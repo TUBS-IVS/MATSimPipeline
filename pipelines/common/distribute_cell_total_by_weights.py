@@ -1,6 +1,8 @@
 import pandas as pd
 
-from utils.logger import logger
+from utils.logger import logging
+
+logger = logging.getLogger(__name__)
 
 
 def distribute_by_weights(df, total_col, weight_col):
@@ -47,17 +49,18 @@ def distribute_cell_totals(cell_df, point_df):
 
     return final_result
 
+
 # Sample usage
-# cell_df_sample = pd.DataFrame({
-#     'cell_id': [1, 2, 3],
-#     'total': [100, 200, 150]
-# })
-#
-# point_df_sample = pd.DataFrame({
-#     'point_id': [101, 102, 103, 104, 105, 106],
-#     'cell_id': [1, 1, 2, 2, 3, 3],
-#     'weight': [2, 3, 1, 4, 5, 2]
-# })
-#
-# result_df = distribute_totals_by_weights(cell_df_sample, point_df_sample)
-# print(result_df)
+cell_df_sample = pd.DataFrame({
+    'cell_id': [1, 2, 3],
+    'total': [100, 200, 150]
+})
+
+point_df_sample = pd.DataFrame({
+    'point_id': [101, 102, 103, 104, 105, 106],
+    'cell_id': [1, 1, 2, 2, 3, 3],
+    'weight': [2, 3, 1, 4, 5, 2]
+})
+
+result_df = distribute_cell_totals(cell_df_sample, point_df_sample)
+print(result_df)

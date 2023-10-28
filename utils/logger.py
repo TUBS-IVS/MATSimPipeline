@@ -1,8 +1,12 @@
-import os
-import logging
 import logging.config
+import os
 
-# Define the logging configuration
+output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'output')
+if not os.path.exists(output_dir):
+    os.makedirs(output_dir)
+
+LOG_FILE_PATH = os.path.join(output_dir, 'pipeline.log')
+
 LOGGING_CONFIG = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -16,17 +20,17 @@ LOGGING_CONFIG = {
             'level': 'DEBUG',
             'class': 'logging.StreamHandler',
             'formatter': 'standard',
-            'stream': 'ext://sys.stdout',  # Default is stderr
+            'stream': 'ext://sys.stdout',
         },
         'file': {
             'level': 'DEBUG',
             'class': 'logging.FileHandler',
-            'filename': 'output/pipeline.log',  # Location of the log file
+            'filename': LOG_FILE_PATH,
             'formatter': 'standard',
         },
     },
     'loggers': {
-        '': {  # Root logger
+        '': {
             'handlers': ['console', 'file'],
             'level': 'DEBUG',
             'propagate': False,
@@ -34,11 +38,5 @@ LOGGING_CONFIG = {
     }
 }
 
-if not os.path.exists('output'):
-    os.makedirs('output')
-
 # Set up the logging configuration
 logging.config.dictConfig(LOGGING_CONFIG)
-
-# Export the logger for use in other modules
-logger = logging.getLogger(__name__)

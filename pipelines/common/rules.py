@@ -1,61 +1,8 @@
 import random
 
-import add_data_from_MiD
 from utils.logger import logging
 
 logger = logging.getLogger(__name__)
-
-
-def safe_apply_rules(df, rules):
-    """
-    Applies a set of custom rules to a DataFrame. If a rule references missing columns,
-    those columns are fetched from a secondary data source (MiD) and the rules are reapplied.
-
-    Parameters:
-    - df (pd.DataFrame): The DataFrame to which the rules will be applied.
-    - rules (list of functions): A list of rule functions. Each rule function must return a tuple of (result, missing_columns).
-
-    Returns:
-    - pd.DataFrame: The DataFrame with the rules applied as new columns.
-
-    Notes:
-    - Could run at different places in the pipeline and might have different rule sets.
-    - Will only add columns, never alter existing columns.
-    """
-    all_missing_columns = set()
-
-    # First pass: identify all missing columns
-    for rule_func in rules:
-        _, missing_columns_list = zip(*df.apply(rule_func, axis=1))
-        rule_missing_columns = set().union(*missing_columns_list)
-        all_missing_columns.update(rule_missing_columns)
-
-        if rule_missing_columns:
-            logger.info(f"Rule '{rule_func.__name__}' identified missing columns: {', '.join(rule_missing_columns)}")
-
-    # Fetch all missing columns at once
-    if all_missing_columns:
-        logger.info(f"Fetching missing columns: {', '.join(all_missing_columns)}")
-        df = add_data_from_MiD(df, list(all_missing_columns))
-
-    # Second pass: apply the rules now that all columns are present
-    for rule_func in rules:
-        column_name = rule_func.__name__
-        results, missing_columns_list = zip(*df.apply(rule_func, axis=1))
-        rule_missing_columns = set().union(*missing_columns_list)
-
-        if rule_missing_columns:
-            logger.error(
-                f"Rule '{rule_func.__name__}' identified missing columns in second pass and was skipped: {', '.join(rule_missing_columns)}")
-        else:
-            df[column_name] = results
-            null_mask = df[column_name].isnull()
-            if null_mask.all():
-                logger.warning(f"The rule '{rule_func.__name__}' returned None for all rows.")
-            elif null_mask.any():
-                logger.warning(f"The rule '{rule_func.__name__}' returned None for {null_mask.sum()} rows.")
-
-    return df
 
 
 def rule1(row):
@@ -67,6 +14,13 @@ def rule1(row):
         missing_columns.add(e.args[0])  # Add the missing column to the set
     return None, missing_columns
 
+
+def raw_plan(row): # Concatenate plan attributes into a string
+    missing_columns = set()
+
+    has_license = row.get("hasLicense")  # Doesn't throw an error if the column is missing
+    if has_license is None:
+        missing_columns.add('hasLicense')
 
 def rule2(row):
     missing_columns = set()
@@ -100,15 +54,14 @@ def rulebased_main_mode(row):  # Function name will be used as the column name
     if car_avail is None:
         missing_columns.add('carAvail')
 
-    hh_num_cars = row.get("hh_num_cars")  # Assuming this is needed and present in the DataFrame
+    hh_num_cars = row.get("hh_num_cars")
     if hh_num_cars is None:
         missing_columns.add('hh_num_cars')
 
-    detailed_distance = row.get("detailed_distance")  # Assuming this is needed and present in the DataFrame
+    detailed_distance = row.get("detailed_distance")
     if detailed_distance is None:
         missing_columns.add('detailed_distance')
 
-    # If any columns are missing, return immediately
     if missing_columns:
         return None, missing_columns
 

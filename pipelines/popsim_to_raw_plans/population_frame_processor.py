@@ -1,8 +1,8 @@
-import logging
-import pandas as pd
+from utils.logger import logging
 from pipelines.common.data_frame_processor import DataFrameProcessor
 
 logger = logging.getLogger(__name__)
+
 
 class PopulationFrameProcessor(DataFrameProcessor):
     def __init__(self, df, id_column):
@@ -61,7 +61,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
             columns=['_processing_count', '_processing_repeat_count', '_processing_int_part', '_processing_frac_part'])
         logger.info(f"Generated expanded weights DataFrame with {len(expanded_weights_df)} rows.")
         if len(expanded_weights_df) != self.df.shape[0]:
-            logger.error(f"Expanded weights DataFrame has {len(expanded_weights_df)} rows, but the population DataFrame has {self.df.shape[0]} rows.")
+            logger.error(
+                f"Expanded weights DataFrame has {len(expanded_weights_df)} rows, but the population DataFrame has {self.df.shape[0]} rows.")
 
         # Add a sequence column to both dataframes to prevent cartesian product on merge
         self.df['_processing_seq'] = self.df.groupby(external_id_column).cumcount()
@@ -101,3 +102,35 @@ class PopulationFrameProcessor(DataFrameProcessor):
 #         # Write to CSV
 #         raw_plans.to_csv("raw_plans.csv", index=False)
 #         logger.info("Raw plans generated.")
+
+# test -------------------------------------------------------------------------
+import pandas as pd
+
+
+# Rule Functions:
+def double_value(row):
+    return row['Value'] * 2, []
+
+
+def mean_by_category(group_df):
+    mean_val = group_df['Value'].mean()
+    return mean_val, []
+
+
+# Test Data:
+data = {
+    'Category': ['A', 'A', 'B', 'B', 'C', 'C'],
+    'Value': [10, 15, 20, 25, 30, 35]
+}
+df = pd.DataFrame(data)
+
+# Using the PopulationFrameProcessor:
+processor = PopulationFrameProcessor(df, 'Category')
+
+# Applying row-wise rule without grouping:
+processor.safe_apply_rules(None, [double_value])
+print(processor.df)
+
+# Applying group-wise rule with grouping:
+processor.safe_apply_rules(None, [mean_by_category], groupby_column='Category')
+print(processor.df)

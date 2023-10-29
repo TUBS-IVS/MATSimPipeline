@@ -87,7 +87,7 @@ class DataFrameProcessor:
 
     # Note: The implementation for merge_dataframes_on_column is assumed to exist elsewhere.
 
-    def safe_apply_rules(self, csv_path, rules):
+    def safe_apply_rules(self, csv_path, rules, groupby_column=None):
         """
         Applies a set of custom rules to the DataFrame stored in this instance. Will only add columns, never alter existing columns.
         If a rule references missing columns, those columns are fetched from a secondary data source (e.g. MiD) and the rules are reapplied.
@@ -95,6 +95,7 @@ class DataFrameProcessor:
         Parameters:
         - rules (list of functions): A list of rule functions. Each rule function must return a tuple of (result, missing_columns).
         - csv_path (str): Path to the CSV file containing the secondary data source (e.g. MiD).
+        - groupby_column (str, optional): Column to group by before applying rules. If not provided, rules are applied per row.
 
         Notes:
         - Could run at different places in the pipeline and might have different rule sets.
@@ -115,6 +116,8 @@ class DataFrameProcessor:
             if rule_missing_columns:
                 logger.info(
                     f"Rule '{rule_func.__name__}' identified missing columns: {', '.join(rule_missing_columns)}")
+            else:
+                logger.debug("No missing columns.")
 
         # Fetch all missing columns at once
         if all_missing_columns:

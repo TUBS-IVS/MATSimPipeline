@@ -1,41 +1,42 @@
 import random
 
+import pandas as pd
+
 from utils.logger import logging
 
 logger = logging.getLogger(__name__)
 
 
-def rule1(row):
-    missing_columns = set()
-    try:
-        if row['col1'] == 1 and row['col2'] > 11 and row['col3'] == 'single':
-            return True, missing_columns
-    except KeyError as e:
-        missing_columns.add(e.args[0])  # Add the missing column to the set
-    return None, missing_columns
+def example_rule(group):
+    """
+    Process a group of rows representing a person's trip and return a summary.
+
+    Parameters:
+    - group (DataFrame): A group of rows representing a person's trip.
+
+    Returns:
+    - DataFrame: A summary DataFrame with the same number of rows and same index as the input group.
+    - list: List of missing columns, if any.
+    """
+
+    # Check for required columns and return missing columns if not present
+    required_columns = ["activity", "duration"]
+    missing_columns = [col for col in required_columns if col not in group.columns]
+
+    if missing_columns:
+        return pd.DataFrame(index=group.index), missing_columns
+
+    # Process the group
+    total_shopping_duration = group.loc[group['activity'] == 'shopping', 'duration'].sum()
+
+    # Create a summary DataFrame with the same number of rows as the group
+    summary_df = pd.DataFrame({
+        'total_shopping_duration': [total_shopping_duration] * len(group)
+    }, index=group.index)
+
+    return summary_df, []
 
 
-def raw_plan(row): # Concatenate plan attributes into a string
-    missing_columns = set()
-
-    has_license = row.get("hasLicense")  # Doesn't throw an error if the column is missing
-    if has_license is None:
-        missing_columns.add('hasLicense')
-
-def rule2(row):
-    missing_columns = set()
-    try:
-        if row['col4'] == 'A':
-            return "Type A", missing_columns
-        elif row['col4'] == 'B':
-            return "Type B", missing_columns
-        elif row['col4'] == 'C':
-            return "Type C", missing_columns
-        else:
-            return "Unknown Type", missing_columns
-    except KeyError as e:
-        missing_columns.add(e.args[0])
-        return None, missing_columns
 
 
 def rulebased_main_mode(row):  # Function name will be used as the column name
@@ -96,6 +97,40 @@ def rulebased_main_mode(row):  # Function name will be used as the column name
     return None, missing_columns
 
 
-rules = [rule1, rule2, rule3, rule4, rule5]
+def collapse_person_trip(group):
+    """
+    Process a person's trip and represent it as a list of activity legs (intermediary for further processing).
 
-updated_df = safe_apply_rules(df, rules)
+    Parameters:
+    - group (pd.DataFrame): A DataFrame group representing a person's trip.
+
+    Returns:
+    - tuple: (processed_trip_representation, missing_columns)
+    """
+
+    # Check for required columns
+    required_columns = ['activity', 'duration']
+    missing_columns = [col for col in required_columns if col not in group.columns]
+
+    if missing_columns:
+        return None, missing_columns
+
+    trip_representation = [{'activity': row['activity'], 'duration': row['duration']}
+                           for _, row in group.iterrows()]
+
+    return trip_representation, []
+
+
+# Example usage
+data = {
+    'person': [1, 1, 1, 2, 2],
+    'activity': ['home', 'work', 'home', 'home', 'school'],
+    'duration': [0, 120, 40, 0, 100]
+}
+
+df = pd.DataFrame(data)
+
+# Applying the rule
+result = df.groupby('person').apply(collapse_person_trip)
+print(result)
+

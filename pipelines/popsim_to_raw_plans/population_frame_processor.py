@@ -1,11 +1,11 @@
-from utils.logger import logging
 from pipelines.common.data_frame_processor import DataFrameProcessor
+from utils.logger import logging
 
 logger = logging.getLogger(__name__)
 
 
 class PopulationFrameProcessor(DataFrameProcessor):
-    def __init__(self, df, id_column):
+    def __init__(self, df, id_column=""):
         super().__init__(df, id_column)
 
     def distribute_by_weights(self, weights_df, external_id_column):
@@ -112,9 +112,19 @@ def double_value(row):
     return row['Value'] * 2, []
 
 
+def missing_column(row):
+    return [], ['MissingColumn']
+
+
 def mean_by_category(group_df):
-    mean_val = group_df['Value'].mean()
-    return mean_val, []
+    # Ensure that group_df is indeed a DataFrame
+    if isinstance(group_df, pd.DataFrame):
+        mean_val = group_df['Value'].mean()
+        return (mean_val, [])
+    else:
+        # Just for debugging
+        logger.error(f"Unexpected input type: {type(group_df)}")
+        return (None, [])
 
 
 # Test Data:
@@ -127,8 +137,10 @@ df = pd.DataFrame(data)
 # Using the PopulationFrameProcessor:
 processor = PopulationFrameProcessor(df, 'Category')
 
-# Applying row-wise rule without grouping:
-processor.safe_apply_rules(None, [double_value])
+processor.safe_apply_rules(None, [missing_column, double_value])
+print(processor.df)
+
+processor.safe_apply_rules(None, [missing_column], groupby_column='Category')
 print(processor.df)
 
 # Applying group-wise rule with grouping:

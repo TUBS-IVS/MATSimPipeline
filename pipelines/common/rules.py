@@ -7,43 +7,74 @@ from utils.logger import logging
 logger = logging.getLogger(__name__)
 
 
-def example_rule(group):
+def example_rule1(row):
     """
-    Process a group of rows representing a person's trip and return a summary.
+    Example of a row rule.
 
     Parameters:
-    - group (DataFrame): A group of rows representing a person's trip.
+    - row: A row from a DataFrame.
 
     Returns:
-    - DataFrame: A summary DataFrame with the same number of rows and same index as the input group.
-    - list: List of missing columns, if any.
+    - tuple:
+        - result (any): The result of the rule for this row, any type that fits in a single DataFrame cell,
+          e.g. a string, a number, a list, a dictionary, etc.
+        - missing_columns (set): A set of strings indicating which necessary columns are missing.
     """
+    missing_columns = set()
 
-    # Check for required columns and return missing columns if not present
-    required_columns = ["activity", "duration"]
-    missing_columns = [col for col in required_columns if col not in group.columns]
+    # Check for missing columns
+    has_license = row.get("hasLicense")  # Doesn't throw an error if the column is missing
+    if has_license is None:
+        missing_columns.add('hasLicense')
+
+    has_pt_card = row.get("hasPTCard")
+    if has_pt_card is None:
+        missing_columns.add('hasPTCard')
 
     if missing_columns:
-        return pd.DataFrame(index=group.index), missing_columns
+        return None, missing_columns
 
-    # Process the group
+    mode = "car" if "true" in has_license else "pt" if "true" in has_pt_card else "walk"
+    return mode, missing_columns
+
+
+def example_rule2(group):
+    """
+    Example of a group rule.
+
+    Parameters:
+    - group (DataFrame)
+
+    Returns:
+    - tuple:
+        - summary_df (DataFrame): Index and number of rows must be the same as the input group. Any number of columns.
+          This allows for very flexible output.
+        - missing_columns (set): A set of strings indicating which necessary columns are missing.
+    """
+    missing_columns = set()
+
+    # A different way to check for missing columns, you can use either
+    required_columns = ["activity", "duration"]
+    missing_columns.update([col for col in required_columns if col not in group.columns])
+
+    if missing_columns:
+        return None, missing_columns
+
     total_shopping_duration = group.loc[group['activity'] == 'shopping', 'duration'].sum()
 
-    # Create a summary DataFrame with the same number of rows as the group
+    # Create a summary DataFrame with the same number of rows and same index as the group (in this case, just duplicated rows)
     summary_df = pd.DataFrame({
         'total_shopping_duration': [total_shopping_duration] * len(group)
     }, index=group.index)
 
-    return summary_df, []
+    return summary_df, missing_columns
 
 
-
-
-def rulebased_main_mode(row):  # Function name will be used as the column name
+def rulebased_main_mode(row):
     missing_columns = set()
 
     # Extract attributes from the row
-    has_license = row.get("hasLicense")  # Doesn't throw an error if the column is missing
+    has_license = row.get("hasLicense")
     if has_license is None:
         missing_columns.add('hasLicense')
 
@@ -117,8 +148,10 @@ def collapse_person_trip(group):
 
     trip_representation = [{'activity': row['activity'], 'duration': row['duration']}
                            for _, row in group.iterrows()]
-
-    return trip_representation, []
+    summary_df = pd.DataFrame({
+        'trip': [trip_representation] * len(group)
+    }, index=group.index)
+    return summary_df, []
 
 
 # Example usage
@@ -133,4 +166,3 @@ df = pd.DataFrame(data)
 # Applying the rule
 result = df.groupby('person').apply(collapse_person_trip)
 print(result)
-

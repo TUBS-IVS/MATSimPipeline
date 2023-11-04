@@ -116,11 +116,9 @@ class DataFrameProcessor:
         except Exception as e:
             logger.error(f"Failed to load and add CSV data from {csv_path}: {e}")
 
-    # Note: The implementation for merge_dataframes_on_column is assumed to exist elsewhere.
-
     def safe_apply_rules(self, rules, csv_path=None, groupby_column=None):
         """
-        Applies a set of custom rules to the DataFrame stored in this instance. Will only add columns, never alter existing columns.
+        Applies a set of custom rules to the DataFrame stored in this instance. Adds the results as new columns.
         If a rule references missing columns, those columns are fetched from a secondary data source (e.g. MiD) and the rules are reapplied.
 
         Parameters:
@@ -201,7 +199,7 @@ class DataFrameProcessor:
 
             if groupby_column:
                 for result_df in results:
-                    result_df.columns = [f"{col}_{rule_func.__name__}" for col in result_df.columns]
+                    result_df.columns = [f"{col}_{rule_func.__name__}" for col in result_df.columns] #  TODO: decide if should overwrite existing columns
                     self.df = self.df.join(result_df)
                 null_mask = self.df[[col for col in self.df.columns if rule_func.__name__ in col]].isnull().any(axis=1)
             else:
@@ -211,8 +209,8 @@ class DataFrameProcessor:
             if null_mask.any():
                 logger.warning(f"The rule '{rule_func.__name__}' returned None for {null_mask.sum()} rows.")
 
-    def remove_added_columns(self):
-        """Removes the columns added by the safe_apply_rules method."""
+    def remove_added_missing_columns(self):
+        """Removes the missing columns added by the safe_apply_rules method, but not the rule results."""
         for col in self.added_missing_columns:
             if col in self.df.columns:
                 self.df.drop(columns=col, inplace=True)

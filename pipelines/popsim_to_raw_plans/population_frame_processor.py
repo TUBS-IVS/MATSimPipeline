@@ -1,11 +1,12 @@
 from pipelines.common.data_frame_processor import DataFrameProcessor
 from utils.logger import logging
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 
 class PopulationFrameProcessor(DataFrameProcessor):
-    def __init__(self, df, id_column=""):
+    def __init__(self, df: pd.DataFrame = None, id_column: str = None):
         super().__init__(df, id_column)
 
     def distribute_by_weights(self, weights_df, external_id_column):
@@ -104,45 +105,46 @@ class PopulationFrameProcessor(DataFrameProcessor):
 #         logger.info("Raw plans generated.")
 
 # test -------------------------------------------------------------------------
-import pandas as pd
 
 
-# Rule Functions:
-def double_value(row):
-    return row['Value'] * 2, []
-
-
-def missing_column(row):
-    return [], ['MissingColumn']
-
-
-def mean_by_category(group_df):
-    # Ensure that group_df is indeed a DataFrame
-    if isinstance(group_df, pd.DataFrame):
-        mean_val = group_df['Value'].mean()
-        return (mean_val, [])
-    else:
-        # Just for debugging
-        logger.error(f"Unexpected input type: {type(group_df)}")
-        return (None, [])
-
-
-# Test Data:
-data = {
-    'Category': ['A', 'A', 'B', 'B', 'C', 'C'],
-    'Value': [10, 15, 20, 25, 30, 35]
-}
-df = pd.DataFrame(data)
-
-# Using the PopulationFrameProcessor:
-processor = PopulationFrameProcessor(df, 'Category')
-
-processor.safe_apply_rules(None, [missing_column, double_value])
-print(processor.df)
-
-processor.safe_apply_rules(None, [missing_column], groupby_column='Category')
-print(processor.df)
-
-# Applying group-wise rule with grouping:
-processor.safe_apply_rules(None, [mean_by_category], groupby_column='Category')
-print(processor.df)
+# # Rule Functions:
+# def double_value(row):
+#     return row['Value'] * 2, []
+#
+#
+# def missing_column(row):
+#     return [], ['MissingColumn']
+#
+#
+# def mean_by_category(group_df):
+#     # Ensure that group_df is indeed a DataFrame
+#     if isinstance(group_df, pd.DataFrame):
+#         mean_val = group_df['Value'].mean()
+#         return (mean_val, [])
+#     else:
+#         # Just for debugging
+#         logger.error(f"Unexpected input type: {type(group_df)}")
+#         return (None, [])
+#
+#
+# # Test Data:
+# data = {
+#     'Category': ['A', 'A', 'B', 'B', 'C', 'C'],
+#     'Value': [10, 15, 20, 25, 30, 35]
+# }
+# df = pd.DataFrame(data)
+#
+# # Using the PopulationFrameProcessor:
+# processor = PopulationFrameProcessor(df, 'Category')
+#
+# processor.safe_apply_rules([missing_column, double_value])
+# print(processor.df)
+#
+# processor.safe_apply_rules([missing_column], groupby_column='Category')
+# print(processor.df)
+#
+# # Applying group-wise rule with grouping:
+# processor.safe_apply_rules([mean_by_category], groupby_column='Category')
+# print(processor.df)
+#
+# # TODO: insert home activity at the beginning of the day

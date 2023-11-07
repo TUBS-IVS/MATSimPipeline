@@ -1,10 +1,43 @@
 import random
+import os
+from utils import matsim_pipeline_setup
 
 import pandas as pd
 
 from utils.logger import logging
 
 logger = logging.getLogger(__name__)
+
+# Column names that are used in several places are defined in settings.yaml
+os.chdir(matsim_pipeline_setup.PROJECT_ROOT)
+settings = matsim_pipeline_setup.load_yaml_config('settings.yaml')
+HOUSEHOLD_ID_COLUMN = settings['household_id_column']
+PERSON_ID_COLUMN = settings['person_id_column']
+LEG_ID_COLUMN = settings['leg_id_column']
+
+# Column names that are just used by rules are defined here
+LEG_ACTIVITY = 'leg_target_activity'
+LEG_MAIN_MODE = 'leg_main_mode'
+LEG_START_TIME = 'leg_start_time'
+LEG_END_TIME = 'leg_end_time'
+LEG_DURATION = 'leg_duration'
+LEG_DISTANCE = 'leg_distance'
+LEG_ID = 'leg_id'
+
+PERSON_ID = 'person_id'
+HH_ID = 'household_id'
+PERSON_AGE = 'age'
+
+rule_required_columns = {
+    PERSON_ID,
+    LEG_ACTIVITY,
+    LEG_MAIN_MODE,
+    LEG_START_TIME,
+    LEG_END_TIME,
+    LEG_DURATION,
+    LEG_DISTANCE,
+    PERSON_AGE
+}
 
 
 def example_rule1(row):
@@ -154,15 +187,15 @@ def collapse_person_trip(group):
     return summary_df, []
 
 
-# Example usage
-data = {
-    'person': [1, 1, 1, 2, 2],
-    'activity': ['home', 'work', 'home', 'home', 'school'],
-    'duration': [0, 120, 40, 0, 100]
-}
-
-df = pd.DataFrame(data)
-
-# Applying the rule
-result = df.groupby('person').apply(collapse_person_trip)
-print(result)
+# # Example usage
+# data = {
+#     'person': [1, 1, 1, 2, 2],
+#     'activity': ['home', 'work', 'home', 'home', 'school'],
+#     'duration': [0, 120, 40, 0, 100]
+# }
+#
+# df = pd.DataFrame(data)
+#
+# # Applying the rule
+# result = df.groupby('person').apply(collapse_person_trip)
+# print(result)

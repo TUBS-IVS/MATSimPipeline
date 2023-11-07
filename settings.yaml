@@ -1,0 +1,11 @@
+expanded_households_files:
+  - "data/final_expanded_household_ids.csv"
+
+mid_persons_file: "data/MiD2017_Personen_gefiltert_RStar71.csv"
+mid_trips_file: "data/MiD2017_Wege_edited.csv"
+
+household_id_column: "H_ID"
+person_id_column: "HP_ID"
+leg_id_column: "W_ID"
+lowest_level_geography: "BLOCK"
+

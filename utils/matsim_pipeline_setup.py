@@ -1,8 +1,10 @@
 import os
 from datetime import datetime
-from utils.logger import logging
-logger = logging.getLogger(__name__)
+import yaml
 
+from utils.logger import logging
+
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = os.path.dirname(
     os.path.dirname(os.path.abspath(__file__)))  # Assuming matsim_pipeline_setup.py is one level down from the project root
@@ -15,3 +17,11 @@ def create_output_directory():
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
         logger.info(f"Created output directory: {OUTPUT_DIR}")
+    return OUTPUT_DIR
+
+
+def load_yaml_config(file_path):
+    with open(file_path, 'r') as file:
+        config = yaml.safe_load(file)
+        logger.info(f"Loaded config from {file_path}")
+    return config

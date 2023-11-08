@@ -1,6 +1,8 @@
 from pipelines.common.data_frame_processor import DataFrameProcessor
 from utils.logger import logging
 import pandas as pd
+import matsim.writers
+import pipelines.common.rules as rules  # For access to globals
 
 logger = logging.getLogger(__name__)
 
@@ -147,4 +149,72 @@ class PopulationFrameProcessor(DataFrameProcessor):
 # processor.safe_apply_rules([mean_by_category], groupby_column='Category')
 # print(processor.df)
 #
-# # TODO: insert home activity at the beginning of the day
+    def write_plans_to_matsim_xml(self):
+        """
+        Write the population frame to MATSim XML format.
+        """
+        logger.info("Writing plans to MATSim XML format...")
+
+        # Create a copy of the population frame
+        raw_plans = self.df.copy()
+
+        # Rename columns
+        raw_plans.rename(columns={"personID": "person_id", "householdID": "household_id"}, inplace=True)
+
+        # Add attributes
+        raw_plans["selected"] = 1
+        raw_plans["score"] = 1
+        raw_plans["plan_type"] = "initial"
+        raw_plans["plan_mode"] = raw_plans.apply(self.get_plan_mode, axis=1)
+        raw_plans["plan_score"] = 1
+        raw_plans["plan_selected"] = 1
+
+        # Reorder columns
+        raw_plans = raw_plans[["person_id", "household_id", "selected", "score", "plan_type", "plan_mode", "plan_score",
+                               "plan_selected"]]
+
+        # Write to CSV
+        raw_plans.to_csv("raw_plans.csv", index=False)
+        logger.info("Raw plans generated.")
+
+        with open("plans.xml", 'wb+') as f_write:
+            writer = matsim.writers.PopulationWriter(f_write)
+
+            writer.start_population()
+            writer.start_person("person_id_123")
+            writer.start_plan(selected=True)
+
+        for _, group in self.df.groupby(rules.PERSON_ID_COLUMN):
+            writer.add_activity(type='home', x=0.0, y=0.0, end_time=8 * 3600)
+            writer.add_leg(mode='walk')
+            writer.add_activity(type='work', x=10.0, y=0.0, end_time=18 * 3600)
+            writer.add_leg(mode='pt')
+            writer.add_activity(type='home', x=0.0, y=0.0)
+
+            writer.end_plan()
+            writer.end_person()
+
+            writer.end_population()
+
+    writer.start_population()
+    for (person_id, plan_id), group in grouped:
+        writer.start_person(person_id)
+        writer.start_plan(selected=True)
+
+        # Iterate over each activity/leg in the plan
+        for index, row in group.iterrows():
+            # Add activity
+            writer.add_activity(
+                type=row['ACTIVITY_TYPE'],
+                x=row['X'],
+                y=row['Y'],
+                end_time=row['END_TIME']
+            )
+            # If there's a leg mode, add a leg
+            if pd.notnull(row['MODE']):
+                writer.add_leg(mode=row['MODE'])
+
+        writer.end_plan()
+        writer.end_person()
+
+    writer.end_population()

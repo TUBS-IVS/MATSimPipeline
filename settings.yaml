@@ -8,8 +8,15 @@ mid_trips_file: "data/MiD2017_Wege_edited.csv"
 household_id_column: "H_ID"
 person_id_column: "HP_ID"
 leg_id_column: "W_ID"
-lowest_level_geography: "BLOCK"
+lowest_level_geography: "BAUBLOCKNR"
 
 # Leave empty to write no file, else e.g.: "output/full_population_frame.csv"
 population_analysis_output_file: "output/full_population_frame.csv"
+
+average_activity_times:
+  work: 30
+  lunch: 45
+  gym: 50
+  shopping: 25
+  meeting: 35
 

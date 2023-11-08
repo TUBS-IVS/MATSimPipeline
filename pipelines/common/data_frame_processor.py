@@ -11,6 +11,7 @@ class DataFrameProcessor:
     Base class for processing a Pandas DataFrame.
     @Author: Felix Petre
     """
+
     def __init__(self, df: pd.DataFrame = None, id_column: str = None):
         self.df = df
         self.id_column = id_column
@@ -59,7 +60,8 @@ class DataFrameProcessor:
             logger.error(f"Failed to load DataFrame from {csv_path}: {e}")
             raise
 
-    def add_df_on_id(self, source_df, columns_to_add, overwrite_existing=False, drop_duplicates_from_source=True) -> None:
+    def add_df_on_id(self, source_df, columns_to_add, overwrite_existing=False, id_column=None,
+                     drop_duplicates_from_source=True) -> None:
         """
         Adds specified columns from a source DataFrame to the current DataFrame based on an ID.
 
@@ -71,24 +73,28 @@ class DataFrameProcessor:
             If False, additional rows will be added to the DataFrame if source_df contains duplicate IDs.
         """
 
-        # Validate that columns_to_add is a list
         if not isinstance(columns_to_add, list):
-            logger.error("columns_to_add should be a list. Not updating the DataFrame.")
-            return
+            raise ValueError("columns_to_add should be a list.")
+
+        if id_column is None:
+            if self.id_column is None:
+                raise ValueError("id_column is None. Please specify an ID column to use.")
+            else:
+                id_column = self.id_column
 
         # Validation for ID columns in both dataframes
-        if self.id_column not in self.df.columns or self.id_column not in source_df.columns:
+        if id_column not in self.df.columns or id_column not in source_df.columns:
             logger.error(
-                f"Either the primary or source DataFrame is missing the ID column: {self.id_column}. Not updating the DataFrame.")
+                f"Either the primary or source DataFrame is missing the ID column: {id_column}. Not updating the DataFrame.")
             return
 
         # Handle duplicates
         if drop_duplicates_from_source:
-            duplicate_mask = source_df.duplicated(subset=self.id_column, keep='first')
+            duplicate_mask = source_df.duplicated(subset=id_column, keep='first')
             if duplicate_mask.any():
-                duplicate_ids = source_df.loc[duplicate_mask, self.id_column].tolist()
-                logger.info(f"Duplicate {self.id_column} values found and dropped in source_df: {duplicate_ids}")
-                source_df = source_df.drop_duplicates(subset=self.id_column, keep='first')
+                duplicate_ids = source_df.loc[duplicate_mask, id_column].tolist()
+                logger.info(f"Duplicate {id_column} values found and dropped in source_df: {duplicate_ids}")
+                source_df = source_df.drop_duplicates(subset=id_column, keep='first')
 
         # Handle columns
         for col in columns_to_add:
@@ -101,14 +107,14 @@ class DataFrameProcessor:
                     columns_to_add.remove(col)
 
         # Ensure id_column is in columns_to_add for merging
-        if self.id_column not in columns_to_add:
-            columns_to_add.append(self.id_column)
+        if id_column not in columns_to_add:
+            columns_to_add.append(id_column)
 
         # Merge the dataframes on the specified id_column
-        self.df = pd.merge(self.df, source_df[columns_to_add], on=self.id_column, how='left')
+        self.df = pd.merge(self.df, source_df[columns_to_add], on=id_column, how='left')
 
-    def add_csv_data_on_id(self, csv_path, columns_to_add, overwrite_existing=False, id_column=None, delete_later=False,
-                           drop_duplicates_from_source=True) -> None:
+    def add_csv_data_on_id(self, csv_path, columns_to_add, overwrite_existing=False, id_column=None,
+                           drop_duplicates_from_source=True, delete_later=False) -> None:
         """
         Load specified columns from a given CSV file and add them to the primary DataFrame.
 
@@ -134,7 +140,7 @@ class DataFrameProcessor:
             if delete_later:
                 self.columns_to_delete.update(columns_to_add)
 
-            self.add_df_on_id(source_df, columns_to_add, overwrite_existing, drop_duplicates_from_source)
+            self.add_df_on_id(source_df, columns_to_add, overwrite_existing, drop_duplicates_from_source, id_column)
         except Exception as e:
             logger.error(f"Failed to load and add CSV data from {csv_path}: {e}")
 
@@ -283,7 +289,8 @@ class DataFrameProcessor:
 
             except Exception as e:
                 logger.error(f"Failed to apply group-wise rule '{rule_func.__name__}': {e}")
-                continue
+                raise
+            logger.info(f"Finished applying group-wise rule '{rule_func.__name__}'")
 
     # def remove_added_required_columns(self):
     #     """Removes the missing columns added by the safe_apply_rules method, but not the rule results."""

@@ -7,10 +7,14 @@ logger = logging.getLogger(__name__)
 
 
 class DataFrameProcessor:
+    """
+    Base class for processing a Pandas DataFrame.
+    @Author: Felix Petre
+    """
     def __init__(self, df: pd.DataFrame = None, id_column: str = None):
         self.df = df
         self.id_column = id_column
-        self.added_missing_columns = set()  # Columns added by the safe_apply_rules method; input for rules, not results
+        self.columns_to_delete = set()
 
     @property
     def df(self) -> pd.DataFrame:
@@ -55,7 +59,7 @@ class DataFrameProcessor:
             logger.error(f"Failed to load DataFrame from {csv_path}: {e}")
             raise
 
-    def add_df_on_id(self, source_df, columns_to_add, overwrite_existing=False, drop_duplicates_from_source=True):
+    def add_df_on_id(self, source_df, columns_to_add, overwrite_existing=False, drop_duplicates_from_source=True) -> None:
         """
         Adds specified columns from a source DataFrame to the current DataFrame based on an ID.
 
@@ -103,8 +107,8 @@ class DataFrameProcessor:
         # Merge the dataframes on the specified id_column
         self.df = pd.merge(self.df, source_df[columns_to_add], on=self.id_column, how='left')
 
-    def add_csv_data_on_id(self, csv_path, columns_to_add, overwrite_existing=False, id_column=None, add_prefix=None,
-                           drop_duplicates_from_source=True):
+    def add_csv_data_on_id(self, csv_path, columns_to_add, overwrite_existing=False, id_column=None, delete_later=False,
+                           drop_duplicates_from_source=True) -> None:
         """
         Load specified columns from a given CSV file and add them to the primary DataFrame.
 
@@ -122,9 +126,13 @@ class DataFrameProcessor:
             if id_column is None:  # If id_column is still None, raise an error
                 raise ValueError("id_column is None. Please specify an ID column to use.")
 
-            source_df = pd.read_csv(csv_path, usecols=[id_column] + columns_to_add)
-            if add_prefix:
-                source_df = source_df.add_prefix(add_prefix)
+            if id_column not in columns_to_add:
+                columns_to_add.append(id_column)
+
+            source_df = pd.read_csv(csv_path, usecols=columns_to_add)
+
+            if delete_later:
+                self.columns_to_delete.update(columns_to_add)
 
             self.add_df_on_id(source_df, columns_to_add, overwrite_existing, drop_duplicates_from_source)
         except Exception as e:
@@ -225,7 +233,7 @@ class DataFrameProcessor:
     #         if null_mask.any():
     #             logger.warning(f"The rule '{rule_func.__name__}' returned None for {null_mask.sum()} rows.")
 
-    def apply_row_wise_rules(self, rules):
+    def apply_row_wise_rules(self, rules) -> None:
         """
         Applies a set of custom row-wise rules to the DataFrame stored in this instance.
         Adds the results as new column with the name of the rule function.
@@ -248,7 +256,7 @@ class DataFrameProcessor:
                 logger.error(f"Failed to apply row-wise rule '{rule_func.__name__}': {e}")
                 continue
 
-    def apply_group_wise_rules(self, rules, groupby_column, safe_apply=True):
+    def apply_group_wise_rules(self, rules, groupby_column, safe_apply=True) -> None:
         """
         Applies a set of custom group-wise rules to the DataFrame stored in this instance.
         Each rule modifies the group and returns it. The modified groups are then merged back into the original DataFrame.
@@ -285,15 +293,34 @@ class DataFrameProcessor:
     #             logger.info(f"Removed column: {col}")
     #     self.added_missing_columns = []
 
-    def remove_columns(self, startswith='_processing'):
+    def remove_columns_startswith(self, startswith) -> None:
         """
-        Removes columns from the DataFrame (default: whose names start with '_processing').
+        Removes columns from the DataFrame that start with the specified string.
         """
-        # Use a list comprehension to find columns starting with '_processing'
+        # Use a list comprehension to find columns starting with the specified string
         cols_to_remove = [col for col in self.df.columns if col.startswith(startswith)]
 
         # Drop the columns from the DataFrame
         self.df.drop(cols_to_remove, axis=1, inplace=True)
+
+        if cols_to_remove:
+            logger.info(f"Removed columns: {cols_to_remove}")
+        else:
+            logger.info("No columns were removed.")
+
+    def remove_columns_marked_for_later_deletion(self) -> None:
+        """
+        Removes columns from the DataFrame that were marked for later deletion.
+        """
+        cols_to_remove = [col for col in self.df.columns if col in self.columns_to_delete]
+
+        cols_not_found = set(self.columns_to_delete) - set(cols_to_remove)
+        if cols_not_found:
+            logger.warning(f"Columns marked for deletion were not found: {cols_not_found}")
+
+        self.df.drop(cols_to_remove, axis=1, inplace=True)
+
+        self.columns_to_delete.clear()
 
         if cols_to_remove:
             logger.info(f"Removed columns: {cols_to_remove}")

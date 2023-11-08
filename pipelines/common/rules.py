@@ -28,8 +28,28 @@ PERSON_ID = 'person_id'
 HH_ID = 'household_id'
 PERSON_AGE = 'age'
 
-rule_required_columns = {
+rule_required_hh_columns = {
     PERSON_ID,
+    LEG_ACTIVITY,
+    LEG_MAIN_MODE,
+    LEG_START_TIME,
+    LEG_END_TIME,
+    LEG_DURATION,
+    LEG_DISTANCE,
+    PERSON_AGE
+}
+rule_required_person_columns = {
+    PERSON_ID,
+    LEG_ACTIVITY,
+    LEG_MAIN_MODE,
+    LEG_START_TIME,
+    LEG_END_TIME,
+    LEG_DURATION,
+    LEG_DISTANCE,
+    PERSON_AGE
+}
+rule_required_leg_columns = {
+    LEG_ID,
     LEG_ACTIVITY,
     LEG_MAIN_MODE,
     LEG_START_TIME,

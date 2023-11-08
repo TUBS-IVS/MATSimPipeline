@@ -1,6 +1,7 @@
 expanded_households_files:
   - "data/final_expanded_household_ids.csv"
 
+mid_hh_file: "data/MiD2017_Haushalte_gefiltert_RStar71.csv"
 mid_persons_file: "data/MiD2017_Personen_gefiltert_RStar71.csv"
 mid_trips_file: "data/MiD2017_Wege_edited.csv"
 
@@ -8,4 +9,7 @@ household_id_column: "H_ID"
 person_id_column: "HP_ID"
 leg_id_column: "W_ID"
 lowest_level_geography: "BLOCK"
+
+# Leave empty to write no file, else e.g.: "output/full_population_frame.csv"
+population_analysis_output_file: "output/full_population_frame.csv"
 

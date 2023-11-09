@@ -8,106 +8,107 @@ from utils.logger import logging
 
 logger = logging.getLogger(__name__)
 
-# Column names that are used in several places are defined in settings.yaml
 os.chdir(matsim_pipeline_setup.PROJECT_ROOT)
 settings = matsim_pipeline_setup.load_yaml_config('settings.yaml')
-HOUSEHOLD_ID_COLUMN = settings['household_id_column']
-PERSON_ID_COLUMN = settings['person_id_column']
-LEG_ID_COLUMN = settings['leg_id_column']
 
-AVERAGE_ACTIVITY_TIMES = settings['average_activity_times']  # in seconds
+# We commit the sin of using global (module-wide) variables because rules would have to declare them many times anyway, it's fine
+HH_COLUMNS = settings['hh_columns']
+P_COLUMNS = settings['person_columns']
+L_COLUMNS = settings['leg_columns']
 
-# Column names that are just used by rules are defined here
-LEG_ACTIVITY = 'leg_target_activity'
-LEG_MAIN_MODE = 'leg_main_mode'
-LEG_START_TIME = 'leg_start_time'
-LEG_END_TIME = 'leg_end_time'
-LEG_DURATION = 'leg_duration'
-LEG_DISTANCE = 'leg_distance'
+AVERAGE_ACTIVITY_TIMES_MINUTES = settings['average_activity_times_minutes']
 
-PERSON_AGE = 'HP_ALTER'
+# Household-related constants
+HOUSEHOLD_MID_ID_COL = HH_COLUMNS['household_mid_id_column']
+HOUSEHOLD_POPSIM_ID_COL = HH_COLUMNS['household_popsim_id_column']
 
-CAR_AVAIL = 'P_AUTO'
-HAS_LICENSE = 'P_FS_PKW'
+# Person-related constants
+PERSON_ID_COL = P_COLUMNS['person_id_column']
+PERSON_AGE_COL = P_COLUMNS['person_age']
+CAR_AVAIL_COL = P_COLUMNS['car_avail']
+HAS_LICENSE_COL = P_COLUMNS['has_license']
 
-# Values in the MiD-columns
-ACTIVITY_HOME = '8'
-ACTIVITIES_EDUCATION = {'2', '3', '4', '5', '6', '7'}
-ACTIVITY_WORK = '1'
+# Leg-related constants
+LEG_ID_COL = L_COLUMNS['leg_id_column']
+LEG_ACTIVITY_COL = L_COLUMNS['leg_target_activity']
+LEG_MAIN_MODE_COL = L_COLUMNS['leg_main_mode']
+LEG_START_TIME_COL = L_COLUMNS['leg_start_time']
+LEG_END_TIME_COL = L_COLUMNS['leg_end_time']
+LEG_DURATION_COL = L_COLUMNS['leg_duration']
+LEG_DISTANCE_COL = L_COLUMNS['leg_distance']
 
-CAR_NEVER = '3'
+# Value maps
+VALUE_MAPS = settings['value_maps']
 
-LICENSE_YES = '1'
-LICENSE_NO = '2'
-LICENSE_UNKNOWN = '9'
-ADULT_OVER_16_PROXY = '206'
-PERSON_UNDER_16 = '403'
+ACTIVITY_HOME = VALUE_MAPS['activities']['home']
+ACTIVITIES_EDUCATION = set(VALUE_MAPS['activities']['education'])
+ACTIVITY_WORK = VALUE_MAPS['activities']['work']
 
-rule_required_hh_columns = {
-    PERSON_ID_COLUMN,
-    LEG_ACTIVITY,
-    LEG_MAIN_MODE,
-    LEG_START_TIME,
-    LEG_END_TIME,
-    LEG_DURATION,
-    LEG_DISTANCE,
-    PERSON_AGE
-}
-rule_required_person_columns = {
-    PERSON_ID_COLUMN,
-    LEG_ACTIVITY,
-    LEG_MAIN_MODE,
-    LEG_START_TIME,
-    LEG_END_TIME,
-    LEG_DURATION,
-    LEG_DISTANCE,
-    PERSON_AGE
-}
-rule_required_leg_columns = {
-    LEG_ID_COLUMN,
-    LEG_ACTIVITY,
-    LEG_MAIN_MODE,
-    LEG_START_TIME,
-    LEG_END_TIME,
-    LEG_DURATION,
-    LEG_DISTANCE,
-    PERSON_AGE
-}
+CAR_NEVER = VALUE_MAPS['car_availability']['never']
+
+LICENSE_YES = VALUE_MAPS['license']['yes']
+LICENSE_NO = VALUE_MAPS['license']['no']
+LICENSE_UNKNOWN = VALUE_MAPS['license']['unknown']
+ADULT_OVER_16_PROXY = VALUE_MAPS['license']['adult_over_16_proxy']
+PERSON_UNDER_16 = VALUE_MAPS['license']['person_under_16']
+
+
+def unique_household_id(row):
+    """
+    We need a unique household ID for later group-based rules. Popsim provides just that.
+    """
+    return f"{row[HOUSEHOLD_MID_ID_COL]}_{row[HOUSEHOLD_POPSIM_ID_COL]}"
+
+
+def unique_person_id(row):
+    """
+    Returns a unique person ID from the unique household ID and the person ID.
+    """
+    return f"{row[unique_household_id]}_{row[PERSON_ID_COL]}"
 
 
 def unique_leg_id(row):
-    return row[PERSON_ID_COLUMN] + '_' + row[LEG_ID_COLUMN]
+    """
+    Returns a unique leg ID from the unique person ID and the leg ID.
+    """
+    return f"{row[unique_person_id]}_{row[LEG_ID_COL]}"
 
 
 def has_license_imputed(row):
-    if row[HAS_LICENSE] == LICENSE_NO:
+    """
+    Impute license status based on age and statistical probabilities.
+    :param row: Row of the population frame
+    :return: 0 if no license, 1 if license
+    """
+    if row[HAS_LICENSE_COL] == LICENSE_NO:
         return 0
-    elif row[HAS_LICENSE] == LICENSE_YES:
-        if row[PERSON_AGE] < 17:
-            logger.debug(f"Person {row[PERSON_ID_COLUMN]} has a car driving license but is under 17 years old. Assuming no license.")
+    elif row[HAS_LICENSE_COL] == LICENSE_YES:
+        if row[PERSON_AGE_COL] < 17:
+            logger.debug(
+                f"Person {row[PERSON_ID_COL]} has a car driving license but is under 17 years old. Assuming no license.")
             return 0
         return 1
-    elif row[HAS_LICENSE] == LICENSE_UNKNOWN or ADULT_OVER_16_PROXY or pd.isnull(row[HAS_LICENSE]):
+    elif row[HAS_LICENSE_COL] == LICENSE_UNKNOWN or ADULT_OVER_16_PROXY or pd.isnull(row[HAS_LICENSE_COL]):
         r = random.random()
-        if row[PERSON_AGE] >= 17:
+        if row[PERSON_AGE_COL] >= 17:
             if r <= 0.94:
-                logger.debug(f"Adult {row[PERSON_ID_COLUMN]} has unknown license status. Assuming license.")
+                logger.debug(f"Adult {row[PERSON_ID_COL]} has unknown license status. Assuming license.")
                 return 1
             else:
-                logger.debug(f"Adult {row[PERSON_ID_COLUMN]} has unknown license status. Assuming no license.")
+                logger.debug(f"Adult {row[PERSON_ID_COL]} has unknown license status. Assuming no license.")
                 return 0
         return 0
-    elif row[HAS_LICENSE] == PERSON_UNDER_16:
+    elif row[HAS_LICENSE_COL] == PERSON_UNDER_16:
         return 0
     else:
-        logger.warning(f"Person {row[PERSON_ID_COLUMN]} has no license status entry, not even unknown. Assuming no license.")
+        logger.warning(f"Person {row[PERSON_ID_COL]} has no license status entry, not even unknown. Assuming no license.")
         return 0
 
 
 def main_mode_imputed(row):
     """
     Impute main mode based on the distance of the leg, the availability of a car and statistical probabilities.
-    Note: Imputed main mode is available in MiD, so this isn't needed, but it's here for reference
+    Note: Imputed main mode is available in MiD, so this isn't needed, but it's here for reference.
     :param row:
     :return: mode
     """
@@ -129,11 +130,11 @@ def main_mode_imputed(row):
         (float('inf'), [0.26, 0.77], ["ride", "car", "pt"])
     ]
 
-    boundaries = boundaries_never_or_no_license if row[CAR_AVAIL] == CAR_NEVER or row[
+    boundaries = boundaries_never_or_no_license if row[CAR_AVAIL_COL] == CAR_NEVER or row[
         has_license_imputed] == 0 else boundaries_otherwise
 
     for distance, probabilities, modes in boundaries:
-        if row[LEG_DISTANCE] < distance:
+        if row[LEG_DISTANCE_COL] < distance:
             for prob, mode in zip(probabilities, modes):
                 if r <= prob:
                     return mode
@@ -145,12 +146,8 @@ def main_mode_imputed(row):
 def collapse_person_trip(group):
     """
     Process a person's trip and represent it as a list of activity legs (intermediary for further processing).
-
-    Parameters:
-    - group (pd.DataFrame): A DataFrame group representing a person's trip.
-
-    Returns:
-    - tuple: (processed_trip_representation, missing_columns)
+    :param group: Population frame grouped by person_id
+    :return: summary_df
     """
 
     trip_representation = [{'activity': row['activity'], 'duration': row['duration']}
@@ -158,7 +155,7 @@ def collapse_person_trip(group):
     summary_df = pd.DataFrame({
         'trip': [trip_representation] * len(group)
     }, index=group.index)
-    return summary_df, []
+    return summary_df
 
 
 def add_return_home_leg(group):
@@ -172,12 +169,12 @@ def add_return_home_leg(group):
 
     main_activity_index = group[group['is_main_activity'] == 1].index[
         0]  # There should only be one main activity but [0] just in case
-    sum_durations_before_main = group.loc[:main_activity_index, LEG_DURATION].sum()  # Minutes
-    sum_durations_after_main = group.loc[main_activity_index:, LEG_DURATION].sum()
+    sum_durations_before_main = group.loc[:main_activity_index, LEG_DURATION_COL].sum()  # Minutes
+    sum_durations_after_main = group.loc[main_activity_index:, LEG_DURATION_COL].sum()
 
     # Estimate leg duration:
-    average_leg_duration = group[LEG_DURATION].mean()  # Minutes
-    average_leg_duration_after_main = group.loc[main_activity_index:, LEG_DURATION].mean()
+    average_leg_duration = group[LEG_DURATION_COL].mean()  # Minutes
+    average_leg_duration_after_main = group.loc[main_activity_index:, LEG_DURATION_COL].mean()
     if average_leg_duration_after_main:
         home_leg_duration = average_leg_duration_after_main
     else:
@@ -190,9 +187,9 @@ def add_return_home_leg(group):
     # Estimate activity duration:
     last_leg = group.iloc[-1]
     try:
-        activity_time = AVERAGE_ACTIVITY_TIMES[last_leg[LEG_ACTIVITY]]
+        activity_time = AVERAGE_ACTIVITY_TIMES_MINUTES[last_leg[LEG_ACTIVITY_COL]]
     except KeyError:
-        activity_time = 3600  # 1 hour default
+        activity_time = 60  # 1 hour default
 
     # Create home_leg with the calculated duration
     home_leg = last_leg.copy()
@@ -225,13 +222,13 @@ def is_main_activity(group):
 
         # If the person has more than one activity, the main activity is the first work activity
         for i, row in group.iterrows():
-            if row[LEG_ACTIVITY] == ACTIVITY_WORK:
+            if row[LEG_ACTIVITY_COL] == ACTIVITY_WORK:
                 row["is_main_activity"] = 1
                 return group
 
         # If the person has no work activity, the main activity is the first education activity
         for i, row in group.iterrows():
-            if row[LEG_ACTIVITY] in ACTIVITIES_EDUCATION:
+            if row[LEG_ACTIVITY_COL] in ACTIVITIES_EDUCATION:
                 row["is_main_activity"] = 1
                 return group
 
@@ -248,9 +245,9 @@ def activity_duration_in_minutes(group):
     :return: edited group with column "activity_duration"
     """
     for i, row in group.iterrows():
-        if not row[LEG_START_TIME] or not row[LEG_END_TIME]:
+        if not row[LEG_START_TIME_COL] or not row[LEG_END_TIME_COL]:
             row["activity_duration_in_minutes"] = None
         else:
             row["activity_duration_in_minutes"] = int(
-                (row[LEG_START_TIME] - group.iloc[i - 1][LEG_END_TIME]).total_seconds() / 60)
+                (row[LEG_START_TIME_COL] - group.iloc[i - 1][LEG_END_TIME_COL]).total_seconds() / 60)
     return group

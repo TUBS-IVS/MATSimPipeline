@@ -1,8 +1,8 @@
 from pipelines.common.data_frame_processor import DataFrameProcessor
 from utils.logger import logging
+from utils import matsim_pipeline_setup
 import pandas as pd
 import matsim.writers
-import pipelines.common.rules as rules  # For access to globals
 
 logger = logging.getLogger(__name__)
 
@@ -10,6 +10,9 @@ logger = logging.getLogger(__name__)
 class PopulationFrameProcessor(DataFrameProcessor):
     def __init__(self, df: pd.DataFrame = None, id_column: str = None):
         super().__init__(df, id_column)
+
+    settings = matsim_pipeline_setup.load_yaml_config('settings.yaml')  # shared across all instances, set at module import
+    PERSON_ID_COLUMN = settings['person_id_column']
 
     def distribute_by_weights(self, weights_df, external_id_column):
         """
@@ -184,7 +187,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
             writer.start_person("person_id_123")
             writer.start_plan(selected=True)
 
-        for _, group in self.df.groupby(rules.PERSON_ID_COLUMN):
+        for _, group in self.df.groupby(self.PERSON_ID_COLUMN):
             writer.add_activity(type='home', x=0.0, y=0.0, end_time=8 * 3600)
             writer.add_leg(mode='walk')
             writer.add_activity(type='work', x=10.0, y=0.0, end_time=18 * 3600)

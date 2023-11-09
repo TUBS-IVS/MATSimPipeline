@@ -5,13 +5,44 @@ mid_hh_file: "data/MiD2017_Haushalte_gefiltert_RStar71.csv"
 mid_persons_file: "data/MiD2017_Personen_gefiltert_RStar71.csv"
 mid_trips_file: "data/MiD2017_Wege_edited.csv"
 
-household_id_column: "H_ID"
-person_id_column: "HP_ID"
-leg_id_column: "W_ID"
-lowest_level_geography: "BAUBLOCKNR"
+# Declare only columns that are needed for processing (you can declare more, but that's a waste of memory and time)
+hh_columns:
+  household_mid_id_column: "H_ID"
+  household_popsim_id_column: "household_id"
 
-# Leave empty to write no file, else e.g.: "output/full_population_frame.csv"
-population_analysis_output_file: "output/full_population_frame.csv"
+person_columns:
+  person_id_column: "HP_ID"
+  person_age: "HP_ALTER"
+  car_avail: "P_AUTO"
+  has_license: "P_FS_PKW"
+
+leg_columns:
+  # In MiD, the leg id is not unique. If you provide leg_non_unique_id_column, a unique id will be created.
+  # If your data already has a unique leg ids, just provide the column name in leg_id_column
+  leg_non_unique_id_column: "W_ID"
+  leg_id_column: "HPW_ID" # Will be created if it doesn't exist and leg_non_unique_id_column is provided
+  leg_target_activity: "leg_target_activity"
+  leg_main_mode: "leg_main_mode"
+  leg_start_time: "leg_start_time"
+  leg_end_time: "leg_end_time"
+  leg_duration: "leg_duration"
+  leg_distance: "leg_distance"
+
+value_maps:
+  activities:
+    home: '8'
+    education: ['2', '3', '4', '5', '6', '7']
+    work: '1'
+  car_availability:
+    never: '3'
+  license:
+    yes: '1'
+    no: '2'
+    unknown: '9'
+    adult_over_16_proxy: '206'
+    person_under_16: '403'
+
+lowest_level_geography: "BAUBLOCKNR"
 
 average_activity_times:
   work: 30
@@ -20,3 +51,5 @@ average_activity_times:
   shopping: 25
   meeting: 35
 
+# Leave empty to write no file, else e.g.: "output/full_population_frame.csv"
+population_analysis_output_file: "output/full_population_frame.csv"

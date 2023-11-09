@@ -12,6 +12,7 @@ os.chdir(matsim_pipeline_setup.PROJECT_ROOT)
 settings = matsim_pipeline_setup.load_yaml_config('settings.yaml')
 
 # We commit the sin of using global (module-wide) variables because rules would have to declare them many times anyway, it's fine
+ID_COLUMNS = settings['id_columns']
 HH_COLUMNS = settings['hh_columns']
 P_COLUMNS = settings['person_columns']
 L_COLUMNS = settings['leg_columns']
@@ -19,17 +20,17 @@ L_COLUMNS = settings['leg_columns']
 AVERAGE_ACTIVITY_TIMES_MINUTES = settings['average_activity_times_minutes']
 
 # Household-related constants
-HOUSEHOLD_MID_ID_COL = HH_COLUMNS['household_mid_id_column']
-HOUSEHOLD_POPSIM_ID_COL = HH_COLUMNS['household_popsim_id_column']
+HOUSEHOLD_MID_ID_COL = ID_COLUMNS['household_mid_id_column']
+HOUSEHOLD_POPSIM_ID_COL = ID_COLUMNS['household_popsim_id_column']
 
 # Person-related constants
-PERSON_ID_COL = P_COLUMNS['person_id_column']
+PERSON_ID_COL = ID_COLUMNS['person_id_column']
 PERSON_AGE_COL = P_COLUMNS['person_age']
 CAR_AVAIL_COL = P_COLUMNS['car_avail']
 HAS_LICENSE_COL = P_COLUMNS['has_license']
 
 # Leg-related constants
-LEG_ID_COL = L_COLUMNS['leg_id_column']
+LED_ID_COL = ID_COLUMNS['leg_id_column']
 LEG_ACTIVITY_COL = L_COLUMNS['leg_target_activity']
 LEG_MAIN_MODE_COL = L_COLUMNS['leg_main_mode']
 LEG_START_TIME_COL = L_COLUMNS['leg_start_time']
@@ -64,14 +65,14 @@ def unique_person_id(row):
     """
     Returns a unique person ID from the unique household ID and the person ID.
     """
-    return f"{row[unique_household_id]}_{row[PERSON_ID_COL]}"
+    return f"{row['unique_household_id']}_{row[PERSON_ID_COL]}"
 
 
 def unique_leg_id(row):
     """
     Returns a unique leg ID from the unique person ID and the leg ID.
     """
-    return f"{row[unique_person_id]}_{row[LEG_ID_COL]}"
+    return f"{row['unique_person_id']}_{row[LEG_ID_COL]}"
 
 
 def has_license_imputed(row):
@@ -81,14 +82,16 @@ def has_license_imputed(row):
     :return: 0 if no license, 1 if license
     """
     if row[HAS_LICENSE_COL] == LICENSE_NO:
+        logger.debug(f"Person {row[PERSON_ID_COL]} has no license.")
         return 0
     elif row[HAS_LICENSE_COL] == LICENSE_YES:
         if row[PERSON_AGE_COL] < 17:
             logger.debug(
                 f"Person {row[PERSON_ID_COL]} has a car driving license but is under 17 years old. Assuming no license.")
             return 0
+        logger.debug(f"Person {row[PERSON_ID_COL]} has a license.")
         return 1
-    elif row[HAS_LICENSE_COL] == LICENSE_UNKNOWN or ADULT_OVER_16_PROXY or pd.isnull(row[HAS_LICENSE_COL]):
+    elif row[HAS_LICENSE_COL] == LICENSE_UNKNOWN or ADULT_OVER_16_PROXY:
         r = random.random()
         if row[PERSON_AGE_COL] >= 17:
             if r <= 0.94:
@@ -97,8 +100,10 @@ def has_license_imputed(row):
             else:
                 logger.debug(f"Adult {row[PERSON_ID_COL]} has unknown license status. Assuming no license.")
                 return 0
+        logger.debug(f"Child {row[PERSON_ID_COL]} has unknown license status. Assuming no license.")
         return 0
     elif row[HAS_LICENSE_COL] == PERSON_UNDER_16:
+        logger.debug(f"Child {row[PERSON_ID_COL]} has unknown license status. Assuming no license.")
         return 0
     else:
         logger.warning(f"Person {row[PERSON_ID_COL]} has no license status entry, not even unknown. Assuming no license.")

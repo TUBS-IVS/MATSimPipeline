@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 # Define the available pipelines in a dictionary for easy reference and scalability
 PIPELINES = {
-    "user_data": popsim_to_raw_plans_main,
+    "user_data": popsim_to_matsim_plans_main,
     #"transaction": transaction_main
 }
 

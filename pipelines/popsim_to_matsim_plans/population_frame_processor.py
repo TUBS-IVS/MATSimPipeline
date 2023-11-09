@@ -12,7 +12,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
         super().__init__(df, id_column)
 
     settings = matsim_pipeline_setup.load_yaml_config('settings.yaml')  # shared across all instances, set at module import
-    PERSON_ID_COLUMN = settings['person_id_column']
+    PERSON_ID_COL = settings['id_columns']['person_id_column']
 
     def distribute_by_weights(self, weights_df, external_id_column):
         """
@@ -199,25 +199,26 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
             writer.end_population()
 
-    writer.start_population()
-    for (person_id, plan_id), group in grouped:
-        writer.start_person(person_id)
-        writer.start_plan(selected=True)
+        grouped = []
+        writer.start_population()
+        for (person_id, plan_id), group in grouped:
+            writer.start_person(person_id)
+            writer.start_plan(selected=True)
 
-        # Iterate over each activity/leg in the plan
-        for index, row in group.iterrows():
-            # Add activity
-            writer.add_activity(
-                type=row['ACTIVITY_TYPE'],
-                x=row['X'],
-                y=row['Y'],
-                end_time=row['END_TIME']
-            )
-            # If there's a leg mode, add a leg
-            if pd.notnull(row['MODE']):
-                writer.add_leg(mode=row['MODE'])
+            # Iterate over each activity/leg in the plan
+            for index, row in group.iterrows():
+                # Add activity
+                writer.add_activity(
+                    type=row['ACTIVITY_TYPE'],
+                    x=row['X'],
+                    y=row['Y'],
+                    end_time=row['END_TIME']
+                )
+                # If there's a leg mode, add a leg
+                if pd.notnull(row['MODE']):
+                    writer.add_leg(mode=row['MODE'])
 
-        writer.end_plan()
-        writer.end_person()
+            writer.end_plan()
+            writer.end_person()
 
-    writer.end_population()
+        writer.end_population()

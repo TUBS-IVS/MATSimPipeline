@@ -49,7 +49,12 @@ class DataFrameProcessor:
         - if_df_exists: str, whether to replace the existing DataFrame or concatenate to it.
         """
         try:
-            new_df = pd.read_csv(csv_path)
+            try:
+                new_df = pd.read_csv(csv_path)
+                test = new_df[self.id_column] if self.id_column else None  # Try to test if the correct separator was used
+            except (KeyError, ValueError):
+                logger.warning(f"Failed to load CSV data from {csv_path} with default separator. Trying ';'.")
+                new_df = pd.read_csv(csv_path, sep=';')
             if if_df_exists == 'replace':
                 self.df = new_df
             elif if_df_exists == 'concat':
@@ -74,19 +79,21 @@ class DataFrameProcessor:
         """
 
         if not isinstance(columns_to_add, list):
-            raise ValueError("columns_to_add should be a list.")
+            try:
+                columns_to_add = list(columns_to_add.values())
+            except AttributeError:
+                raise ValueError("columns_to_add should be a list or convertible to a list.")
 
         if id_column is None:
             if self.id_column is None:
                 raise ValueError("id_column is None. Please specify an ID column to use.")
             else:
                 id_column = self.id_column
+                logger.info(f"No id_column provided, using id_column from DataFrame: {id_column}")
 
         # Validation for ID columns in both dataframes
         if id_column not in self.df.columns or id_column not in source_df.columns:
-            logger.error(
-                f"Either the primary or source DataFrame is missing the ID column: {id_column}. Not updating the DataFrame.")
-            return
+            raise ValueError(f"Either the primary or source DataFrame is missing the ID column: {id_column}")
 
         # Handle duplicates
         if drop_duplicates_from_source:
@@ -126,6 +133,13 @@ class DataFrameProcessor:
         - add_prefix: str, optional, prefix to add to the column names from the CSV.
         - drop_duplicates_from_source: bool, whether to drop duplicates based on id_column in the CSV. Default is True.
         """
+
+        if not isinstance(columns_to_add, list):
+            try:
+                columns_to_add = list(columns_to_add.values())
+            except AttributeError:
+                raise ValueError("columns_to_add should be a list or convertible to a list.")
+
         if id_column is None:
             id_column = self.id_column
         try:
@@ -134,15 +148,19 @@ class DataFrameProcessor:
 
             if id_column not in columns_to_add:
                 columns_to_add.append(id_column)
-
-            source_df = pd.read_csv(csv_path, usecols=columns_to_add)
+            try:
+                source_df = pd.read_csv(csv_path, usecols=columns_to_add)
+            except ValueError:
+                logger.warning(f"Failed to load CSV data from {csv_path} with default separator. Trying ';'.")
+                source_df = pd.read_csv(csv_path, usecols=columns_to_add, sep=';')
 
             if delete_later:
                 self.columns_to_delete.update(columns_to_add)
 
-            self.add_df_on_id(source_df, columns_to_add, overwrite_existing, drop_duplicates_from_source, id_column)
+            self.add_df_on_id(source_df, columns_to_add, overwrite_existing, id_column, drop_duplicates_from_source)
         except Exception as e:
             logger.error(f"Failed to load and add CSV data from {csv_path}: {e}")
+            raise
 
     # def safe_apply_rules(self, rules, csv_path=None, id_col=None, groupby_column=None):
     #     """
@@ -260,7 +278,7 @@ class DataFrameProcessor:
 
             except Exception as e:
                 logger.error(f"Failed to apply row-wise rule '{rule_func.__name__}': {e}")
-                continue
+                raise
 
     def apply_group_wise_rules(self, rules, groupby_column, safe_apply=True) -> None:
         """

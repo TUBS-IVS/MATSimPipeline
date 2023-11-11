@@ -27,6 +27,10 @@ HOUSEHOLD_ID_COLUMN = ID_COLUMNS['household_mid_id_column']
 PERSON_ID_COLUMN = ID_COLUMNS['person_id_column']
 LEG_ID_COLUMN = ID_COLUMNS['leg_id_column']
 
+LEG_START_TIME_COL = L_COLUMNS['leg_start_time']
+LEG_END_TIME_COL = L_COLUMNS['leg_end_time']
+LEG_DURATION_MINUTES_COL = L_COLUMNS['leg_duration_minutes']
+
 LOWEST_LEVEL_GEOGRAPHY = settings['lowest_level_geography']
 
 POPULATION_ANALYSIS_OUTPUT_FILE = settings['population_analysis_output_file']
@@ -40,7 +44,6 @@ def popsim_to_matsim_plans_main():
     Notes:
         - The ids of households, persons and trips must be unique within the population sample (e.g. MiD)
         (MiD: H_ID, HP_ID, and a previously added HPW_ID for legs)
-
     """
     # Create unique leg ids in the leg input file if necessary
     #matsim_pipeline_setup.create_unique_leg_ids()
@@ -80,7 +83,7 @@ def popsim_to_matsim_plans_main():
     logger.info(f"Population df after adding P attributes: \n{population.df.head()}")
 
     # Add/edit person-specific rule-based attributes
-    apply_me = [rules.unique_person_id, rules.has_license_imputed]
+    apply_me = [rules.unique_person_id]  # rules.has_license_imputed
     population.apply_row_wise_rules(apply_me)
     logger.info(f"Population df after applying P row rules: \n{population.df.head()}")
 
@@ -104,7 +107,7 @@ def popsim_to_matsim_plans_main():
     # All people where there are 0 legs for other reasons, e.g. because of missing data, must be removed in the inputs.
     # For MiD, all people with 0 legs can be assumed to not have travelled.
 
-    population.df = population.df[population.df[LEG_ID_COLUMN].notna()]
+    population.df = population.df[population.df[LEG_ID_COLUMN].notna()].reset_index()
 
     # Add trip attributes from MiD
     if L_COLUMNS:
@@ -112,14 +115,19 @@ def popsim_to_matsim_plans_main():
                                       drop_duplicates_from_source=True, delete_later=True)
     logger.info(f"Population df after adding L attributes: \n{population.df.head()}")
 
+    # Convert time columns to datetime
+    population.convert_time_columns_to_datetime([LEG_START_TIME_COL, LEG_END_TIME_COL])
 
     # Add/edit trip-specific rule-based attributes
     apply_me = [rules.unique_leg_id]
     population.apply_row_wise_rules(apply_me)
     logger.info(f"Population df after applying L row rules: \n{population.df.head()}")
 
-    apply_me = [rules.activity_duration_in_minutes, rules.is_main_activity]
-    population.apply_group_wise_rules(apply_me, groupby_column="unique_person_id")
+    # apply_me = [rules.activity_duration_in_minutes, rules.is_main_activity]
+    # population.apply_group_wise_rules(apply_me, groupby_column="unique_person_id")
+
+    apply_me = [rules.connected_activities]
+    population.apply_group_wise_rules(apply_me, groupby_column="unique_household_id")
 
     apply_me = [rules.add_return_home_leg]  # Adds rows, so safe_apply=False
     population.apply_group_wise_rules(apply_me, groupby_column="unique_person_id", safe_apply=False)

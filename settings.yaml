@@ -23,18 +23,18 @@ person_columns:
   has_license: "P_FS_PKW"
 
 leg_columns:
-  leg_target_activity: "leg_target_activity"
-  leg_main_mode: "leg_main_mode"
-  leg_start_time: "leg_start_time"
-  leg_end_time: "leg_end_time"
-  leg_duration: "leg_duration"
-  leg_distance: "leg_distance"
+  leg_target_activity: "W_ZWECK"
+  leg_main_mode: "hvm_imp"
+  leg_start_time: "W_SZ"
+  leg_end_time: "W_AZ"
+  leg_duration_minutes: "wegmin"
+  leg_distance: "wegkm"
 
 value_maps:
   activities:
     home: 8
     education: [3,11,12]
-    work: 1
+    work: 1 # Work is considered the main activity, else education
   car_availability:
     never: 3
   license:
@@ -43,6 +43,14 @@ value_maps:
     unknown: 9
     adult_over_16_proxy: 206
     person_under_16: 403
+  mode:
+    car: 4
+    bike: 2
+    walk: 1
+    pt: 5
+    ride: 3
+    other:
+    unknown:
 
 lowest_level_geography: "BAUBLOCKNR"
 

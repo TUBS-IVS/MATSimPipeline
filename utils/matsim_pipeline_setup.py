@@ -41,12 +41,17 @@ def create_unique_leg_ids():
     PERSON_ID_COLUMN = settings['id_columns']['person_id_column']
 
     logger.info(f"Creating unique leg ids in {LEGS_FILE}...")
+    legs_file = pd.read_csv(LEGS_FILE)
     try:
-        legs_file = pd.read_csv(LEGS_FILE)
         test = legs_file[LEG_NON_UNIQUE_ID_COLUMN]
     except (KeyError, ValueError):
-        logger.warning(f"Failed to load CSV data from {LEGS_FILE} with default separator. Trying ';'.")
+        logger.warning(f"{LEG_NON_UNIQUE_ID_COLUMN} not found in {LEGS_FILE}, trying to read as ';' separated file...")
         legs_file = pd.read_csv(LEGS_FILE, sep=';')
+        try:
+            test = legs_file[LEG_NON_UNIQUE_ID_COLUMN]
+        except (KeyError, ValueError):
+            logger.warning(f"{LEG_NON_UNIQUE_ID_COLUMN} still not found in {LEGS_FILE}, verify column name and try again.")
+            raise
 
     if LEG_ID_COLUMN in legs_file.columns:
         logger.info(f"Legs file already has unique leg ids, skipping.")

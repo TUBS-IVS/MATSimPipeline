@@ -1,6 +1,6 @@
 import logging
 from typing import Literal
-
+from datetime import datetime
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -49,12 +49,17 @@ class DataFrameProcessor:
         - if_df_exists: str, whether to replace the existing DataFrame or concatenate to it.
         """
         try:
+            new_df = pd.read_csv(csv_path)
             try:
-                new_df = pd.read_csv(csv_path)
-                test = new_df[self.id_column] if self.id_column else None  # Try to test if the correct separator was used
+                test = new_df[self.id_column] if self.id_column else None  # Test if the correct separator was used
             except (KeyError, ValueError):
-                logger.warning(f"Failed to load CSV data from {csv_path} with default separator. Trying ';'.")
+                logger.warning(f"ID column '{self.id_column}' not found in {csv_path}, trying to read as ';' separated file...")
                 new_df = pd.read_csv(csv_path, sep=';')
+                try:
+                    test = new_df[self.id_column] if self.id_column else None
+                except (KeyError, ValueError):
+                    logger.error(f"ID column '{self.id_column}' still not found in {csv_path}, verify column name and try again.")
+                    raise
             if if_df_exists == 'replace':
                 self.df = new_df
             elif if_df_exists == 'concat':
@@ -150,7 +155,7 @@ class DataFrameProcessor:
                 columns_to_add.append(id_column)
             try:
                 source_df = pd.read_csv(csv_path, usecols=columns_to_add)
-            except ValueError:
+            except (ValueError, KeyError):
                 logger.warning(f"Failed to load CSV data from {csv_path} with default separator. Trying ';'.")
                 source_df = pd.read_csv(csv_path, usecols=columns_to_add, sep=';')
 
@@ -294,16 +299,24 @@ class DataFrameProcessor:
                 # The rule function is expected to return the modified group with the same index
                 modified_groups = self.df.groupby(groupby_column).apply(rule_func)
 
-                if safe_apply:
-                    if modified_groups.index.size != original_shape[0]:
-                        raise ValueError(
-                            f"The rule '{rule_func.__name__}' returned a group with a different number of rows than the original DataFrame.")
+                # if safe_apply:
+                #     if modified_groups.index.size != original_shape[0]:
+                #         raise ValueError(
+                #             f"The rule '{rule_func.__name__}' returned a group with a different number of rows than the original DataFrame.")
+                #
+                #     if modified_groups.shape[1] < original_shape[1]:
+                #         raise ValueError(
+                #             f"The rule '{rule_func.__name__}' returned a group with fewer columns than the original DataFrame.")
 
-                    if modified_groups.shape[1] < original_shape[1]:
-                        raise ValueError(
-                            f"The rule '{rule_func.__name__}' returned a group with fewer columns than the original DataFrame.")
+                # self.df = pd.concat(modified_groups, ignore_index=True)
+                # self.df = modified_groups
+                if modified_groups.shape[0] != self.df.shape[0]:
+                    raise ValueError(
+                        f"The rule '{rule_func.__name__}' returned a group with a different number of rows than the original DataFrame.")
 
-                self.df = pd.concat(modified_groups, ignore_index=True)
+                self.df.reset_index(inplace=True, drop=True)
+                modified_groups.reset_index(inplace=True, drop=True)
+                self.df[rule_func.__name__] = modified_groups
 
             except Exception as e:
                 logger.error(f"Failed to apply group-wise rule '{rule_func.__name__}': {e}")
@@ -351,3 +364,28 @@ class DataFrameProcessor:
             logger.info(f"Removed columns: {cols_to_remove}")
         else:
             logger.info("No columns were removed.")
+
+    import pandas as pd
+    from datetime import datetime
+
+    def convert_time_columns_to_datetime(self, column_names: list) -> None:
+        """
+        Convert specified columns to datetime; as time alone would not support arithmetic operations.
+        The date part is set to a default date, otherwise the date part would be today's date,
+        which might break stuff if the pipeline runs across midnight.
+        :param column_names: The names of the columns to convert.
+        :return: The DataFrame with the specified columns converted to datetime.
+        """
+        default_date = '2020-01-01'
+        #default_date = datetime.strptime(default_date, '%Y-%m-%d').date()
+
+        for column_name in column_names:
+            logger.info(f"Converting column '{column_name}' with {len(self.df)} total rows to datetime.")
+
+            # Convert to datetime with a fixed date
+            self.df[column_name] = pd.to_datetime(self.df[column_name].astype(str).apply(lambda x: f"{default_date} {x}"),
+                                                  errors='coerce')
+
+            null_count = self.df[column_name].isnull().sum()  # Count NaT values, which are considered null
+            logger.info(f"Number of failed conversions (NaT): {null_count}")
+

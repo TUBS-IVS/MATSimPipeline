@@ -1,3 +1,4 @@
 pandas~=2.1.1
 pyyaml~=6.0.1
 yaml~=0.2.5
+shapely~=2.0.1

@@ -1,5 +1,9 @@
 import os
+import time
 
+import winsound
+
+from pipelines.common import helpers as h
 from pipelines.common import rules
 from pipelines.popsim_to_matsim_plans.population_frame_processor import PopulationFrameProcessor
 from utils import matsim_pipeline_setup
@@ -26,6 +30,7 @@ L_COLUMNS = settings['leg_columns']
 HOUSEHOLD_ID_COLUMN = ID_COLUMNS['household_mid_id_column']
 PERSON_ID_COLUMN = ID_COLUMNS['person_id_column']
 LEG_ID_COLUMN = ID_COLUMNS['leg_id_column']
+NON_UNIQUE_LEG_ID_COLUMN = ID_COLUMNS['leg_non_unique_id_column']
 
 LEG_START_TIME_COL = L_COLUMNS['leg_start_time']
 LEG_END_TIME_COL = L_COLUMNS['leg_end_time']
@@ -33,6 +38,10 @@ LEG_DURATION_MINUTES_COL = L_COLUMNS['leg_duration_minutes']
 
 LOWEST_LEVEL_GEOGRAPHY = settings['lowest_level_geography']
 
+DUN_DUN_DUUUN = settings['misc']['dun_dun_duuun']
+SHAPE_BOUNDARY = settings['misc']['shape_boundary']
+
+BUILDINGS_IN_LOWEST_GEOGRAPHY_WITH_WEIGHTS_FILE = settings['buildings_in_lowest_geography_with_weights_file']
 POPULATION_ANALYSIS_OUTPUT_FILE = settings['population_analysis_output_file']
 write_to_file = True if POPULATION_ANALYSIS_OUTPUT_FILE else False
 
@@ -46,7 +55,7 @@ def popsim_to_matsim_plans_main():
         (MiD: H_ID, HP_ID, and a previously added HPW_ID for legs)
     """
     # Create unique leg ids in the leg input file if necessary
-    #matsim_pipeline_setup.create_unique_leg_ids()
+    # matsim_pipeline_setup.create_unique_leg_ids()
 
     # Load data from PopSim, concat different PopSim results if necessary
     # Lowest level of geography must be named the same in all input files, if there are multiple
@@ -54,7 +63,6 @@ def popsim_to_matsim_plans_main():
     population.id_column = HOUSEHOLD_ID_COLUMN
     for csv_path in EXPANDED_HOUSEHOLDS_FILES:
         population.load_df_from_csv(csv_path, "concat")
-
 
     # Add household attributes from MiD
     if HH_COLUMNS:
@@ -67,9 +75,9 @@ def popsim_to_matsim_plans_main():
     population.apply_row_wise_rules(apply_me)
     logger.info(f"Population df after applying HH rules: \n{population.df.head()}")
 
-    # Distribute buildings to households (if PopSim assigned them to a larger geography)
-    # buildings_in_lowest_geography_with_weights_df =
-    # population.distribute_by_weights(buildings_in_lowest_geography_with_weights_df, LOWEST_LEVEL_GEOGRAPHY)
+    # Distribute buildings to households (if PopSim assigned hhs to a larger geography)
+    weights_df = h.read_csv(BUILDINGS_IN_LOWEST_GEOGRAPHY_WITH_WEIGHTS_FILE, LOWEST_LEVEL_GEOGRAPHY)
+    population.distribute_by_weights(weights_df, LOWEST_LEVEL_GEOGRAPHY, True)
 
     # Add people to households (increases the number of rows)
     population.add_csv_data_on_id(MiD_PERSONS_FILE, [PERSON_ID_COLUMN], id_column=HOUSEHOLD_ID_COLUMN,
@@ -99,7 +107,8 @@ def popsim_to_matsim_plans_main():
     # Temp for testing
     logger.debug(f"Number of rows after adding L attributes: {len(population.df)}")
     logger.debug(f"Number of nan leg ids after adding L attributes: {population.df[LEG_ID_COLUMN].isna().sum()}")
-    logger.debug(f"Number of legs called nan after adding L attributes: {len(population.df[population.df[LEG_ID_COLUMN] == 'nan'])}")
+    logger.debug(
+        f"Number of legs called nan after adding L attributes: {len(population.df[population.df[LEG_ID_COLUMN] == 'nan'])}")
     logger.debug(f"Number of empty leg ids after adding L attributes: {len(population.df[population.df[LEG_ID_COLUMN] == ''])}")
     logger.debug(f"Number of unique leg ids after adding L attributes: {len(population.df[LEG_ID_COLUMN].unique())}")
 
@@ -111,9 +120,14 @@ def popsim_to_matsim_plans_main():
 
     # Add trip attributes from MiD
     if L_COLUMNS:
-        population.add_csv_data_on_id(MiD_TRIPS_FILE, L_COLUMNS, id_column=LEG_ID_COLUMN,
+        list_L_COLUMNS = list(L_COLUMNS.values())
+        list_L_COLUMNS.append(NON_UNIQUE_LEG_ID_COLUMN)
+        population.add_csv_data_on_id(MiD_TRIPS_FILE, list_L_COLUMNS, id_column=LEG_ID_COLUMN,
                                       drop_duplicates_from_source=True, delete_later=True)
     logger.info(f"Population df after adding L attributes: \n{population.df.head()}")
+
+    # Remove legs that are "regelmäßiger beruflicher Weg" (duration is marked as 70701)
+    population.filter_out_rows(LEG_DURATION_MINUTES_COL, [70701])
 
     # Convert time columns to datetime
     population.convert_time_columns_to_datetime([LEG_START_TIME_COL, LEG_END_TIME_COL])
@@ -123,14 +137,19 @@ def popsim_to_matsim_plans_main():
     population.apply_row_wise_rules(apply_me)
     logger.info(f"Population df after applying L row rules: \n{population.df.head()}")
 
-    # apply_me = [rules.activity_duration_in_minutes, rules.is_main_activity]
-    # population.apply_group_wise_rules(apply_me, groupby_column="unique_person_id")
+    apply_me = [rules.is_main_activity]
+    population.apply_group_wise_rules(apply_me, groupby_column="unique_person_id")
 
     apply_me = [rules.connected_activities]
     population.apply_group_wise_rules(apply_me, groupby_column="unique_household_id")
 
-    apply_me = [rules.add_return_home_leg]  # Adds rows, so safe_apply=False
-    population.apply_group_wise_rules(apply_me, groupby_column="unique_person_id", safe_apply=False)
+    population.calculate_activity_time()
+    population.adjust_mode_based_on_age()
+    population.change_last_leg_activity_to_home()
+    population.assign_random_location()
+
+    # apply_me = [rules.add_return_home_leg]  # Adds rows, so safe_apply=False
+    # population.apply_group_wise_rules(apply_me, groupby_column="unique_person_id", safe_apply=False)
     logger.info(f"Population df after applying L group rules: \n{population.df.head()}")
 
     # Remove cols that were used by rules, to keep the df clean
@@ -149,6 +168,16 @@ def popsim_to_matsim_plans_main():
 #
 if __name__ == '__main__':
     output_dir = matsim_pipeline_setup.create_output_directory()
-    popsim_to_matsim_plans_main()
+    try:
+        popsim_to_matsim_plans_main()
+    except Exception as e:
+        if DUN_DUN_DUUUN:
+            winsound.Beep(600, 500)
+            time.sleep(0.1)
+            winsound.Beep(500, 500)
+            time.sleep(0.2)
+            winsound.Beep(400, 1500)
+
+        raise
 else:
     output_dir = matsim_pipeline_setup.OUTPUT_DIR

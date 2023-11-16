@@ -1,5 +1,10 @@
+import os.path
+import random
+
+import geopandas as gpd
 import matsim.writers
 import pandas as pd
+from shapely.geometry import Point
 
 from pipelines.common.data_frame_processor import DataFrameProcessor
 from utils import matsim_pipeline_setup
@@ -20,31 +25,44 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
     settings = matsim_pipeline_setup.load_yaml_config('settings.yaml')  # shared across all instances, set at module import
     #  Column names
+    HOUSEHOLD_ID_COL = settings['id_columns']['household_mid_id_column']
     PERSON_ID_COL = settings['id_columns']['person_id_column']
+    LEG_NON_UNIQUE_ID_COL = settings['id_columns']['leg_non_unique_id_column']
     LEG_ID_COL = settings['id_columns']['leg_id_column']
     LEG_ACTIVITY_COL = settings['leg_columns']['leg_target_activity']
+    LEG_START_TIME_COL = settings['leg_columns']['leg_start_time']
+    LEG_END_TIME_COL = settings['leg_columns']['leg_end_time']
     MODE_COL = settings['leg_columns']['leg_main_mode']
     PERSON_AGE_COL = settings['person_columns']['person_age']
+    SHAPE_BOUNDARY_FILE = settings['shape_boundary_file']
     #  Value_maps
-    ACTIVITY_HOME = settings['value_maps']['activities']['home']
-    MODE_CAR = settings['value_maps']['mode']['car']
-    MODE_RIDE = settings['value_maps']['mode']['ride']
+    ACTIVITY_HOME = (settings['value_maps']['activities']['home'])
+    MODE_CAR = settings['value_maps']['modes']['car']
+    MODE_RIDE = settings['value_maps']['modes']['ride']
 
-    def distribute_by_weights(self, weights_df, external_id_column):
+    def distribute_by_weights(self, weights_df, external_id_column, cut_missing_ids=False):
         """
         Distribute data points from `weights_df` across the population dataframe based on weights (e.g. assign buildings to households).
 
-        The function modifies the internal dataframe by appending the point IDs from the weights dataframe
+        The function modifies the internal population dataframe by appending the point IDs from the weights dataframe
         based on their weights and the count of each ID in the population dataframe.
 
         Args:
-            weights_df (pd.DataFrame): DataFrame containing the ID, point IDs, and their weights.
+            weights_df (pd.DataFrame): DataFrame containing the ID of the geography, point IDs, and their weights.
+            Must contain all geography IDs in the population dataframe. Is allowed to contain more (they will be skipped).
             external_id_column (str): The column name of the ID in the weights dataframe (e.g. 'BLOCK_NR').
-
-        Returns:
-            None. The internal dataframe is modified in place.
+            cut_missing_ids (bool): If True, IDs in the population dataframe that are not in the weights dataframe are cut from the population dataframe.
         """
         logger.info("Starting distribution by weights...")
+
+        if not self.df[external_id_column].isin(weights_df[external_id_column]).all():
+            if cut_missing_ids:
+                logger.warning(f"Not all geography IDs in the population dataframe are in the weights dataframe. "
+                               f"Cutting missing IDs: {set(self.df[external_id_column]) - set(weights_df[external_id_column])}")
+                self.df = self.df[self.df[external_id_column].isin(weights_df[external_id_column])]
+            else:
+                raise ValueError(f"Not all geography IDs in the population dataframe are in the weights dataframe. "
+                                 f"Missing IDs: {set(self.df[external_id_column]) - set(weights_df[external_id_column])}")
 
         # Count of each ID in population_df
         id_counts = self.df[external_id_column].value_counts().reset_index()
@@ -56,14 +74,19 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
         def distribute_rows(group):
             total_count = group['_processing_count'].iloc[0]
-
+            if total_count == 0 or pd.isna(total_count):
+                logger.debug(f"Geography ID {group[external_id_column].iloc[0]} is not in the given dataframe, "
+                             f"likely because no person/activity etc. exists there. Skipping distribution for this ID.")
+                return []
             # Compute distribution
-            group['_processing_repeat_count'] = (group['weight'] / group['weight'].sum()) * total_count
+            group['_processing_repeat_count'] = (group['ewzahl'] / group['ewzahl'].sum()) * total_count
             group['_processing_int_part'] = group['_processing_repeat_count'].astype(int)
             group['_processing_frac_part'] = group['_processing_repeat_count'] - group['_processing_int_part']
 
             # Distribute remainder
             remainder = total_count - group['_processing_int_part'].sum()
+            assert remainder >= 0 and remainder % 1 == 0, f"Remainder is {remainder}, should be a positive integer."
+            remainder = int(remainder)
             top_indices = group['_processing_frac_part'].nlargest(remainder).index
             group.loc[top_indices, '_processing_int_part'] += 1
 
@@ -74,17 +97,15 @@ class PopulationFrameProcessor(DataFrameProcessor):
             return expanded
 
         expanded_rows = []
-        groups = weights_df.groupby(external_id_column)
-        for _, group in groups:
+        for _, group in weights_df.groupby(external_id_column):
             expanded_rows.extend(distribute_rows(group))
-        logger.info("Finished row distribution based on weights.")
 
         expanded_weights_df = pd.DataFrame(expanded_rows).drop(
             columns=['_processing_count', '_processing_repeat_count', '_processing_int_part', '_processing_frac_part'])
         logger.info(f"Generated expanded weights DataFrame with {len(expanded_weights_df)} rows.")
         if len(expanded_weights_df) != self.df.shape[0]:
-            logger.error(
-                f"Expanded weights DataFrame has {len(expanded_weights_df)} rows, but the population DataFrame has {self.df.shape[0]} rows.")
+            raise ValueError(f"Expanded weights DataFrame has {len(expanded_weights_df)} rows, "
+                             f"but the population DataFrame has {self.df.shape[0]} rows.")
 
         # Add a sequence column to both dataframes to prevent cartesian product on merge
         self.df['_processing_seq'] = self.df.groupby(external_id_column).cumcount()
@@ -168,89 +189,120 @@ class PopulationFrameProcessor(DataFrameProcessor):
     #
     def write_plans_to_matsim_xml(self):
         """
-        Write the population frame to MATSim XML format.
+        Write to MATSim xml.gz directly from the dataframe.
+        The design of this method decides which data from the population frame is written and which is not.
         """
-        logger.info("Writing plans to MATSim XML format...")
+        logger.info("Writing plans to MATSim xml.gz...")
 
-        # Create a copy of the population frame
-        raw_plans = self.df.copy()
-
-        # Rename columns
-        raw_plans.rename(columns={"personID": "person_id", "householdID": "household_id"}, inplace=True)
-
-        # Add attributes
-        raw_plans["selected"] = 1
-        raw_plans["score"] = 1
-        raw_plans["plan_type"] = "initial"
-        raw_plans["plan_mode"] = raw_plans.apply(self.get_plan_mode, axis=1)
-        raw_plans["plan_score"] = 1
-        raw_plans["plan_selected"] = 1
-
-        # Reorder columns
-        raw_plans = raw_plans[["person_id", "household_id", "selected", "score", "plan_type", "plan_mode", "plan_score",
-                               "plan_selected"]]
-
-        # Write to CSV
-        raw_plans.to_csv("raw_plans.csv", index=False)
-        logger.info("Raw plans generated.")
-
-        with open("plans.xml", 'wb+') as f_write:
+        output_file = os.path.join(matsim_pipeline_setup.OUTPUT_DIR, "population.xml.gz")
+        with open(output_file, 'wb+') as f_write:
             writer = matsim.writers.PopulationWriter(f_write)
 
-            writer.start_population()
-            writer.start_person("person_id_123")
-            writer.start_plan(selected=True)
+            writer.start_population(attributes={"coordinateReferenceSystem": "UTM-32N"})  # TODO: verify CRS everywhere
 
-        for _, group in self.df.groupby(self.PERSON_ID_COLUMN):
-            writer.add_activity(type='home', x=0.0, y=0.0, end_time=8 * 3600)
-            writer.add_leg(mode='walk')
-            writer.add_activity(type='work', x=10.0, y=0.0, end_time=18 * 3600)
-            writer.add_leg(mode='pt')
-            writer.add_activity(type='home', x=0.0, y=0.0)
+            for _, group in self.df.groupby(['unique_person_id']):
+                writer.start_person(group['unique_person_id'].iloc[0])
+                writer.start_plan(selected=True)
+                # One row in the df contains the leg and the following activity
+                # All trips are assumed to start at home
+                if group[self.LEG_ACTIVITY_COL].iloc[0] != self.ACTIVITY_HOME:
+                    logger.info(
+                        f"First activity of person {group[self.PERSON_ID_COL].iloc[0]} is not home. Assuming home anyway.")
+                # All trips should end at home. If not, we warn the user but use the given activity.
+                if group[self.LEG_ACTIVITY_COL].iloc[-1] != self.ACTIVITY_HOME:
+                    logger.warning(f"Last activity of person {group[self.PERSON_ID_COL].iloc[0]} is not home.")
+                writer.add_activity(
+                    type="home",
+                    x=group['home_loc'].iloc[0].x, y=group['home_loc'].iloc[0].y,
+                    end_time=(group[self.LEG_START_TIME_COL].iloc[0]))
+                for idx, row in group.iterrows():
+                    writer.add_leg(mode=row[self.MODE_COL])
+                    writer.add_activity(
+                        type=row[self.LEG_ACTIVITY_COL],
+                        x=row["random_point"].x, y=row["random_point"].y,
+                        # The writer expects seconds. Also, we mean max_dur here, but the writer doesn't have that yet.
+                        end_time=row["activity_duration_seconds"])
 
-            writer.end_plan()
-            writer.end_person()
+                writer.end_plan()
+                writer.end_person()
 
             writer.end_population()
-
-        grouped = []
-        writer.start_population()
-        for (person_id, plan_id), group in grouped:
-            writer.start_person(person_id)
-            writer.start_plan(selected=True)
-
-            # Iterate over each activity/leg in the plan
-            for index, row in group.iterrows():
-                # Add activity
-                writer.add_activity(
-                    type=row['ACTIVITY_TYPE'],
-                    x=row['X'],
-                    y=row['Y'],
-                    end_time=row['END_TIME']
-                )
-                # If there's a leg mode, add a leg
-                if pd.notnull(row['MODE']):
-                    writer.add_leg(mode=row['MODE'])
-
-            writer.end_plan()
-            writer.end_person()
-
-        writer.end_population()
 
     def change_last_leg_activity_to_home(self) -> None:
         """
         Change the target activity of the last leg to home. Alternative to add_return_home_leg().
         Assumes LEG_ID is ascending in order of legs (which it is in MiD and should be in other datasets).
         """
-        self.df = self.df.sort_values(by=[self.PERSON_ID_COL, self.LEG_ID_COL])
+        logger.info("Changing last leg activity to home...")
+        self.df = self.df.sort_values(by=[self.HOUSEHOLD_ID_COL, self.PERSON_ID_COL, self.LEG_ID_COL])
 
         is_last_leg = self.df['person_id'].ne(self.df['person_id'].shift(-1))
 
+        number_of_rows_to_change = len(self.df[is_last_leg & (self.df[self.LEG_ACTIVITY_COL] != self.ACTIVITY_HOME)])
+
         self.df.loc[is_last_leg, self.LEG_ACTIVITY_COL] = self.ACTIVITY_HOME
+        logger.info(f"Changed last leg activity to home for {number_of_rows_to_change} of {len(self.df)} rows.")
 
     def adjust_mode_based_on_age(self):
         """
         Change the mode of transportation from car to ride if age < 17.
         """
+        logger.info("Adjusting mode based on age...")
         conditions = (self.df[self.MODE_COL] == self.MODE_CAR) & (self.df[self.PERSON_AGE_COL] < 17)
         self.df.loc[conditions, self.MODE_COL] = self.MODE_RIDE
+        logger.info(f"Adjusted mode based on age for {conditions.sum()} of {len(self.df)} rows.")
+
+    def calculate_activity_time(self):
+        """
+        Calculate the time between the end of one leg and the start of the next leg in minutes and seconds.
+        :return:
+        """
+        self.df.sort_values(by=[self.HOUSEHOLD_ID_COL, self.PERSON_ID_COL, self.LEG_NON_UNIQUE_ID_COL], inplace=True,
+                            ignore_index=True)
+
+        # Group by person and calculate the time difference within each group
+        self.df['activity_time_seconds'] = self.df.groupby(self.PERSON_ID_COL)[self.LEG_START_TIME_COL].shift(-1) - self.df[
+            self.LEG_END_TIME_COL]
+
+        self.df['activity_time_seconds'] = self.df['activity_time_seconds'].dt.total_seconds()
+        self.df['activity_time_seconds'] = pd.to_numeric(self.df['activity_time_seconds'], downcast='integer', errors='coerce')
+
+        # Set the activity time of the last leg to None
+        is_last_leg = self.df[self.PERSON_ID_COL] != self.df[self.PERSON_ID_COL].shift(-1)
+        self.df.loc[is_last_leg, 'activity_time_in_seconds'] = None
+
+    def assign_random_location(self):
+        """
+        Assign a random location to each activity.
+        :return:
+        """
+        polygon = self.find_outer_boundary()
+        self.df['random_point'] = self.df.apply(lambda row: random_point_in_polygon(polygon), axis=1)
+
+        def random_point_in_polygon(polygon):
+            if not polygon.is_valid or polygon.is_empty:
+                raise ValueError("Invalid polygon")
+
+            min_x, min_y, max_x, max_y = polygon.bounds
+
+            while True:
+                random_point = Point(random.uniform(min_x, max_x), random.uniform(min_y, max_y))
+                if polygon.contains(random_point):
+                    return random_point
+
+    def find_outer_boundary(self, method='convex_hull'):
+        # Read the shapefile
+        gdf = gpd.read_file(self.SHAPE_BOUNDARY_FILE)
+
+        # Combine all geometries in the GeoDataFrame
+        combined = gdf.geometry.unary_union
+
+        # Calculate the convex hull or envelope
+        if method == 'convex_hull':
+            outer_boundary = combined.convex_hull
+        elif method == 'envelope':
+            outer_boundary = combined.envelope
+        else:
+            raise ValueError("Method must be 'convex_hull' or 'envelope'")
+
+        return outer_boundary

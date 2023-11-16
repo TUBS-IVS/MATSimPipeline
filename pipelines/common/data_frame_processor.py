@@ -1,6 +1,6 @@
 import logging
 from typing import Literal
-from datetime import datetime
+
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -365,9 +365,6 @@ class DataFrameProcessor:
         else:
             logger.info("No columns were removed.")
 
-    import pandas as pd
-    from datetime import datetime
-
     def convert_time_columns_to_datetime(self, column_names: list) -> None:
         """
         Convert specified columns to datetime; as time alone would not support arithmetic operations.
@@ -377,7 +374,7 @@ class DataFrameProcessor:
         :return: The DataFrame with the specified columns converted to datetime.
         """
         default_date = '2020-01-01'
-        #default_date = datetime.strptime(default_date, '%Y-%m-%d').date()
+        # default_date = datetime.strptime(default_date, '%Y-%m-%d').date()
 
         for column_name in column_names:
             logger.info(f"Converting column '{column_name}' with {len(self.df)} total rows to datetime.")
@@ -389,3 +386,13 @@ class DataFrameProcessor:
             null_count = self.df[column_name].isnull().sum()  # Count NaT values, which are considered null
             logger.info(f"Number of failed conversions (NaT): {null_count}")
 
+    def filter_out_rows(self, column_name, values_to_filter: list):
+        """
+        Filter out rows from a DataFrame based on specific values in a given column.
+        """
+        if column_name not in self.df.columns:
+            raise ValueError(f"Column '{column_name}' not found in DataFrame.")
+        logger.info(f"Filtering out rows where column '{column_name}' has values: {values_to_filter}")
+        logger.info(f"Number of rows before filtering: {len(self.df)}")
+        self.df = self.df[~self.df[column_name].isin(values_to_filter)]
+        logger.info(f"Number of rows after filtering: {len(self.df)}")

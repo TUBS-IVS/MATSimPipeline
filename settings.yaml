@@ -1,15 +1,27 @@
-expanded_households_files: # synthetic_households from PopSim
-  - "data/synthetic_households.csv"
 
-mid_hh_file: "data/MiD2017_Haushalte_gefiltert_RStar71.csv"
-mid_persons_file: "data/MiD2017_Personen_gefiltert_RStar71.csv"
-mid_trips_file: "data/MiD2017_Wege_edited.csv"
-buildings_in_lowest_geography_with_weights_file: "data/houses_with_weights.csv"
+sample_size: 0.5 # 0.1 = 10% of the population
+n_closest_cells: 5 # Number of cell candidates to consider for main activity location
 
-shape_boundary_file: "data/shapes/boundaries_hannover.shp"
 
-# Leave empty to write no file, else e.g.: "output/full_population_frame.csv"
-population_analysis_output_file: "output/full_population_frame.csv"
+
+input_files:
+  expanded_households_files: # synthetic_households from PopSim
+    - "data/synthetic_households1.csv"
+
+
+  mid_hh_file: "data/MiD2017_Haushalte_gefiltert_RStar71.csv"
+  mid_persons_file: "data/MiD2017_Personen_gefiltert_RStar71.csv"
+  mid_trips_file: "data/MiD2017_Wege_edited.csv"
+  buildings_in_lowest_geography_with_weights_file: "data/houses_with_weights.csv"
+
+  shape_boundary_file: "data/shapes/Region Hannover.shp"
+  tt_matrix_cells_file: "data/shapes/tt_matrix_cells.shp"
+  tt_matrix_file: "data/tt_matrix.csv"
+
+# Leave empty to write no file, else e.g.: "full_population_frame.csv"
+output_files:
+  population_analysis_output_file: "full_population_frame.csv"
+  matsim_plans_file: "population.xml"
 
 id_columns:
   household_mid_id_column: "H_ID"
@@ -20,8 +32,16 @@ id_columns:
   # but a sortable leg_non_unique_id_column must be provided anyway.
   leg_non_unique_id_column: "W_ID"  # Expected to be sortable in the order of the trip legs
   leg_id_column: "HPW_ID" # Will be created if it doesn't exist and leg_non_unique_id_column is provided
+  tt_matrix_cell_id_column: "cell_id"
 
 # Declare only columns that are needed for processing (you can declare more, but that's a waste of memory and time)
+geography_columns:  # largest to smallest, as in the popsim settings
+- WELT
+- STAAT
+- STADTTLNR
+- BAUBLOCKNR
+lowest_level_geography: "BAUBLOCKNR"
+
 hh_columns:
 
 person_columns:
@@ -39,14 +59,23 @@ leg_columns:
 
 value_maps: # Values may usually be left empty if they don't exist in the data
   activities:
+    work: 1
+    business: 2
+    education: 3
+    shopping: 4
+    errands: 5
+    pick_up_drop_off: 6
+    leisure: 7
     home: 8
-    education: [3,11,12]
-    work: 1 # Work is considered the main activity, else education
-    shopping:
-    leisure:
-    errands:
-    accompany:
-    undefined:
+    return_journey: 9
+    other: 10
+    early_education: 11 # Preschool, Grundschule
+    daycare: 12 #Kiga, Kita
+    accompany_adult: 13
+    sports: 14
+    meetup: 15 # Visit friends
+    lessons: 16 # Music, dance, etc., not school
+    unspecified: 99
   car_availability:
     never: 3
   license:
@@ -63,8 +92,6 @@ value_maps: # Values may usually be left empty if they don't exist in the data
     ride: 3
     other:
     undefined:
-
-lowest_level_geography: "BAUBLOCKNR"
 
 average_activity_times_minutes:
   work: 30

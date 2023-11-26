@@ -1,79 +1,20 @@
-import os
-
 import random
-from shapely.geometry import Point
+
 import pandas as pd
 
-from utils import matsim_pipeline_setup
+from pipelines.common import helpers as h
+from utils import settings_values as s
 from utils.logger import logging
 
 logger = logging.getLogger(__name__)
-
-os.chdir(matsim_pipeline_setup.PROJECT_ROOT)
-settings = matsim_pipeline_setup.load_yaml_config('settings.yaml')
-
-# We commit the sin of using global (module-wide) variables because rules would have to declare them many times anyway, it's fine
-ID_COLUMNS = settings['id_columns']
-HH_COLUMNS = settings['hh_columns']
-P_COLUMNS = settings['person_columns']
-L_COLUMNS = settings['leg_columns']
-
-AVERAGE_ACTIVITY_TIMES_MINUTES = settings['average_activity_times_minutes']
-
-# Household-related constants
-HOUSEHOLD_MID_ID_COL = ID_COLUMNS['household_mid_id_column']
-HOUSEHOLD_POPSIM_ID_COL = ID_COLUMNS['household_popsim_id_column']
-
-# Person-related constants
-PERSON_ID_COL = ID_COLUMNS['person_id_column']
-PERSON_AGE_COL = P_COLUMNS['person_age']
-CAR_AVAIL_COL = P_COLUMNS['car_avail']
-HAS_LICENSE_COL = P_COLUMNS['has_license']
-
-# Leg-related constants
-LEG_ID_COL = ID_COLUMNS['leg_id_column']
-LEG_ACTIVITY_COL = L_COLUMNS['leg_target_activity']
-LEG_MAIN_MODE_COL = L_COLUMNS['leg_main_mode']
-LEG_START_TIME_COL = L_COLUMNS['leg_start_time']
-LEG_END_TIME_COL = L_COLUMNS['leg_end_time']
-LEG_DURATION_MINUTES_COL = L_COLUMNS['leg_duration_minutes']
-LEG_DISTANCE_COL = L_COLUMNS['leg_distance']
-
-# Value maps
-VALUE_MAPS = settings['value_maps']
-
-ACTIVITY_HOME = VALUE_MAPS['activities']['home']
-ACTIVITIES_EDUCATION = list(VALUE_MAPS['activities']['education'])
-ACTIVITY_WORK = VALUE_MAPS['activities']['work']
-ACTIVITY_SHOPPING = VALUE_MAPS['activities']['shopping']
-ACTIVITY_LEISURE = VALUE_MAPS['activities']['leisure']
-ACTIVITY_ACCOMPANY = VALUE_MAPS['activities']['accompany']
-ACTIVITY_ERRANDS = VALUE_MAPS['activities']['errands']
-ACTIVITY_UNDEFINED = VALUE_MAPS['activities']['undefined']
-
-CAR_NEVER = VALUE_MAPS['car_availability']['never']
-
-LICENSE_YES = VALUE_MAPS['license']['yes']
-LICENSE_NO = VALUE_MAPS['license']['no']
-LICENSE_UNKNOWN = VALUE_MAPS['license']['unknown']
-ADULT_OVER_16_PROXY = VALUE_MAPS['license']['adult_over_16_proxy']
-PERSON_UNDER_16 = VALUE_MAPS['license']['person_under_16']
-
-MODE_CAR = VALUE_MAPS['modes']['car']
-MODE_PT = VALUE_MAPS['modes']['pt']
-MODE_RIDE = VALUE_MAPS['modes']['ride']
-MODE_BIKE = VALUE_MAPS['modes']['bike']
-MODE_WALK = VALUE_MAPS['modes']['walk']
-MODE_UNDEFINED = VALUE_MAPS['modes']['undefined']
 
 
 def unique_household_id(row):
     """
     Household_ids are unique in MiD (or other dataset), but not in the expanded population.
-    PopSim provides a unique expanded household ID, we use that to create a unique household ID
-    including the MiD-identifier.
+    We simply use the MiD household id and the row index to create a unique household id.
     """
-    return f"{row[HOUSEHOLD_MID_ID_COL]}_{row[HOUSEHOLD_POPSIM_ID_COL]}"
+    return f"{row[s.HOUSEHOLD_MID_ID_COL]}_{row.name}"
 
 
 def unique_person_id(row):
@@ -81,14 +22,14 @@ def unique_person_id(row):
     Person_ids are unique in MiD (or other dataset), but not in the expanded population.
     Returns a unique person ID from the unique household ID and the person ID.
     """
-    return f"{row['unique_household_id']}_{row[PERSON_ID_COL]}"
+    return f"{row['unique_household_id']}_{row[s.PERSON_ID_COL]}"
 
 
 def unique_leg_id(row):
     """
     Returns a unique leg ID from the unique person ID and the leg ID.
     """
-    return f"{row['unique_person_id']}_{row[LEG_ID_COL]}"
+    return f"{row['unique_person_id']}_{row[s.LEG_ID_COL]}"
 
 
 def has_license_imputed(row):
@@ -97,32 +38,32 @@ def has_license_imputed(row):
     :param row: Row of the population frame
     :return: 0 if no license, 1 if license
     """
-    if row[HAS_LICENSE_COL] == LICENSE_NO:
-        logger.debug(f"Person {row[PERSON_ID_COL]} has no license.")
+    if row[s.HAS_LICENSE_COL] == s.LICENSE_NO:
+        logger.debug(f"Person {row[s.PERSON_ID_COL]} has no license.")
         return 0
-    elif row[HAS_LICENSE_COL] == LICENSE_YES:
-        if row[PERSON_AGE_COL] < 17:
+    elif row[s.HAS_LICENSE_COL] == s.LICENSE_YES:
+        if row[s.PERSON_AGE_COL] < 17:
             logger.debug(
-                f"Person {row[PERSON_ID_COL]} has a car driving license but is under 17 years old. Assuming no license.")
+                f"Person {row[s.PERSON_ID_COL]} has a car driving license but is under 17 years old. Assuming no license.")
             return 0
-        logger.debug(f"Person {row[PERSON_ID_COL]} has a license.")
+        logger.debug(f"Person {row[s.PERSON_ID_COL]} has a license.")
         return 1
-    elif row[HAS_LICENSE_COL] == LICENSE_UNKNOWN or ADULT_OVER_16_PROXY:
+    elif row[s.HAS_LICENSE_COL] == s.LICENSE_UNKNOWN or s.ADULT_OVER_16_PROXY:
         r = random.random()
-        if row[PERSON_AGE_COL] >= 17:
+        if row[s.PERSON_AGE_COL] >= 17:
             if r <= 0.94:
-                logger.debug(f"Adult {row[PERSON_ID_COL]} has unknown license status. Assuming license.")
+                logger.debug(f"Adult {row[s.PERSON_ID_COL]} has unknown license status. Assuming license.")
                 return 1
             else:
-                logger.debug(f"Adult {row[PERSON_ID_COL]} has unknown license status. Assuming no license.")
+                logger.debug(f"Adult {row[s.PERSON_ID_COL]} has unknown license status. Assuming no license.")
                 return 0
-        logger.debug(f"Child {row[PERSON_ID_COL]} has unknown license status. Assuming no license.")
+        logger.debug(f"Child {row[s.PERSON_ID_COL]} has unknown license status. Assuming no license.")
         return 0
-    elif row[HAS_LICENSE_COL] == PERSON_UNDER_16:
-        logger.debug(f"Child {row[PERSON_ID_COL]} has unknown license status. Assuming no license.")
+    elif row[s.HAS_LICENSE_COL] == s.PERSON_UNDER_16:
+        logger.debug(f"Child {row[s.PERSON_ID_COL]} has unknown license status. Assuming no license.")
         return 0
     else:
-        logger.warning(f"Person {row[PERSON_ID_COL]} has no license status entry, not even unknown. Assuming no license.")
+        logger.warning(f"Person {row[s.PERSON_ID_COL]} has no license status entry, not even unknown. Assuming no license.")
         return 0
 
 
@@ -151,11 +92,11 @@ def main_mode_imputed(row):
         (float('inf'), [0.26, 0.77], ["ride", "car", "pt"])
     ]
 
-    boundaries = boundaries_never_or_no_license if row[CAR_AVAIL_COL] == CAR_NEVER or row[
+    boundaries = boundaries_never_or_no_license if row[s.CAR_AVAIL_COL] == s.CAR_NEVER or row[
         has_license_imputed] == 0 else boundaries_otherwise
 
     for distance, probabilities, modes in boundaries:
-        if row[LEG_DISTANCE_COL] < distance:
+        if row[s.LEG_DISTANCE_COL] < distance:
             for prob, mode in zip(probabilities, modes):
                 if r <= prob:
                     return mode
@@ -179,104 +120,6 @@ def collapse_person_trip(group):
     return summary_df
 
 
-# def add_return_home_leg(group):
-#     """
-#     Add a home leg at the end of the day if the person doesn't already have one.
-#     The length of the activity and the leg duration are estimated.
-#     Requires is_main_activity() to be run first.
-#     :param group: Population frame grouped by person_id
-#     :return: edited group
-#     """
-#
-#     main_activity_index = group[group['is_main_activity'] == 1].index[
-#         0]  # There should only be one main activity but [0] just in case
-#     sum_durations_before_main = group.loc[:main_activity_index, LEG_DURATION_MINUTES_COL].sum()  # Minutes
-#     sum_durations_after_main = group.loc[main_activity_index:, LEG_DURATION_MINUTES_COL].sum()
-#
-#     # Estimate leg duration:
-#     average_leg_duration = group[LEG_DURATION_MINUTES_COL].mean()
-#     average_leg_duration_after_main = group.loc[main_activity_index:, LEG_DURATION_MINUTES_COL].mean()
-#     if average_leg_duration_after_main:
-#         home_leg_duration = average_leg_duration_after_main
-#     else:
-#         home_leg_duration = average_leg_duration
-#     # We assume the trip home is equal or longer than the trip to the main activity
-#     if sum_durations_before_main > sum_durations_after_main + home_leg_duration:
-#         # max() so the trip doesn't get crazy short
-#         home_leg_duration = max(sum_durations_before_main - sum_durations_after_main, average_leg_duration / 4)
-#
-#     # Estimate activity duration:
-#     last_leg = group.iloc[-1]
-#     try:
-#         activity_time = AVERAGE_ACTIVITY_TIMES_MINUTES[last_leg[LEG_ACTIVITY_COL]]
-#     except KeyError:
-#         activity_time = 60  # 1 hour default
-#
-#     # Create home_leg with the calculated duration
-#     home_leg = last_leg.copy()
-#     home_leg['LEG_ID'] = last_leg['LEG_ID'] + 1
-#     home_leg['LEG_START_TIME'] = last_leg['LEG_END_TIME'] + pd.Timedelta(minutes=activity_time)
-#     home_leg['LEG_END_TIME'] = home_leg['LEG_START_TIME'] + pd.Timedelta(minutes=home_leg_duration)
-#     home_leg['LEG_ACTIVITY'] = ACTIVITY_HOME
-#     home_leg['LEG_DURATION'] = home_leg_duration
-#     home_leg['LEG_DISTANCE'] = None
-#
-#     # Append the home leg to the group
-#     group = group.append(home_leg, ignore_index=True)
-#     return group
-
-def add_return_home_leg(df):
-    """
-    Add a home leg at the end of the day, if it doesn't exist. Alternative to change_last_leg_target_to_home().
-    The length of the activity and the leg duration are estimated.
-    Requires is_main_activity() to be run first.
-    :param df: Population frame
-    :return: DataFrame with added home legs
-    """
-    new_rows = []
-
-    for person_id, group in df.groupby(PERSON_ID_COL):
-        main_activity_index = group[group['is_main_activity'] == 1].index[0]  # There should only be one main activity
-        sum_durations_before_main = group.loc[:main_activity_index, LEG_DURATION_MINUTES_COL].sum()
-        sum_durations_after_main = group.loc[main_activity_index:, LEG_DURATION_MINUTES_COL].sum()
-
-        # Estimate leg duration:
-        average_leg_duration = group[LEG_DURATION_MINUTES_COL].mean()
-        average_leg_duration_after_main = group.loc[main_activity_index:, LEG_DURATION_MINUTES_COL].mean()
-        if average_leg_duration_after_main:
-            home_leg_duration = average_leg_duration_after_main
-        else:
-            home_leg_duration = average_leg_duration
-        # We assume the trip home is equal or longer than the trip to the main activity
-        if sum_durations_before_main > sum_durations_after_main + home_leg_duration:
-            # max() so the trip doesn't get crazy short
-            home_leg_duration = max(sum_durations_before_main - sum_durations_after_main, average_leg_duration / 4)
-
-        # Estimate activity duration:
-        last_leg = group.iloc[-1]
-        try:
-            activity_time = AVERAGE_ACTIVITY_TIMES_MINUTES[last_leg[LEG_ACTIVITY_COL]]
-        except KeyError:
-            activity_time = 60  # 1 hour default
-
-        # Create home_leg with the calculated duration
-        home_leg = last_leg.copy()
-        home_leg[LEG_ID_COL] = last_leg['LEG_ID'] + 1
-        home_leg["unique_leg_id"] = unique_leg_id(home_leg)
-        home_leg[LEG_START_TIME_COL] = last_leg[LEG_END_TIME_COL] + pd.Timedelta(minutes=activity_time)
-        home_leg[LEG_END_TIME_COL] = home_leg[LEG_START_TIME_COL] + pd.Timedelta(minutes=home_leg_duration)
-        home_leg[LEG_ACTIVITY_COL] = ACTIVITY_HOME
-        home_leg[LEG_DURATION_MINUTES_COL] = home_leg_duration
-        home_leg[LEG_DISTANCE_COL] = None  # Could also be estimated, but isn't necessary for the current use case
-
-        new_rows.append(home_leg)
-
-    new_rows_df = pd.DataFrame(new_rows)
-
-    # Sorting by person_id and leg_id_col will insert the new rows in the correct place
-    return pd.concat([df, new_rows_df]).sort_values([PERSON_ID_COL, LEG_ID_COL]).reset_index(drop=True)
-
-
 def is_main_activity(group):
     """
     Check if the leg is travelling to the main activity of the day.
@@ -293,14 +136,14 @@ def is_main_activity(group):
         return is_main_activity_series
 
     # If the person has more than one activity, the main activity is the first work activity
-    work_activity_rows = group[group[LEG_ACTIVITY_COL] == ACTIVITY_WORK]
+    work_activity_rows = group[group[s.LEG_ACTIVITY_COL] == s.ACTIVITY_WORK]
     if not work_activity_rows.empty:
         is_main_activity_series[work_activity_rows.index[0]] = 1
         assert is_main_activity_series.shape[0] == group.shape[0]
         return is_main_activity_series
 
     # If the person has no work activity, the main activity is the first education activity
-    education_activity_rows = group[group[LEG_ACTIVITY_COL].isin(ACTIVITIES_EDUCATION)]
+    education_activity_rows = group[group[s.LEG_ACTIVITY_COL].isin[s.ACTIVITY_EDUCATION, s.ACTIVITY_EARLY_EDUCATION, s.ACTIVITY_DAYCARE]]
     if not education_activity_rows.empty:
         is_main_activity_series[education_activity_rows.index[0]] = 1
         assert is_main_activity_series.shape[0] == group.shape[0]
@@ -318,65 +161,6 @@ def is_main_activity(group):
     return is_main_activity_series
 
 
-# def activity_duration_in_minutes(group):
-#     """
-#     Calculate the duration of each activity between the end of the previous leg and the start of the next leg.
-#     :param group: Population frame grouped by person_id
-#     :return: edited group with column "activity_duration"
-#     """
-#     previous_end_time = None  # Initialize previous end time
-#     logger.debug(f"Calculating activity durations for person {group[PERSON_ID_COL].iloc[0]}...")
-#     for idx, row in group.iterrows():
-#         if previous_end_time is None:
-#             # For the first row in each group, there's no previous leg's end time
-#             group.at[idx, "activity_duration_in_minutes"] = None
-#         else:
-#             # Convert string to datetime
-#             start_time = pd.to_datetime(row[LEG_START_TIME_COL], errors='coerce')
-#             end_time = pd.to_datetime(previous_end_time, errors='coerce')
-#
-#             if pd.isna(start_time) or pd.isna(end_time):
-#                 group.at[idx, "activity_duration_in_minutes"] = None
-#             else:
-#                 duration = (start_time - end_time).total_seconds() / 60
-#                 group.at[idx, "activity_duration_in_minutes"] = int(duration)
-#
-#         # Update previous_end_time for the next iteration
-#         previous_end_time = row.get(LEG_END_TIME_COL, None)
-#
-#     return group
-
-def activity_duration_minutes(group):
-    """
-    Calculate the duration of each activity between the end of the previous leg and the start of the next leg.
-    :param group: Population frame grouped by person_id
-    :return: Series with activity_duration in minutes
-    """
-    previous_end_time = None  # Initialize previous end time
-    activity_durations = []  # Initialize a list to store activity durations
-
-    logger.debug(f"Calculating activity durations for person {group[PERSON_ID_COL].iloc[0]}...")
-    for idx, row in group.iterrows():
-        if previous_end_time is None:
-            # For the first row in each group, there's no previous leg's end time
-            activity_durations.append(None)
-        else:
-            # Convert string to datetime
-            start_time = pd.to_datetime(row[LEG_START_TIME_COL], errors='coerce')
-            end_time = pd.to_datetime(previous_end_time, errors='coerce')
-
-            if pd.isna(start_time) or pd.isna(end_time):
-                activity_durations.append(None)
-            else:
-                duration = (start_time - end_time).total_seconds() / 60
-                activity_durations.append(int(duration))
-
-        # Update previous_end_time for the next iteration
-        previous_end_time = row.get(LEG_END_TIME_COL, None)
-
-    return pd.Series(activity_durations, index=group.index)
-
-
 def connected_activities(household_group):
     """
     Find connections between trip legs in a household.
@@ -386,13 +170,13 @@ def connected_activities(household_group):
     """
 
     connections = pd.Series(index=household_group.index, dtype='object')
-    if household_group[PERSON_ID_COL].nunique() == 1:
-        logger.debug(f"Household {household_group[HOUSEHOLD_MID_ID_COL].iloc[0]} has only one person. No connections.")
+    if household_group[s.PERSON_ID_COL].nunique() == 1:
+        logger.debug(f"Household {household_group[s.HOUSEHOLD_MID_ID_COL].iloc[0]} has only one person. No connections.")
         return connections
 
     for idx_a, person_a_leg in household_group.iterrows():
         for idx_b, person_b_leg in household_group.iterrows():
-            if person_a_leg[PERSON_ID_COL] == person_b_leg[PERSON_ID_COL] or idx_b <= idx_a:
+            if person_a_leg[s.PERSON_ID_COL] == person_b_leg[s.PERSON_ID_COL] or idx_b <= idx_a:
                 continue  # So we don't compare a leg to itself or to a leg it's already been compared to
 
             dist_match = check_distance(person_a_leg, person_b_leg)
@@ -410,16 +194,16 @@ def connected_activities(household_group):
                 connections.at[idx_b].append(person_a_leg['unique_leg_id'])
 
     if connections.isna().all():
-        logger.debug(f"No connections found for household {household_group[HOUSEHOLD_MID_ID_COL].iloc[0]}.")
+        logger.debug(f"No connections found for household {household_group[s.HOUSEHOLD_MID_ID_COL].iloc[0]}.")
     else:
-        logger.info(f"Connections found for household {household_group[HOUSEHOLD_MID_ID_COL].iloc[0]}")
+        logger.debug(f"Connections found for household {household_group[s.HOUSEHOLD_MID_ID_COL].iloc[0]}")
         logger.debug(f"{connections}")
     return connections
 
 
 def check_distance(leg_to_find, leg_to_compare):
-    distance_to_find = leg_to_find[LEG_DISTANCE_COL]
-    distance_to_compare = leg_to_compare[LEG_DISTANCE_COL]
+    distance_to_find = leg_to_find[s.LEG_DISTANCE_COL]
+    distance_to_compare = leg_to_compare[s.LEG_DISTANCE_COL]
 
     if pd.isnull(distance_to_find) or pd.isnull(distance_to_compare):
         return False
@@ -432,10 +216,10 @@ def check_distance(leg_to_find, leg_to_compare):
 
 def check_time(leg_to_find, leg_to_compare):
     # Using constant variables instead of strings
-    leg_begin_to_find = leg_to_find[LEG_START_TIME_COL]
-    leg_end_to_find = leg_to_find[LEG_END_TIME_COL]
-    leg_begin_to_compare = leg_to_compare[LEG_START_TIME_COL]
-    leg_end_to_compare = leg_to_compare[LEG_END_TIME_COL]
+    leg_begin_to_find = leg_to_find[s.LEG_START_TIME_COL]
+    leg_end_to_find = leg_to_find[s.LEG_END_TIME_COL]
+    leg_begin_to_compare = leg_to_compare[s.LEG_START_TIME_COL]
+    leg_end_to_compare = leg_to_compare[s.LEG_END_TIME_COL]
 
     time_range = pd.Timedelta(minutes=5)
 
@@ -456,41 +240,41 @@ def check_mode(leg_to_find, leg_to_compare):
     :param leg_to_compare:
     :return:
     """
-    mode_to_find = leg_to_find[LEG_MAIN_MODE_COL]
-    mode_to_compare = leg_to_compare[LEG_MAIN_MODE_COL]
+    mode_to_find = leg_to_find[s.LEG_MAIN_MODE_COL]
+    mode_to_compare = leg_to_compare[s.LEG_MAIN_MODE_COL]
 
     if mode_to_find == mode_to_compare:
         return True
 
-    mode_pairs = {(MODE_CAR, MODE_RIDE), (MODE_RIDE, MODE_CAR),
-                  (MODE_WALK, MODE_BIKE), (MODE_BIKE, MODE_WALK)}
+    mode_pairs = {(s.MODE_CAR, s.MODE_RIDE), (s.MODE_RIDE, s.MODE_CAR),
+                  (s.MODE_WALK, s.MODE_BIKE), (s.MODE_BIKE, s.MODE_WALK)}
     if (mode_to_find, mode_to_compare) in mode_pairs:
         return True
 
-    if MODE_UNDEFINED in [mode_to_find, mode_to_compare]:
+    if s.MODE_UNDEFINED in [mode_to_find, mode_to_compare]:
         # Assuming if one mode is undefined and the other is car, they pair as ride
-        return MODE_CAR in [mode_to_find, mode_to_compare]
+        return s.MODE_CAR in [mode_to_find, mode_to_compare]
 
     return False
 
 
 def check_activity(leg_to_find, leg_to_compare):
     compatible_activities = {
-        ACTIVITY_SHOPPING: [ACTIVITY_ERRANDS],
-        ACTIVITY_ERRANDS: [ACTIVITY_SHOPPING, ACTIVITY_LEISURE],
-        ACTIVITY_LEISURE: [ACTIVITY_ERRANDS, ACTIVITY_SHOPPING]}
+        s.ACTIVITY_SHOPPING: [s.ACTIVITY_ERRANDS],
+        s.ACTIVITY_ERRANDS: [s.ACTIVITY_SHOPPING, s.ACTIVITY_LEISURE],
+        s.ACTIVITY_LEISURE: [s.ACTIVITY_ERRANDS, s.ACTIVITY_SHOPPING]}
 
-    type_to_find = leg_to_find[LEG_ACTIVITY_COL]
-    type_to_compare = leg_to_compare[LEG_ACTIVITY_COL]
+    type_to_find = leg_to_find[s.LEG_ACTIVITY_COL]
+    type_to_compare = leg_to_compare[s.LEG_ACTIVITY_COL]
 
-    if type_to_find == type_to_compare or ACTIVITY_ACCOMPANY in [type_to_find, type_to_compare]:
+    if type_to_find == type_to_compare or s.ACTIVITY_ACCOMPANY_ADULT in [type_to_find, type_to_compare]:
         return True
-    elif ACTIVITY_UNDEFINED in [type_to_find, type_to_compare] or pd.isnull([type_to_find, type_to_compare]).any():
+    elif s.ACTIVITY_UNSPECIFIED in [type_to_find, type_to_compare] or pd.isnull([type_to_find, type_to_compare]).any():
         logger.warning("Activity Type Undefined")
         return False
     # Assuming trip home
-    elif (type_to_find == ACTIVITY_HOME and type_to_compare != ACTIVITY_WORK) or \
-            (type_to_compare == ACTIVITY_HOME and type_to_find != ACTIVITY_WORK):
+    elif (type_to_find == s.ACTIVITY_HOME and type_to_compare != s.ACTIVITY_WORK) or \
+            (type_to_compare == s.ACTIVITY_HOME and type_to_find != s.ACTIVITY_WORK):
         return True
 
     return type_to_compare in compatible_activities.get(type_to_find, [])
@@ -505,11 +289,11 @@ def is_protagonist(household_group):  # TODO: Finish this
     prot_series = pd.Series(0, index=household_group.index)
 
     if household_group['connected_activities'].isna().all():
-        logger.debug(f"No connections exist for household {household_group[HOUSEHOLD_MID_ID_COL].iloc[0]}.")
+        logger.debug(f"No connections exist for household {household_group[s.HOUSEHOLD_MID_ID_COL].iloc[0]}.")
         return prot_series
 
     # A person is the protagonist if their activity is the highest ranked in the connected leg
-    activities_ranked = [ACTIVITY_WORK, ACTIVITY_SHOPPING, ACTIVITY_LEISURE]
+    activities_ranked = [s.ACTIVITY_WORK, s.ACTIVITY_SHOPPING, s.ACTIVITY_LEISURE]
 
     highest_rank = 0
     for idx, row in household_group[household_group['connected_activities'].notna()].iterrows():
@@ -527,6 +311,10 @@ def is_protagonist(household_group):  # TODO: Finish this
     return prot_series
 
 
-
-
-
+def home_loc(row):
+    """
+    Convert the home location string to a Shapely Point.
+    :param row: Row of the household frame
+    :return: Shapely Point
+    """
+    return h.string_to_shapely_point(row['home_loc'])

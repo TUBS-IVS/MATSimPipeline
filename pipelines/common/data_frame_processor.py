@@ -1,7 +1,9 @@
-import logging
 from typing import Literal
 
 import pandas as pd
+
+from utils import settings_values as s
+from utils.logger import logging
 
 logger = logging.getLogger(__name__)
 
@@ -365,7 +367,7 @@ class DataFrameProcessor:
         else:
             logger.info("No columns were removed.")
 
-    def convert_time_columns_to_datetime(self, column_names: list) -> None:
+    def convert_time_to_datetime(self, column_names: list) -> None:
         """
         Convert specified columns to datetime; as time alone would not support arithmetic operations.
         The date part is set to a default date, otherwise the date part would be today's date,
@@ -373,8 +375,7 @@ class DataFrameProcessor:
         :param column_names: The names of the columns to convert.
         :return: The DataFrame with the specified columns converted to datetime.
         """
-        default_date = '2020-01-01'
-        # default_date = datetime.strptime(default_date, '%Y-%m-%d').date()
+        default_date = s.BASE_DATE
 
         for column_name in column_names:
             logger.info(f"Converting column '{column_name}' with {len(self.df)} total rows to datetime.")
@@ -385,6 +386,21 @@ class DataFrameProcessor:
 
             null_count = self.df[column_name].isnull().sum()  # Count NaT values, which are considered null
             logger.info(f"Number of failed conversions (NaT): {null_count}")
+
+    def convert_datetime_to_seconds(self, column_names: list) -> None:
+        """
+        Calculates the seconds from midnight of the reference day (2020-01-01).
+        Adds a new column with the column name + '_seconds' to the DataFrame.
+        :param column_names: The names of the columns to convert.
+        :return: The DataFrame with new columns containing the seconds from midnight.
+        """
+        default_date = '2020-01-01'
+        for column_name in column_names:
+            if pd.api.types.is_datetime64_any_dtype(self.df[column_name]):
+                logger.info(f"Converting column '{column_name}' with {len(self.df)} total rows to seconds.")
+                self.df[f"{column_name}_seconds"] = (self.df[column_name] - pd.Timestamp(default_date)).dt.total_seconds()
+            else:
+                logger.warning(f"Column '{column_name}' is not a datetime column.")
 
     def filter_out_rows(self, column_name, values_to_filter: list):
         """

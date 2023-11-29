@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 from utils import settings_values as s
+from pipelines.common import helpers as h
 from utils.logger import logging
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ class MainActivityLocator:
 
         self.target_crs = target_crs
         self.capacity_cells_df = None
+        self.located_main_activities_for_current_population = False
 
         self.perform_integrity_checks()
         self.match_crs(self.target_crs)
@@ -182,25 +184,36 @@ class MainActivityLocator:
 
         return cell_travel_times.iloc[closest_indices]
 
-    def prepare(self):
+    def update_capacity(self, cell_id, activity_type, count):
+        self.capacity_points_gdf.loc[(self.capacity_points_gdf['cell_id'] == cell_id) &
+                                     (self.capacity_points_gdf['activity_type'] == activity_type), 'total_capacity'] -= count
+
+    def distribute_persons_to_capacity_points(self):
+        h.distribute_by_weights(self.persons_gdf, self.capacity_points_gdf, "cell_ids")
+        """
+        Sub-distributes persons to individual capacity points within the same cell.
+        :return: 
+        """
+        pass
+
+    def locate_main_activities(self):
         self.assign_cells_to_persons()
         self.assign_cells_to_capacities()
         self.aggregate_supply_to_cells()
+        self.normalize_capacities()
 
-    def locate_main_activities(self):
-        # Calculate the potential of each cell
+        self.assign_persons_to_cells()
+        self.distribute_persons_to_capacity_points()
 
-        # Normalize the potentials
-
-        # Assign persons to cells
-
-        # Calculate the number of persons assigned to each cell
-        assigned_persons = self.calculate_assigned_persons()
-
-        return assigned_persons
+        return self.persons_gdf
 
     def locate_secondary_activities(self):
-        pass
+        """
+        Locate activity chains between two known activity locations.
+
+        :return:
+        """
+
 
     def replace_population(self, replace_with, replace_with_crs=None, replace_with_geometry_col=None):
         """

@@ -22,11 +22,11 @@ OUTPUT_FILES = settings['output_files']
 POPULATION_ANALYSIS_OUTPUT_FILE = OUTPUT_FILES['population_analysis_output_file']
 
 # Columns
-ID_COLUMNS = settings['id_columns']
-HH_COLUMNS = settings['hh_columns']
-P_COLUMNS = settings['person_columns']
-L_COLUMNS = settings['leg_columns']
-GEO_COLUMNS = settings['geography_columns']
+ID_COLUMNS = dict(settings['id_columns'])
+HH_COLUMNS = dict(settings['hh_columns'])
+P_COLUMNS = dict(settings['person_columns'])
+L_COLUMNS = dict(settings['leg_columns'])
+GEO_COLUMNS = dict(settings['geography_columns'])
 
 # Household-related columns
 HOUSEHOLD_MID_ID_COL = ID_COLUMNS['household_mid_id_column']

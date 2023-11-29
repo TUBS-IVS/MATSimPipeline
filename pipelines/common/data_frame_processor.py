@@ -2,6 +2,7 @@ from typing import Literal
 
 import pandas as pd
 
+from pipelines.common import helpers as h
 from utils import settings_values as s
 from utils.logger import logging
 
@@ -42,7 +43,7 @@ class DataFrameProcessor:
 
         self._id_column = value
 
-    def load_df_from_csv(self, csv_path, if_df_exists: Literal['replace', 'concat'] = 'concat') -> None:
+    def load_df_from_csv(self, csv_path, if_df_exists: Literal['replace', 'concat'] = 'concat', use_cols=None) -> None:
         """
         Initializes the DataFrame from a CSV file.
 
@@ -51,17 +52,8 @@ class DataFrameProcessor:
         - if_df_exists: str, whether to replace the existing DataFrame or concatenate to it.
         """
         try:
-            new_df = pd.read_csv(csv_path)
-            try:
-                test = new_df[self.id_column] if self.id_column else None  # Test if the correct separator was used
-            except (KeyError, ValueError):
-                logger.warning(f"ID column '{self.id_column}' not found in {csv_path}, trying to read as ';' separated file...")
-                new_df = pd.read_csv(csv_path, sep=';')
-                try:
-                    test = new_df[self.id_column] if self.id_column else None
-                except (KeyError, ValueError):
-                    logger.error(f"ID column '{self.id_column}' still not found in {csv_path}, verify column name and try again.")
-                    raise
+            new_df = h.read_csv(csv_path, self.id_column, use_cols=use_cols)
+
             if if_df_exists == 'replace':
                 self.df = new_df
             elif if_df_exists == 'concat':
@@ -127,39 +119,36 @@ class DataFrameProcessor:
         # Merge the dataframes on the specified id_column
         self.df = pd.merge(self.df, source_df[columns_to_add], on=id_column, how='left')
 
-    def add_csv_data_on_id(self, csv_path, columns_to_add, overwrite_existing=False, id_column=None,
+    def add_csv_data_on_id(self, csv_path, columns_to_add=None, overwrite_existing=False, id_column=None,
                            drop_duplicates_from_source=True, delete_later=False) -> None:
         """
         Load specified columns from a given CSV file and add them to the primary DataFrame.
 
         Parameters:
         - csv_path: str, path to the CSV file.
-        - columns_to_add: list of str, the columns to fetch from the CSV.
+        - columns_to_add: list of str, the columns to fetch from the CSV. If None, all columns are fetched.
         - overwrite_existing: bool, whether to overwrite columns that already exist. Default is False.
         - id_column: str, the column to use as the ID. Default is the id_column specified in the constructor.
         - add_prefix: str, optional, prefix to add to the column names from the CSV.
         - drop_duplicates_from_source: bool, whether to drop duplicates based on id_column in the CSV. Default is True.
         """
+        if columns_to_add is not None:
+            if not isinstance(columns_to_add, list):
+                try:
+                    columns_to_add = list(columns_to_add.values())
+                except AttributeError:
+                    raise ValueError("columns_to_add should be a list or convertible to a list.")
 
-        if not isinstance(columns_to_add, list):
-            try:
-                columns_to_add = list(columns_to_add.values())
-            except AttributeError:
-                raise ValueError("columns_to_add should be a list or convertible to a list.")
+            if id_column is None:
+                id_column = self.id_column
 
-        if id_column is None:
-            id_column = self.id_column
-        try:
-            if id_column is None:  # If id_column is still None, raise an error
-                raise ValueError("id_column is None. Please specify an ID column to use.")
+                if id_column is None:  # If id_column is still None, raise an error
+                    raise ValueError("id_column is None. Please specify an ID column to use.")
 
             if id_column not in columns_to_add:
                 columns_to_add.append(id_column)
-            try:
-                source_df = pd.read_csv(csv_path, usecols=columns_to_add)
-            except (ValueError, KeyError):
-                logger.warning(f"Failed to load CSV data from {csv_path} with default separator. Trying ';'.")
-                source_df = pd.read_csv(csv_path, usecols=columns_to_add, sep=';')
+        try:
+            source_df = h.read_csv(csv_path, id_column, use_cols=columns_to_add)
 
             if delete_later:
                 self.columns_to_delete.update(columns_to_add)

@@ -28,82 +28,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
     def __init__(self, df: pd.DataFrame = None, id_column: str = None):
         super().__init__(df, id_column)
 
-    def distribute_by_weights(self, weights_df, external_id_column, cut_missing_ids=False):
-        """
-        Distribute data points from `weights_df` across the population dataframe based on weights (e.g. assign buildings to households).
-
-        The function modifies the internal population dataframe by appending the point IDs from the weights dataframe
-        based on their weights and the count of each ID in the population dataframe.
-
-        Args:
-            weights_df (pd.DataFrame): DataFrame containing the ID of the geography, point IDs, and their weights.
-            Must contain all geography IDs in the population dataframe. Is allowed to contain more (they will be skipped).
-            external_id_column (str): The column name of the ID in the weights dataframe (e.g. 'BLOCK_NR').
-            cut_missing_ids (bool): If True, IDs in the population dataframe that are not in the weights dataframe are cut from the population dataframe.
-        """
-        logger.info("Starting distribution by weights...")
-
-        if not self.df[external_id_column].isin(weights_df[external_id_column]).all():
-            if cut_missing_ids:
-                logger.warning(f"Not all geography IDs in the population dataframe are in the weights dataframe. "
-                               f"Cutting missing IDs: {set(self.df[external_id_column]) - set(weights_df[external_id_column])}")
-                self.df = self.df[self.df[external_id_column].isin(weights_df[external_id_column])]
-            else:
-                raise ValueError(f"Not all geography IDs in the population dataframe are in the weights dataframe. "
-                                 f"Missing IDs: {set(self.df[external_id_column]) - set(weights_df[external_id_column])}")
-
-        # Count of each ID in population_df
-        id_counts = self.df[external_id_column].value_counts().reset_index()
-        id_counts.columns = [external_id_column, '_processing_count']
-        logger.info(f"Computed ID counts for {len(id_counts)} unique IDs.")
-
-        # Merge with weights_df
-        weights_df = pd.merge(weights_df, id_counts, on=external_id_column, how='left')
-
-        def distribute_rows(group):
-            total_count = group['_processing_count'].iloc[0]
-            if total_count == 0 or pd.isna(total_count):
-                logger.debug(f"Geography ID {group[external_id_column].iloc[0]} is not in the given dataframe, "
-                             f"likely because no person/activity etc. exists there. Skipping distribution for this ID.")
-                return []
-            # Compute distribution
-            group['_processing_repeat_count'] = (group['ewzahl'] / group['ewzahl'].sum()) * total_count
-            group['_processing_int_part'] = group['_processing_repeat_count'].astype(int)
-            group['_processing_frac_part'] = group['_processing_repeat_count'] - group['_processing_int_part']
-
-            # Distribute remainder
-            remainder = total_count - group['_processing_int_part'].sum()
-            assert remainder >= 0 and remainder % 1 == 0, f"Remainder is {remainder}, should be a positive integer."
-            remainder = int(remainder)
-            top_indices = group['_processing_frac_part'].nlargest(remainder).index
-            group.loc[top_indices, '_processing_int_part'] += 1
-
-            # Expand rows based on int_part
-            expanded = []
-            for _, row in group.iterrows():
-                expanded.extend([row.to_dict()] * int(row['_processing_int_part']))
-            return expanded
-
-        expanded_rows = []
-        for _, group in weights_df.groupby(external_id_column):
-            expanded_rows.extend(distribute_rows(group))
-
-        expanded_weights_df = pd.DataFrame(expanded_rows).drop(
-            columns=['_processing_count', '_processing_repeat_count', '_processing_int_part', '_processing_frac_part'])
-        logger.info(f"Generated expanded weights DataFrame with {len(expanded_weights_df)} rows.")
-        if len(expanded_weights_df) != self.df.shape[0]:
-            raise ValueError(f"Expanded weights DataFrame has {len(expanded_weights_df)} rows, "
-                             f"but the population DataFrame has {self.df.shape[0]} rows.")
-
-        # Add a sequence column to both dataframes to prevent cartesian product on merge
-        self.df['_processing_seq'] = self.df.groupby(external_id_column).cumcount()
-        expanded_weights_df['_processing_seq'] = expanded_weights_df.groupby(external_id_column).cumcount()
-
-        # Merge using the ID column and the sequence
-        self.df = pd.merge(self.df, expanded_weights_df, on=[external_id_column, '_processing_seq'],
-                           how='left').drop(columns='_processing_seq')
-
-        logger.info("Completed distribution by weights.")
+    def distribute_by_weights(self, weights_df: pd.DataFrame, cell_id_col: str, cut_missing_ids: bool = False):
+        self.df = h.distribute_by_weights(self.df, weights_df, cell_id_col, cut_missing_ids)
 
     def write_plans_to_matsim_xml(self):
         """
@@ -270,7 +196,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
         self.df['activity_translated_string'] = self.df[s.LEG_ACTIVITY_COL].map(activity_translation)
         logger.info(f"Translated activities.")
 
-    def write_stats(self):
+    def write_stats(self, stat_by_columns: list = None):
         logger.info(f"Exporting stats...")
 
         stat_by_columns = [col for col in s.GEO_COLUMNS if col in self.df.columns]
@@ -278,13 +204,13 @@ class PopulationFrameProcessor(DataFrameProcessor):
         # stat_by_columns.extend(["unique_household_id", "unique_person_id"])  # Very large files
         # non_stat_by_columns = [col for col in self.df.columns if col not in stat_by_columns]
 
-        for geo_col in stat_by_columns:
-            stats_df = self.df.groupby(geo_col).describe()
+        for col in stat_by_columns:
+            stats_df = self.df.groupby(col).describe()
 
             # Flattening MultiIndex columns
             stats_df.columns = ['_'.join(col).strip() for col in stats_df.columns]
 
-            file_path = f"{matsim_pipeline_setup.OUTPUT_DIR}/{geo_col}_stats.csv"
+            file_path = f"{matsim_pipeline_setup.OUTPUT_DIR}/{col}_stats.csv"
             stats_df.to_csv(file_path)
             logger.info(f"Exported stats to {file_path}.")
 

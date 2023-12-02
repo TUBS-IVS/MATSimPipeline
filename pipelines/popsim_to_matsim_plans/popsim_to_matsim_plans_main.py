@@ -138,7 +138,7 @@ def popsim_to_matsim_plans_main():
     # Remove cols that were used by rules, to keep the df clean
     # population.remove_columns_marked_for_later_deletion()
 
-    #population.vary_times_by_person("unique_person_id", [s.LEG_START_TIME_COL, s.LEG_END_TIME_COL])
+    # population.vary_times_by_person("unique_person_id", [s.LEG_START_TIME_COL, s.LEG_END_TIME_COL])
 
     # Write plans to MATSim XML format
     pop_output_file = population.write_plans_to_matsim_xml()

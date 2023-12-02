@@ -1,12 +1,16 @@
 #  Helper functions
 import gzip
 import os
+import random
 import re
 import shutil
 
+import matplotlib.pyplot as plt
 import pandas as pd
+import seaborn as sns
 from shapely import Point
 
+from utils import matsim_pipeline_setup as m
 from utils import settings_values as s
 from utils.logger import logging
 
@@ -68,7 +72,7 @@ def create_unique_leg_ids():
     logger.info(f"Created unique leg ids in {s.MiD_TRIPS_FILE}.")
 
 
-def read_csv(csv_path, test_col, use_cols=None):
+def read_csv(csv_path: str, test_col: str = None, use_cols: list = None):
     """
     Read a csv file with unknown separator and return a dataframe.
     :param csv_path: Path to csv file.
@@ -77,7 +81,8 @@ def read_csv(csv_path, test_col, use_cols=None):
     """
     try:
         df = pd.read_csv(csv_path, sep=',', usecols=use_cols)
-        test = df[test_col]
+        if test_col:
+            test = df[test_col]
     except (KeyError, ValueError):
         logger.info(f"ID column '{test_col}' not found in {csv_path}, trying to read as ';' separated file...")
         df = pd.read_csv(csv_path, sep=';', usecols=use_cols)
@@ -134,7 +139,8 @@ def find_outer_boundary(gdf, method='convex_hull'):
     return outer_boundary
 
 
-def distribute_by_weights(self, weights_df, external_id_column, cut_missing_ids=False):
+def distribute_by_weights(data_to_distribute: pd.DataFrame, weighted_points_in_cells: pd.DataFrame, external_id_column,
+                          cut_missing_ids=False):
     """
     Distribute data points from `weights_df` across the population dataframe based on weights (e.g. assign buildings to households).
 
@@ -142,29 +148,31 @@ def distribute_by_weights(self, weights_df, external_id_column, cut_missing_ids=
     based on their weights and the count of each ID in the population dataframe.
 
     Args:
-        weights_df (pd.DataFrame): DataFrame containing the ID of the geography, point IDs, and their weights.
+        data_to_distribute (pd.DataFrame): DataFrame containing the data on cell level to distribute.
+        weighted_points_in_cells (pd.DataFrame): DataFrame containing the ID of the geography, point IDs, and their weights.
         Must contain all geography IDs in the population dataframe. Is allowed to contain more (they will be skipped).
         external_id_column (str): The column name of the ID in the weights dataframe (e.g. 'BLOCK_NR').
         cut_missing_ids (bool): If True, IDs in the population dataframe that are not in the weights dataframe are cut from the population dataframe.
     """
     logger.info("Starting distribution by weights...")
 
-    if not self.df[external_id_column].isin(weights_df[external_id_column]).all():
+    if not data_to_distribute[external_id_column].isin(weighted_points_in_cells[external_id_column]).all():
         if cut_missing_ids:
             logger.warning(f"Not all geography IDs in the population dataframe are in the weights dataframe. "
-                           f"Cutting missing IDs: {set(self.df[external_id_column]) - set(weights_df[external_id_column])}")
-            self.df = self.df[self.df[external_id_column].isin(weights_df[external_id_column])]
+                           f"Cutting missing IDs: {set(data_to_distribute[external_id_column]) - set(weighted_points_in_cells[external_id_column])}")
+            data_to_distribute = data_to_distribute[
+                data_to_distribute[external_id_column].isin(weighted_points_in_cells[external_id_column])].copy()
         else:
             raise ValueError(f"Not all geography IDs in the population dataframe are in the weights dataframe. "
-                             f"Missing IDs: {set(self.df[external_id_column]) - set(weights_df[external_id_column])}")
+                             f"Missing IDs: {set(data_to_distribute[external_id_column]) - set(weighted_points_in_cells[external_id_column])}")
 
     # Count of each ID in population_df
-    id_counts = self.df[external_id_column].value_counts().reset_index()
+    id_counts = data_to_distribute[external_id_column].value_counts().reset_index()
     id_counts.columns = [external_id_column, '_processing_count']
     logger.info(f"Computed ID counts for {len(id_counts)} unique IDs.")
 
     # Merge with weights_df
-    weights_df = pd.merge(weights_df, id_counts, on=external_id_column, how='left')
+    weighted_points_in_cells = pd.merge(weighted_points_in_cells, id_counts, on=external_id_column, how='left')
 
     def distribute_rows(group):
         total_count = group['_processing_count'].iloc[0]
@@ -191,23 +199,135 @@ def distribute_by_weights(self, weights_df, external_id_column, cut_missing_ids=
         return expanded
 
     expanded_rows = []
-    for _, group in weights_df.groupby(external_id_column):
+    for _, group in weighted_points_in_cells.groupby(external_id_column):
         expanded_rows.extend(distribute_rows(group))
 
     expanded_weights_df = pd.DataFrame(expanded_rows).drop(
         columns=['_processing_count', '_processing_repeat_count', '_processing_int_part', '_processing_frac_part'])
     logger.info(f"Generated expanded weights DataFrame with {len(expanded_weights_df)} rows.")
-    if len(expanded_weights_df) != self.df.shape[0]:
+    if len(expanded_weights_df) != data_to_distribute.shape[0]:
         raise ValueError(f"Expanded weights DataFrame has {len(expanded_weights_df)} rows, "
-                         f"but the population DataFrame has {self.df.shape[0]} rows.")
+                         f"but the population DataFrame has {data_to_distribute.shape[0]} rows.")
 
     # Add a sequence column to both dataframes to prevent cartesian product on merge
-    self.df['_processing_seq'] = self.df.groupby(external_id_column).cumcount()
+    data_to_distribute['_processing_seq'] = data_to_distribute.groupby(external_id_column).cumcount()
     expanded_weights_df['_processing_seq'] = expanded_weights_df.groupby(external_id_column).cumcount()
 
     # Merge using the ID column and the sequence
-    self.df = pd.merge(self.df, expanded_weights_df, on=[external_id_column, '_processing_seq'],
-                       how='left').drop(columns='_processing_seq')
+    data_to_distribute = pd.merge(data_to_distribute, expanded_weights_df, on=[external_id_column, '_processing_seq'],
+                                  how='left').drop(columns='_processing_seq')
 
     logger.info("Completed distribution by weights.")
-    return self.df
+    return data_to_distribute
+
+
+def random_point_in_polygon(polygon):
+    if not polygon.is_valid or polygon.is_empty:
+        raise ValueError("Invalid polygon")
+
+    min_x, min_y, max_x, max_y = polygon.bounds
+
+    while True:
+        random_point = Point(random.uniform(min_x, max_x), random.uniform(min_y, max_y))
+        if polygon.contains(random_point):
+            return random_point
+
+
+def plot_column(df, column, title=None, xlabel=None, ylabel='Frequency', plot_type=None, figsize=(10, 6), save_name=None):
+    """
+    Plots a column from a pandas DataFrame.
+
+    Parameters:
+    df (pd.DataFrame): DataFrame containing the data.
+    column (str): Column name to plot.
+    title (str, optional): Title of the plot. Defaults to None, which will use the column name.
+    xlabel (str, optional): Label for the x-axis. Defaults to None, which will use the column name.
+    ylabel (str, optional): Label for the y-axis. Defaults to 'Frequency'.
+    plot_type (str, optional): Type of plot (hist, bar, box, violin, strip, swarm, point). If None, the plot type is inferred from the column type. Defaults to None.
+    figsize (tuple, optional): Size of the figure (width, height). Defaults to (10, 6).
+    save_name (str, optional): Name with file extension to save the figure. If None, the figure is not saved. Defaults to None.
+    """
+    # Infer plot type if not specified
+    if plot_type is None:
+        if pd.api.types.is_numeric_dtype(df[column]):
+            plot_type = 'hist'
+        elif pd.api.types.is_datetime64_any_dtype(df[column]):
+            plot_type = 'hist'
+        else:
+            plot_type = 'bar'
+
+    # Set plot title and labels
+    if title is None:
+        title = f'Distribution of {column}'
+    if xlabel is None:
+        xlabel = column
+
+    # Create the plot
+    plt.figure(figsize=figsize)
+    if plot_type == 'hist':
+        sns.histplot(df[column].dropna(), kde=True)  # KDE for numeric and datetime
+    elif plot_type == 'bar':
+        sns.countplot(x=column, data=df)
+    elif plot_type == 'box':
+        sns.boxplot(x=column, data=df)
+    elif plot_type == 'violin':
+        sns.violinplot(x=column, data=df)
+    elif plot_type == 'strip':
+        sns.stripplot(x=column, data=df)
+    elif plot_type == 'swarm':
+        sns.swarmplot(x=column, data=df)
+    elif plot_type == 'point':
+        sns.pointplot(x=column, data=df)
+    else:
+        raise ValueError("Unsupported plot type. Use 'hist' or 'bar'.")
+
+    # Set title and labels
+    plt.title(title)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+
+    # Save the plot if a save path is provided
+    if save_name:
+        save_name = os.path.join(m.OUTPUT_DIR, save_name)
+        plt.savefig(save_name, bbox_inches='tight')
+
+    else:
+        plt.show()
+
+
+def calculate_condition_likelihoods(df, filter_col, target_col) -> dict:
+    """
+    Calculate the likelihood of a target condition being true under different conditions.
+    :param df: DataFrame containing the relevant data.
+    :param filter_col: Given the unique values in this column,
+    :param target_col: calculate the likelihood of each target condition.
+    :return: Dictionary with likelihoods for each unique value in the filter column.
+    """
+    likelihoods = {}
+
+    for condition in df[filter_col].unique():
+        likelihood = df[df[filter_col] == condition][target_col].mean()
+        likelihoods[condition] = likelihood
+
+    logger.info(f"Calculated likelihoods for {len(likelihoods)} unique values in {filter_col}.")
+    logger.info(f"{likelihoods}")
+    return likelihoods
+
+def calculate_value_frequencies_df(df, filter_col, target_col)->pd.DataFrame:
+    """
+    Calculate the normalized frequency of each target value for each unique value in the filter column.
+    :param df:
+    :param filter_col: Given all unique values in this column,
+    :param target_col: calculate the frequency of each target value.
+    :return:
+    """
+    # Create a grouped DataFrame
+    grouped = df.groupby([filter_col, target_col]).size().unstack(fill_value=0)
+
+    # Normalize the counts to get frequencies
+    frequencies_df = grouped.div(grouped.sum(axis=1), axis=0)
+
+    logger.info(f"Calculated frequencies for {len(frequencies_df)} unique values in {filter_col}.")
+    logger.info(f"{frequencies_df}")
+
+    return frequencies_df

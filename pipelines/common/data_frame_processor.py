@@ -52,7 +52,7 @@ class DataFrameProcessor:
         - if_df_exists: str, whether to replace the existing DataFrame or concatenate to it.
         """
         try:
-            new_df = h.read_csv(csv_path, self.id_column, use_cols=use_cols)
+            new_df = h.read_csv(csv_path, use_cols=use_cols)
 
             if if_df_exists == 'replace':
                 self.df = new_df
@@ -64,18 +64,20 @@ class DataFrameProcessor:
             logger.error(f"Failed to load DataFrame from {csv_path}: {e}")
             raise
 
-    def add_df_on_id(self, source_df, columns_to_add, overwrite_existing=False, id_column=None,
+    def add_df_on_id(self, source_df, columns_to_add=None, overwrite_existing=False, id_column=None,
                      drop_duplicates_from_source=True) -> None:
         """
         Adds specified columns from a source DataFrame to the current DataFrame based on an ID.
 
         Parameters:
         - source_df: DataFrame, the source dataframe.
-        - columns_to_add: list of str, the columns to fetch and add to df.
+        - columns_to_add: list of str, the columns to fetch and add to df. If None, all columns are fetched.
         - overwrite_existing: bool, whether to overwrite columns that already exist. Default is True.
         - drop_duplicates_from_source: bool, whether to drop duplicates based on id_column in source_df. Default is True.
             If False, additional rows will be added to the DataFrame if source_df contains duplicate IDs.
         """
+        if columns_to_add is None:
+            columns_to_add = source_df.columns.tolist()
 
         if not isinstance(columns_to_add, list):
             try:
@@ -151,107 +153,14 @@ class DataFrameProcessor:
             source_df = h.read_csv(csv_path, id_column, use_cols=columns_to_add)
 
             if delete_later:
+                if columns_to_add is None:
+                    columns_to_add = source_df.columns.tolist()
                 self.columns_to_delete.update(columns_to_add)
 
             self.add_df_on_id(source_df, columns_to_add, overwrite_existing, id_column, drop_duplicates_from_source)
         except Exception as e:
             logger.error(f"Failed to load and add CSV data from {csv_path}: {e}")
             raise
-
-    # def safe_apply_rules(self, rules, csv_path=None, id_col=None, groupby_column=None):
-    #     """
-    #     Applies a set of custom rules to the DataFrame stored in this instance. Adds the results as new columns.
-    #     If a rule references missing columns, those columns are fetched from a secondary data source (e.g. MiD) and the rules are reapplied.
-    #
-    #     Parameters:
-    #     - rules (list of functions): A list of rule functions. Each rule function must return a tuple of (result, missing_columns).
-    #     - csv_path (str, optional): Path to the CSV file containing the external data source (e.g. MiD).
-    #     - id_col (str, optional): ID on which external data is added. If not provided, the id_column specified in the constructor is used.
-    #     - groupby_column (str, optional): Column to group by before applying rules. If not provided, rules are applied per row.
-    #
-    #     Notes:
-    #     - Could run at different places in the pipeline and with different rule sets.
-    #     """
-    #
-    #     def apply_rules(data, groupby_column, rule_func):
-    #         try:
-    #             if groupby_column:
-    #                 results = []
-    #                 missing_columns_list = []
-    #                 skip_more_logs = False
-    #
-    #                 for _, group in data.groupby(groupby_column):
-    #                     result, missing_columns = rule_func(group)  # TODO: might consider .apply for performance
-    #                     if result is not None:  # Allow None to be returned e.g. when just checking for missing columns
-    #                         if len(result) != len(group):
-    #                             if not skip_more_logs:
-    #                                 logger.error(
-    #                                     f"Rule '{rule_func.__name__}' returned DataFrame with incorrect number of rows. Skipping its results."
-    #                                 )
-    #                             skip_more_logs = True
-    #                             continue
-    #                         if not result.index.equals(group.index):
-    #                             if not skip_more_logs:
-    #                                 logger.error(
-    #                                     f"Rule '{rule_func.__name__}' returned DataFrame with incorrect index. Skipping its results."
-    #                                 )
-    #                             skip_more_logs = True
-    #                             continue
-    #                     results.append(result)
-    #                     missing_columns_list.extend(missing_columns)
-    #             else:
-    #                 results, missing_columns_list = zip(*data.apply(rule_func, axis=1))
-    #         except Exception as e:
-    #             logger.error(f"Failed to apply rule '{rule_func.__name__}': {e}")
-    #             return None, []
-    #
-    #         return results, list(set().union(*missing_columns_list))
-    #
-    #     all_missing_columns = set()
-    #
-    #     if csv_path:
-    #         # First pass: identify all missing columns
-    #         for rule_func in rules:
-    #             logger.info(f"Collecting missing columns for rule '{rule_func.__name__}'")
-    #             _, rule_missing_columns = apply_rules(self.df, groupby_column, rule_func)
-    #             all_missing_columns.update(rule_missing_columns)
-    #
-    #             if rule_missing_columns:
-    #                 logger.info(
-    #                     f"Rule '{rule_func.__name__}' identified missing columns: {', '.join(rule_missing_columns)}")
-    #
-    #         # Fetch all missing columns at once
-    #         if all_missing_columns:
-    #             logger.info(f"Fetching missing columns: {', '.join(all_missing_columns)}")
-    #             self.add_csv_data_on_id(csv_path, list(all_missing_columns), overwrite_existing=False, id_column=id_col)
-    #             self.added_missing_columns.update(all_missing_columns)  # Keep track of added columns for optional removal later
-    #
-    #     # Second pass: apply the rules now that all columns are present
-    #     for rule_func in rules:
-    #         logger.info(f"Applying rule '{rule_func.__name__}'")
-    #         results, rule_missing_columns = apply_rules(self.df, groupby_column, rule_func)
-    #
-    #         if not results:
-    #             logger.error(f"Rule '{rule_func.__name__}' returned None for all rows and was skipped.")
-    #             continue
-    #
-    #         if rule_missing_columns:
-    #             logger.error(
-    #                 f"Rule '{rule_func.__name__}' identified missing columns in second pass and was skipped: {', '.join(rule_missing_columns)}")
-    #             continue
-    #
-    #         if groupby_column:
-    #             for result_df in results:
-    #                 result_df.columns = [f"{col}_{rule_func.__name__}" for col in
-    #                                      result_df.columns]  # TODO: decide if should overwrite existing columns
-    #                 self.df = self.df.join(result_df)
-    #             null_mask = self.df[[col for col in self.df.columns if rule_func.__name__ in col]].isnull().any(axis=1)
-    #         else:
-    #             self.df[rule_func.__name__] = results
-    #             null_mask = self.df[rule_func.__name__].isnull()
-    #
-    #         if null_mask.any():
-    #             logger.warning(f"The rule '{rule_func.__name__}' returned None for {null_mask.sum()} rows.")
 
     def apply_row_wise_rules(self, rules) -> None:
         """
@@ -281,8 +190,6 @@ class DataFrameProcessor:
         Applies a set of custom group-wise rules to the DataFrame stored in this instance.
         Each rule modifies the group and returns it. The modified groups are then merged back into the original DataFrame.
         """
-        # Store the original shape to compare after modifications if safe_apply is True
-        original_shape = self.df.shape
 
         for rule_func in rules:
             logger.info(f"Applying group-wise rule '{rule_func.__name__}' grouped on column '{groupby_column}'")
@@ -290,17 +197,6 @@ class DataFrameProcessor:
                 # The rule function is expected to return the modified group with the same index
                 modified_groups = self.df.groupby(groupby_column).apply(rule_func)
 
-                # if safe_apply:
-                #     if modified_groups.index.size != original_shape[0]:
-                #         raise ValueError(
-                #             f"The rule '{rule_func.__name__}' returned a group with a different number of rows than the original DataFrame.")
-                #
-                #     if modified_groups.shape[1] < original_shape[1]:
-                #         raise ValueError(
-                #             f"The rule '{rule_func.__name__}' returned a group with fewer columns than the original DataFrame.")
-
-                # self.df = pd.concat(modified_groups, ignore_index=True)
-                # self.df = modified_groups
                 if modified_groups.shape[0] != self.df.shape[0]:
                     raise ValueError(
                         f"The rule '{rule_func.__name__}' returned a group with a different number of rows than the original DataFrame.")

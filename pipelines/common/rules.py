@@ -32,40 +32,6 @@ def unique_leg_id(row):
     return f"{row['unique_person_id']}_{row[s.LEG_ID_COL]}"
 
 
-def has_license_imputed(row):
-    """
-    Impute license status based on age and statistical probabilities.
-    :param row: Row of the population frame
-    :return: 0 if no license, 1 if license
-    """
-    if row[s.HAS_LICENSE_COL] == s.LICENSE_NO:
-        logger.debug(f"Person {row[s.PERSON_ID_COL]} has no license.")
-        return 0
-    elif row[s.HAS_LICENSE_COL] == s.LICENSE_YES:
-        if row[s.PERSON_AGE_COL] < 17:
-            logger.debug(
-                f"Person {row[s.PERSON_ID_COL]} has a car driving license but is under 17 years old. Assuming no license.")
-            return 0
-        logger.debug(f"Person {row[s.PERSON_ID_COL]} has a license.")
-        return 1
-    elif row[s.HAS_LICENSE_COL] == s.LICENSE_UNKNOWN or s.ADULT_OVER_16_PROXY:
-        r = random.random()
-        if row[s.PERSON_AGE_COL] >= 17:
-            if r <= 0.94:
-                logger.debug(f"Adult {row[s.PERSON_ID_COL]} has unknown license status. Assuming license.")
-                return 1
-            else:
-                logger.debug(f"Adult {row[s.PERSON_ID_COL]} has unknown license status. Assuming no license.")
-                return 0
-        logger.debug(f"Child {row[s.PERSON_ID_COL]} has unknown license status. Assuming no license.")
-        return 0
-    elif row[s.HAS_LICENSE_COL] == s.PERSON_UNDER_16:
-        logger.debug(f"Child {row[s.PERSON_ID_COL]} has unknown license status. Assuming no license.")
-        return 0
-    else:
-        logger.warning(f"Person {row[s.PERSON_ID_COL]} has no license status entry, not even unknown. Assuming no license.")
-        return 0
-
 
 def main_mode_imputed(row):
     """
@@ -143,7 +109,8 @@ def is_main_activity(group):
         return is_main_activity_series
 
     # If the person has no work activity, the main activity is the first education activity
-    education_activity_rows = group[group[s.LEG_ACTIVITY_COL].isin[s.ACTIVITY_EDUCATION, s.ACTIVITY_EARLY_EDUCATION, s.ACTIVITY_DAYCARE]]
+    education_activity_rows = group[
+        group[s.LEG_ACTIVITY_COL].isin[s.ACTIVITY_EDUCATION, s.ACTIVITY_EARLY_EDUCATION, s.ACTIVITY_DAYCARE]]
     if not education_activity_rows.empty:
         is_main_activity_series[education_activity_rows.index[0]] = 1
         assert is_main_activity_series.shape[0] == group.shape[0]

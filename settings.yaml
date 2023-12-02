@@ -43,6 +43,8 @@ geography_columns:  # largest to smallest, as in the popsim settings
 lowest_level_geography: "BAUBLOCKNR"
 
 hh_columns:
+  car_in_hh_column: "auto"
+  region_type_column: "RegioStaR7"
 
 person_columns:
   person_age: "HP_ALTER"
@@ -78,6 +80,9 @@ value_maps: # Values may usually be left empty if they don't exist in the data
     unspecified: 99
   car_availability:
     never: 3
+  car_in_hh:
+    "yes": 1
+    "no": 0
   license:
     "yes": 1
     "no": 2

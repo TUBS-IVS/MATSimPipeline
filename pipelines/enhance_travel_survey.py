@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 os.chdir(matsim_pipeline_setup.PROJECT_ROOT)
 write_to_file = True if s.POPULATION_ANALYSIS_OUTPUT_FILE else False
 
-add_absolutely_all_columns = False
+add_all_columns = True
 
 
 def enhance_travel_survey():
@@ -32,13 +32,13 @@ def enhance_travel_survey():
     logger.info(f"Starting popsim_to_matsim_plans pipeline")
 
     # Create unique leg ids in the leg input file if necessary
-    h.create_unique_leg_ids()
+    #h.create_unique_leg_ids()
 
     population = PopulationFrameProcessor()
 
     # Only load necessary household columns to not blow up the final file size
     # Otherwise, use_cols=None to load all columns
-    if add_absolutely_all_columns:
+    if add_all_columns:
         household_cols_to_load = None
     else:
         household_cols_to_load = list(s.HH_COLUMNS.values())
@@ -60,7 +60,7 @@ def enhance_travel_survey():
     logger.info(f"Population df after adding persons: \n{population.df.head()}")
 
     # Add person attributes
-    if add_absolutely_all_columns:
+    if add_all_columns:
         person_cols_to_load = None
     else:
         person_cols_to_load = list(s.P_COLUMNS.values())
@@ -78,6 +78,8 @@ def enhance_travel_survey():
     population.apply_group_wise_rules(apply_me, groupby_column="unique_household_id")
     logger.info(f"Population df after applying P group rules: \n{population.df.head()}")
 
+    population.impute_license_status()
+
     # Add MiD-trips to people (increases the number of rows)
     population.add_csv_data_on_id(s.MiD_TRIPS_FILE, [s.LEG_ID_COL], id_column=s.PERSON_ID_COL,
                                   drop_duplicates_from_source=False)
@@ -88,7 +90,7 @@ def enhance_travel_survey():
     # For MiD, all people with 0 legs can be assumed to not have travelled.
     # We keep them in the population.
 
-    #population.df = population.df[population.df[s.LEG_ID_COL].notna()].reset_index()
+    # population.df = population.df[population.df[s.LEG_ID_COL].notna()].reset_index()
 
     # Add trip attributes from MiD
     if s.L_COLUMNS:
@@ -122,7 +124,7 @@ def enhance_travel_survey():
     population.apply_group_wise_rules(apply_me, groupby_column="unique_household_id")
 
     population.adjust_mode_based_on_age()
-    #population.change_last_leg_activity_to_home()
+    # population.change_last_leg_activity_to_home()
     population.translate_modes()
     population.translate_activities()
 
@@ -138,10 +140,8 @@ def enhance_travel_survey():
     # Write stats
     population.write_stats()
 
-    # Write dataframe to csv file if desired
-    if write_to_file:
-        population.df.to_csv(os.path.join(matsim_pipeline_setup.OUTPUT_DIR, s.POPULATION_ANALYSIS_OUTPUT_FILE), index=False)
-        logger.info(f"Wrote population analysis output file to {s.POPULATION_ANALYSIS_OUTPUT_FILE}")
+    population.df.to_csv(os.path.join(matsim_pipeline_setup.OUTPUT_DIR, s.POPULATION_ANALYSIS_OUTPUT_FILE), index=False)
+    logger.info(f"Wrote population output file to {s.POPULATION_ANALYSIS_OUTPUT_FILE}")
 
     logger.info(f"Finished popsim_to_matsim_plans pipeline")
     return
@@ -151,7 +151,7 @@ if __name__ == '__main__':
     output_dir = matsim_pipeline_setup.create_output_directory()
     try:
 
-        popsim_to_matsim_plans_main()
+        enhance_travel_survey()
 
     except Exception as e:
         if s.DUN_DUN_DUUUN:
@@ -162,5 +162,3 @@ if __name__ == '__main__':
             winsound.Beep(400, 1500)
 
         raise
-else:
-    output_dir = matsim_pipeline_setup.OUTPUT_DIR

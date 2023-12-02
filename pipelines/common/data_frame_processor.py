@@ -105,7 +105,8 @@ class DataFrameProcessor:
                 source_df = source_df.drop_duplicates(subset=id_column, keep='first')
 
         # Handle columns
-        for col in columns_to_add:
+        columns_to_iterate = columns_to_add.copy()
+        for col in columns_to_iterate:
             if col in self.df.columns:
                 if overwrite_existing:
                     logger.info(f"Column {col} already exists in the DataFrame. Overwriting.")
@@ -297,3 +298,22 @@ class DataFrameProcessor:
         logger.info(f"Number of rows before filtering: {len(self.df)}")
         self.df = self.df[~self.df[column_name].isin(values_to_filter)]
         logger.info(f"Number of rows after filtering: {len(self.df)}")
+
+    import pandas as pd
+
+    def check_for_merge_suffixes(self, suffixes=('_x', '_y')):
+        """
+        Check for columns in a DataFrame that have specified merge suffixes.
+
+        :param df: Pandas DataFrame to check.
+        :param suffixes: Tuple of suffixes to look for. Defaults to ('_x', '_y').
+        :return: Dictionary with suffixes as keys and list of columns with these suffixes as values.
+        """
+        columns_with_suffixes = {suffix: [] for suffix in suffixes}
+        for col in self.df.columns:
+            for suffix in suffixes:
+                if col.endswith(suffix):
+                    columns_with_suffixes[suffix].append(col)
+
+        logger.info(f"Columns with merge suffixes: {columns_with_suffixes}")
+        return columns_with_suffixes

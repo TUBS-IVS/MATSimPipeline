@@ -39,6 +39,7 @@ PERSON_ID_COL = ID_COLUMNS['person_id_column']
 PERSON_AGE_COL = P_COLUMNS['person_age']
 CAR_AVAIL_COL = P_COLUMNS['car_avail']
 HAS_LICENSE_COL = P_COLUMNS['has_license']
+NUMBER_OF_LEGS_COL = P_COLUMNS['number_of_legs']
 
 # Leg-related columns
 LEG_ID_COL = ID_COLUMNS['leg_id_column']

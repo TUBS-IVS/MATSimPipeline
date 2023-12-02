@@ -99,6 +99,7 @@ def is_main_activity(group):
     if len(group) == 1:
         is_main_activity_series.iloc[0] = 1
         assert is_main_activity_series.shape[0] == group.shape[0]
+        assert is_main_activity_series.sum() == 1
         return is_main_activity_series
 
     # If the person has more than one activity, the main activity is the first work activity
@@ -106,14 +107,16 @@ def is_main_activity(group):
     if not work_activity_rows.empty:
         is_main_activity_series[work_activity_rows.index[0]] = 1
         assert is_main_activity_series.shape[0] == group.shape[0]
+        assert is_main_activity_series.sum() == 1
         return is_main_activity_series
 
     # If the person has no work activity, the main activity is the first education activity
     education_activity_rows = group[
-        group[s.LEG_ACTIVITY_COL].isin[s.ACTIVITY_EDUCATION, s.ACTIVITY_EARLY_EDUCATION, s.ACTIVITY_DAYCARE]]
+        group[s.LEG_ACTIVITY_COL].isin([s.ACTIVITY_EDUCATION, s.ACTIVITY_EARLY_EDUCATION, s.ACTIVITY_DAYCARE])]
     if not education_activity_rows.empty:
         is_main_activity_series[education_activity_rows.index[0]] = 1
         assert is_main_activity_series.shape[0] == group.shape[0]
+        assert is_main_activity_series.sum() == 1
         return is_main_activity_series
 
     # If the person has no work or education activity, the main activity is the longest activity
@@ -121,10 +124,12 @@ def is_main_activity(group):
         # If all activities have no duration, pick the middle one
         is_main_activity_series.iloc[len(group) // 2] = 1
         assert is_main_activity_series.shape[0] == group.shape[0]
+        assert is_main_activity_series.sum() == 1
         return is_main_activity_series
     max_duration_index = group["activity_duration_seconds"].idxmax()
     is_main_activity_series[max_duration_index] = 1
     assert is_main_activity_series.shape[0] == group.shape[0]
+    assert is_main_activity_series.sum() == 1
     return is_main_activity_series
 
 
@@ -255,7 +260,7 @@ def is_protagonist(household_group):  # TODO: Finish this
     """
     prot_series = pd.Series(0, index=household_group.index)
 
-    if household_group['connected_activities'].isna().all():
+    if household_group['connected_legs'].isna().all():
         logger.debug(f"No connections exist for household {household_group[s.HOUSEHOLD_MID_ID_COL].iloc[0]}.")
         return prot_series
 
@@ -263,15 +268,15 @@ def is_protagonist(household_group):  # TODO: Finish this
     activities_ranked = [s.ACTIVITY_WORK, s.ACTIVITY_SHOPPING, s.ACTIVITY_LEISURE]
 
     highest_rank = 0
-    for idx, row in household_group[household_group['connected_activities'].notna()].iterrows():
-        activity_rank = activities_ranked.index(row['connected_activities']) \
-            if row['connected_activities'] in activities_ranked else 0
+    for idx, row in household_group[household_group['connected_legs'].notna()].iterrows():
+        activity_rank = activities_ranked.index(row['connected_legs']) \
+            if row['connected_legs'] in activities_ranked else 0
         if activity_rank > highest_rank:
             highest_rank = activity_rank
 
-    for idx, row in household_group[household_group['connected_activities'].notna()].iterrows():
-        if row['connected_activities'] in activities_ranked and activities_ranked.index(
-                row['connected_activities']) == highest_rank:
+    for idx, row in household_group[household_group['connected_legs'].notna()].iterrows():
+        if row['connected_legs'] in activities_ranked and activities_ranked.index(
+                row['connected_legs']) == highest_rank:
             prot_series.at[idx] = 1
             break  # Only one person can be the protagonist
 

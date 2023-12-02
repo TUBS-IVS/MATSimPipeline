@@ -291,7 +291,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
         # Sorting by person_id and leg_id_col will insert the new rows in the correct place
         self.df = pd.concat([self.df, new_rows_df]).sort_values([s.PERSON_ID_COL, s.LEG_ID_COL]).reset_index(drop=True)
 
-    def estimate_leg_times(self):
+    def estimate_leg_times_averages(self):
         """
         Estimates leg_start_time and leg_end_time if they are missing.
         """
@@ -385,7 +385,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
                     logger.debug(f"Person {person_id} has no legs. Skipping...")
                     continue
                 # Persons with one leg might be problematic, but impute times for them anyway
-                logger.warning(f"Person {person_id} has only one leg.")
+                logger.debug(f"Person {person_id} has only one leg.")
 
             # Check for negative activity times
             if (person["activity_duration_seconds"] < 0).any():
@@ -400,57 +400,83 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 first_missing_time_index = person[person[s.LEG_START_TIME_COL].isna() | person[s.LEG_END_TIME_COL].isna()].index[
                     0]
                 if first_missing_time_index == first_index:
-                    logger.debug(
+                    logger.info(
                         f"Person {person_id} has no time information, imputation from index {first_missing_time_index}...")
                 else:
-                    logger.debug(
+                    logger.info(
                         f"Person {person_id} has some time information, imputation from index {first_missing_time_index}...")
 
-                orig_min_similar = 200
-                for min_similar in range(orig_min_similar, 2000,
-                                         200):  # Find more similar persons if there are too few with good data
+                # Find similar persons
+                orig_min_similar = 400
+                for min_similar in range(orig_min_similar, 10000,
+                                         1000):  # Find more similar persons if there are too few with good data
                     similar_persons: pd.DataFrame = self.find_similar_persons(person, min_similar)
 
                     # Filter similar persons for valid data
                     similar_persons_with_last_legs = similar_persons[
+                        similar_persons[s.LEG_NON_UNIQUE_ID_COL].notna() &
                         similar_persons[s.LEG_START_TIME_COL].notna() &
-                        similar_persons[s.LEG_DURATION_MINUTES_COL] > 0 &
-                        similar_persons[s.LEG_DURATION_MINUTES_COL] <= 300]
+                        (similar_persons[s.LEG_DURATION_MINUTES_COL] > 0) &
+                        (similar_persons[s.LEG_DURATION_MINUTES_COL] <= 300)]
                     # Removing rows with na activity durs removes the last leg, so we need a separate df to keep quality
                     similar_persons_no_last_legs = similar_persons_with_last_legs[
-                        similar_persons_with_last_legs["activity_duration_seconds"].notna() &
-                        similar_persons_with_last_legs["activity_duration_seconds"] > 0]
+                        (similar_persons_with_last_legs["activity_duration_seconds"].notna()) &
+                        (similar_persons_with_last_legs["activity_duration_seconds"] > 0)]
 
                     if len(similar_persons_no_last_legs) > orig_min_similar / 2:
                         break
                     else:
-                        logger.debug(f"Person {person_id} has too few similar persons. Lowering standards.")
+                        logger.info(f"Person {person_id} has too few similar persons. Lowering standards.")
                 else:  # No break
                     logger.warning(f"Person {person_id} misses times and has no even slightly similar persons. "
                                    f"Removing the person to avoid errors.")
                     self.df.drop(person.index, inplace=True)
                     continue
 
-                for idx, row in person.iterrows():
-                    if idx == first_missing_time_index:
-                        if idx == first_index:  # Start of the day TODO: Select by just the fitting activity
-                            typical_day_start = similar_persons_with_last_legs[similar_persons[s.LEG_NON_UNIQUE_ID_COL] == 1].sample(1).iloc[0]
-                            my_start_time = typical_day_start if pd.isna(person.at[idx, s.LEG_START_TIME_COL]) else \
-                                person.at[idx, s.LEG_START_TIME_COL]
-                        else:
-                            prev_end_time = person.at[idx - 1, s.LEG_END_TIME_COL]
-                            my_start_time = prev_end_time + pd.Timedelta(
-                                seconds=similar_persons_no_last_legs["activity_duration_seconds"].sample(1).iloc[0])
-                    else:
-                        prev_end_time = person.at[idx - 1, s.LEG_END_TIME_COL]
-                        my_start_time = prev_end_time + pd.Timedelta(
-                            seconds=similar_persons_no_last_legs["activity_duration_seconds"].sample(1).iloc[0])
+                # Impute times
+                loops_max = 5
+                loop = 0
+                while loop < loops_max:  # Loop until imputed times pass checks
+                    for idx, row in person.iterrows():
+                        if idx >= first_missing_time_index:
+                            if idx == first_index:  # Start of the day
+                                similar_persons_same_activity = similar_persons_with_last_legs.loc[
+                                    (similar_persons_with_last_legs[s.LEG_ACTIVITY_COL] == row[s.LEG_ACTIVITY_COL]) &
+                                    (similar_persons_with_last_legs[s.LEG_NON_UNIQUE_ID_COL] == 1), s.LEG_START_TIME_COL]
+                                if similar_persons_same_activity.empty:
+                                    logger.info(f"Person {person_id} has no similar persons with the same first activity."
+                                                f"Lowering standards.")
+                                    similar_persons_same_activity = similar_persons_with_last_legs.loc[
+                                        (similar_persons_with_last_legs[s.LEG_NON_UNIQUE_ID_COL] == 1), s.LEG_START_TIME_COL]
 
-                    person.at[idx, s.LEG_START_TIME_COL] = my_start_time
-                    person.at[idx, s.LEG_END_TIME_COL] = my_start_time + pd.Timedelta(
-                        minutes=similar_persons_with_last_legs[s.LEG_DURATION_MINUTES_COL].sample(1).iloc[0])
+                                typical_day_start = similar_persons_same_activity.sample(1).iloc[0]
+                                my_start_time = typical_day_start if pd.isna(person.at[idx, s.LEG_START_TIME_COL]) else \
+                                    person.at[idx, s.LEG_START_TIME_COL]
 
-                logger.debug(f"Person {person_id} updated times: \n{person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]]}")
+                            else:
+                                prev_end_time = person.at[idx - 1, s.LEG_END_TIME_COL]
+                                similar_persons_same_activity = similar_persons_no_last_legs.loc[
+                                    similar_persons_no_last_legs[s.LEG_ACTIVITY_COL] == person.loc[idx - 1, s.LEG_ACTIVITY_COL],
+                                    "activity_duration_seconds"]
+                                my_start_time = prev_end_time + pd.Timedelta(
+                                    # Sample an activity duration from a similar person with the same activity
+                                    seconds=similar_persons_same_activity.sample(1).iloc[0])
+
+                            person.at[idx, s.LEG_START_TIME_COL] = my_start_time
+                            similar_persons_same_activity = similar_persons_with_last_legs.loc[
+                                similar_persons_with_last_legs[s.LEG_ACTIVITY_COL] == row[
+                                    s.LEG_ACTIVITY_COL], s.LEG_DURATION_MINUTES_COL]
+                            person.at[idx, s.LEG_END_TIME_COL] = my_start_time + pd.Timedelta(
+                                minutes=similar_persons_same_activity.sample(1).iloc[0])
+
+                    # Check if times are valid (for now, all tours that end before 2am are valid)
+                    if person[s.LEG_END_TIME_COL].iloc[-1] < pd.Timestamp(s.BASE_DATE) + pd.Timedelta(days=1, hours=2):
+                        break
+                    logger.info(f"Person {person_id} imputed invalid times. Trying again...")
+                    loop += 1
+
+                logger.info(
+                    f"Person {person_id} updated times: \n{person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL, s.LEG_ACTIVITY_COL]]}")
                 if person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]].isna().any().any():
                     logger.warning(f"Person {person_id} still has missing times. "
                                    f"Check the data and try again. Skipping...")
@@ -458,28 +484,27 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 updated_persons.append(person)
 
         if updated_persons:
-            logger.debug(f"Concatenating {len(updated_persons)} updated persons...")
+            logger.info(f"Concatenating {len(updated_persons)} updated persons...")
             updated_df = pd.concat(updated_persons)
-            logger.debug(f"Updating original df...")
+            logger.info(f"Updating original df...")
             self.df.update(updated_df)
         logger.info("Time estimation completed.")
 
-
-    def vary_times_by_person(self, person_id_col, time_cols):
+    def vary_times_by_household(self, person_id_col, time_cols, max_shift_minutes=3):
         """
-        Varies times in the DataFrame by the same random amount (±3 minutes) for each person.
+        Varies times in the DataFrame by the same random amount (±max_shift_minutes) for each household.
 
         :param person_id_col: String, the column name for the unique person identifier.
         :param time_cols: List of strings, the names of the columns containing time data.
+        :param max_shift_minutes: Integer, the maximum number of minutes for the time shift.
         :return: pandas DataFrame with varied times.
         """
 
-        # Apply the random time shift for each person
-        logger.info("Varying times by person...")
+        logger.info("Varying times by household...")
 
         def apply_time_shift(group):
-            # Generate a random time shift between -3 and +3 minutes
-            time_shift = timedelta(minutes=np.random.randint(-3, 4))
+            # Generate a random time shift between -max_shift_minutes and +max_shift_minutes
+            time_shift = timedelta(minutes=np.random.randint(-max_shift_minutes, max_shift_minutes + 1))
 
             # Apply this time shift to all time columns
             for col in time_cols:
@@ -490,16 +515,15 @@ class PopulationFrameProcessor(DataFrameProcessor):
         self.df = self.df.groupby(person_id_col).apply(apply_time_shift)
         logger.info("Times varied by person.")
 
-
     def downsample_population(self, sample_percentage):
         """
         Downsample the population to a given sample percentage size of the original population.
-        Recommended to sample households, not persons, to keep the household structure intact.
+        Recommended to sample households (e.g. at the point when only households are loaded),
+        not persons, to keep the household structure intact.
         """
         logger.info("Downsampling population...")
         self.df = self.df.sample(frac=sample_percentage)
         logger.info(f"Downsampled population to {sample_percentage * 100}% of the original population.")
-
 
     def update_missing_times(self, similar_persons, person, idx, row):
         """
@@ -511,13 +535,12 @@ class PopulationFrameProcessor(DataFrameProcessor):
             person.at[idx, s.LEG_START_TIME_COL] = similar_leg[s.LEG_START_TIME_COL]
             person.at[idx, s.LEG_END_TIME_COL] = similar_leg[s.LEG_END_TIME_COL]
 
-
     def find_similar_persons(self, person: pd.DataFrame, min_similar, attributes: list = None):
         """
         Find similar persons (or other entries) based on a dynamic number of matching attributes.
         """
         if attributes is None:
-            attributes = [s.H_REGION_TYPE_COL]
+            attributes = [s.H_REGION_TYPE_COL, s.NUMBER_OF_LEGS_COL, s.HAS_LICENSE_COL, s.H_CAR_IN_HH_COL]
 
         logger.debug(f"Finding similar persons for {person[s.PERSON_ID_COL].iloc[0]}...")
         for min_matches in range(len(attributes), 0, -1):  # Decrease criteria to a minimum of 1 attributes
@@ -535,7 +558,6 @@ class PopulationFrameProcessor(DataFrameProcessor):
         logger.debug(f"Found no similar persons for {person[s.PERSON_ID_COL].iloc[0]}.")
         return pd.DataFrame()  # Return an empty DataFrame if no similar persons found
 
-
     def impute_license_status(self):
         """
         Vectorized function to impute license status based on age and statistical probabilities.
@@ -545,37 +567,50 @@ class PopulationFrameProcessor(DataFrameProcessor):
         """
         logger.info("Imputing license status...")
 
-        self.df['imputed_license'] = s.LICENSE_YES  # Default to no license
-
-        # Calculate license likelihoods
+        # Calculate license likelihoods (valid entries are mostly based on adults in MiD, which is good, because we
+        # assign non-adults no license; this means unknowns are mostly adults)
         valid_entries = self.df[self.df[s.HAS_LICENSE_COL].isin([s.LICENSE_YES, s.LICENSE_NO])]
         likelihoods = h.calculate_value_frequencies_df(valid_entries, s.H_CAR_IN_HH_COL, s.HAS_LICENSE_COL)
         licence_likelihood_with_car = likelihoods.at[s.CAR_IN_HH_YES, s.LICENSE_YES]
+        logger.debug(f"Likelihood of having a license with a car: {licence_likelihood_with_car}")
         licence_likelihood_without_car = likelihoods.at[s.CAR_IN_HH_NO, s.LICENSE_YES]
+        logger.debug(f"Likelihood of having a license without a car: {licence_likelihood_without_car}")
 
-        # Case where license status is explicitly known
-        self.df.loc[self.df[s.HAS_LICENSE_COL] == s.LICENSE_YES, 'imputed_license'] = s.LICENSE_YES
+        # Log cases where license status was wrongly reported based on age
         self.df.loc[
             (self.df[s.HAS_LICENSE_COL] == s.LICENSE_YES) & (self.df[s.PERSON_AGE_COL] < 17), 'imputed_license'] = s.LICENSE_NO
         logger.info(f"Changed {self.df['imputed_license'].eq(s.LICENSE_NO).sum()} license status to no license based on age.")
 
-        # Impute for unknown license cases
-        unknown_license = self.df[s.HAS_LICENSE_COL].isin([s.LICENSE_UNKNOWN, s.ADULT_OVER_16_PROXY])
-        adults = self.df[s.PERSON_AGE_COL] >= 17
+        # Cases where license status is known
+        self.df['imputed_license'] = valid_entries[s.HAS_LICENSE_COL]
+        self.df.loc[
+            (self.df[s.HAS_LICENSE_COL] == s.PERSON_UNDER_16) | (
+                    self.df[s.PERSON_AGE_COL] < 17), 'imputed_license'] = s.LICENSE_NO
+
+        logger.info(f"{self.df['imputed_license'].eq(s.LICENSE_YES).sum()} rows with license and "
+                    f"{self.df['imputed_license'].eq(s.LICENSE_NO).sum()} rows without license before imputation.")
+
+        # Impute for still unknown license cases (s.LICENSE_UNKNOWN, s.ADULT_OVER_16_PROXY, but also any other unknown values)
+        unknown_license = self.df['imputed_license'].isna()
         no_car = self.df[s.H_CAR_IN_HH_COL] == s.CAR_IN_HH_NO
 
-        # Random choice for unknown license with/without car
-        condition = unknown_license & adults & no_car
+        # Weighed random choice for unknown license with/without car
+        condition = unknown_license & no_car
         num_rows = self.df[condition].shape[0]
         self.df.loc[condition, 'imputed_license'] = np.random.choice(
             [s.LICENSE_NO, s.LICENSE_YES], size=num_rows,
             p=[1 - licence_likelihood_without_car, licence_likelihood_without_car]
         )
-        logger.info(f"Imputed license status for {num_rows} rows without car.")
+        logger.info(f"Imputed license status for {num_rows} rows without car of {self.df.shape[0]} total rows.")
 
-        condition = unknown_license & adults & ~no_car
+        condition = unknown_license & ~no_car
         num_rows = self.df[condition].shape[0]
         self.df.loc[condition, 'imputed_license'] = np.random.choice(
             [s.LICENSE_NO, s.LICENSE_YES], size=num_rows, p=[1 - licence_likelihood_with_car, licence_likelihood_with_car]
         )
-        logger.info(f"Imputed license status for {num_rows} rows with car.")
+        logger.info(f"Imputed license status for {num_rows} rows with car of {self.df.shape[0]} total rows.")
+
+        logger.info(f"{self.df['imputed_license'].eq(s.LICENSE_YES).sum()} rows with license and "
+                    f"{self.df['imputed_license'].eq(s.LICENSE_NO).sum()} rows without license.")
+
+        assert self.df['imputed_license'].isna().sum() == 0, "There are still unknown license statuses."

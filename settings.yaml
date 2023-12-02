@@ -50,6 +50,7 @@ person_columns:
   person_age: "HP_ALTER"
   car_avail: "P_VAUTO"
   has_license: "P_FS_PKW"
+  number_of_legs: "anzwege1"
 
 leg_columns:
   leg_target_activity: "W_ZWECK"

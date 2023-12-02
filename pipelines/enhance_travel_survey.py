@@ -48,6 +48,7 @@ def enhance_travel_survey():
     population.load_df_from_csv(s.MiD_HH_FILE, use_cols=household_cols_to_load)
 
     logger.info(f"Population df after adding HH attributes: \n{population.df.head()}")
+    population.check_for_merge_suffixes()
 
     # Add/edit household-specific rule-based attributes
     apply_me = [rules.unique_household_id]
@@ -58,6 +59,7 @@ def enhance_travel_survey():
     population.add_csv_data_on_id(s.MiD_PERSONS_FILE, [s.PERSON_ID_COL], id_column=s.HOUSEHOLD_MID_ID_COL,
                                   drop_duplicates_from_source=False)
     logger.info(f"Population df after adding persons: \n{population.df.head()}")
+    population.check_for_merge_suffixes()
 
     # Add person attributes
     if add_all_columns:
@@ -68,6 +70,7 @@ def enhance_travel_survey():
         population.add_csv_data_on_id(s.MiD_PERSONS_FILE, columns_to_add=person_cols_to_load, id_column=s.PERSON_ID_COL,
                                       drop_duplicates_from_source=True, delete_later=True)
     logger.info(f"Population df after adding P attributes: \n{population.df.head()}")
+    population.check_for_merge_suffixes()
 
     # Add/edit person-specific rule-based attributes
     apply_me = [rules.unique_person_id]  # rules.has_license_imputed
@@ -84,6 +87,7 @@ def enhance_travel_survey():
     population.add_csv_data_on_id(s.MiD_TRIPS_FILE, [s.LEG_ID_COL], id_column=s.PERSON_ID_COL,
                                   drop_duplicates_from_source=False)
     logger.info(f"Population df after adding trips: \n{population.df.head()}")
+    population.check_for_merge_suffixes()
 
     # There might be people with 0 legs, meaning they didn't travel on the survey day.
     # All people where there are 0 legs for other reasons, e.g. because of missing data, must be removed in the inputs.
@@ -99,6 +103,7 @@ def enhance_travel_survey():
         population.add_csv_data_on_id(s.MiD_TRIPS_FILE, list_L_COLUMNS, id_column=s.LEG_ID_COL,
                                       drop_duplicates_from_source=True, delete_later=True)
     logger.info(f"Population df after adding L attributes: \n{population.df.head()}")
+    population.check_for_merge_suffixes()
 
     # Remove legs that are "regelmäßiger beruflicher Weg" (duration is marked as 70701)
     population.filter_out_rows(s.LEG_DURATION_MINUTES_COL, [70701])
@@ -113,6 +118,8 @@ def enhance_travel_survey():
     logger.info(f"Population df after applying L row rules: \n{population.df.head()}")
 
     population.calculate_activity_duration()
+    population.activity_times_distribution_seconds()
+    population.leg_duration_distribution_seconds()
     population.estimate_leg_times()
     # Recalculate after estimating leg times
     population.calculate_activity_duration()

@@ -122,7 +122,7 @@ def popsim_to_matsim_plans_main():
     apply_me = [rules.is_main_activity]
     # population.apply_group_wise_rules(apply_me, groupby_column="unique_person_id")
 
-    apply_me = [rules.connected_activities]
+    apply_me = [rules.connected_legs]
     population.apply_group_wise_rules(apply_me, groupby_column="unique_household_id")
 
     population.adjust_mode_based_on_age()

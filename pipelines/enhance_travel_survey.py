@@ -120,17 +120,19 @@ def enhance_travel_survey():
     population.calculate_activity_duration()
     population.activity_times_distribution_seconds()
     population.leg_duration_distribution_seconds()
-    population.estimate_leg_times()
+    #population.estimate_leg_times()
     # Recalculate after estimating leg times
-    population.calculate_activity_duration()
+    #population.calculate_activity_duration()
 
-    apply_me = [rules.is_main_activity]
-    population.apply_group_wise_rules(apply_me, groupby_column="unique_person_id")
+    #apply_me = [rules.is_main_activity]
+    #population.apply_group_wise_rules(apply_me, groupby_column="unique_person_id")
 
-    apply_me = [rules.connected_activities]
+    apply_me = [rules.connected_legs, rules.is_protagonist]
     population.apply_group_wise_rules(apply_me, groupby_column="unique_household_id")
 
     population.adjust_mode_based_on_age()
+    population.adjust_mode_based_on_license()
+
     # population.change_last_leg_activity_to_home()
     population.translate_modes()
     population.translate_activities()
@@ -150,7 +152,7 @@ def enhance_travel_survey():
     population.df.to_csv(os.path.join(matsim_pipeline_setup.OUTPUT_DIR, s.POPULATION_ANALYSIS_OUTPUT_FILE), index=False)
     logger.info(f"Wrote population output file to {s.POPULATION_ANALYSIS_OUTPUT_FILE}")
 
-    logger.info(f"Finished popsim_to_matsim_plans pipeline")
+    logger.info(f"Finished enhance_travel_survey pipeline")
     return
 
 

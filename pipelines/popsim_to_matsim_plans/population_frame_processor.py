@@ -62,11 +62,13 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 for idx, row in group.iterrows():
                     writer.add_leg(mode=row['mode_translated_string'])
                     if not pd.isna(row['activity_duration_seconds']):
+                        # Rounding must fit the matsim config TODO
+                        max_dur: int = round(row["activity_duration_seconds"] / 10) * 10
                         writer.add_activity(
-                            type=row['activity_translated_string'],
+                            type=f"{row['activity_translated_string']}_{max_dur}",
                             x=row["random_point"].x, y=row["random_point"].y,
                             # The writer expects seconds. Also, we mean max_dur here, but the writer doesn't have that yet.
-                            start_time=row["activity_duration_seconds"])
+                            start_time=max_dur)
                     else:
                         # No time for the last activity
                         writer.add_activity(
@@ -103,6 +105,15 @@ class PopulationFrameProcessor(DataFrameProcessor):
         conditions = (self.df[s.LEG_MAIN_MODE_COL] == s.MODE_CAR) & (self.df[s.PERSON_AGE_COL] < 17)
         self.df.loc[conditions, s.LEG_MAIN_MODE_COL] = s.MODE_RIDE
         logger.info(f"Adjusted mode based on age for {conditions.sum()} of {len(self.df)} rows.")
+
+    def adjust_mode_based_on_license(self):
+        """
+        Change the mode of transportation from car to ride if person has no license.
+        """
+        logger.info("Adjusting mode based on license...")
+        conditions = (self.df[s.LEG_MAIN_MODE_COL] == s.MODE_CAR) & (self.df["imputed_license"] == s.LICENSE_NO)
+        self.df.loc[conditions, s.LEG_MAIN_MODE_COL] = s.MODE_RIDE
+        logger.info(f"Adjusted mode based on license for {conditions.sum()} of {len(self.df)} rows.")
 
     def calculate_activity_duration(self):
         """

@@ -32,7 +32,6 @@ def unique_leg_id(row):
     return f"{row['unique_person_id']}_{row[s.LEG_ID_COL]}"
 
 
-
 def main_mode_imputed(row):
     """
     Impute main mode based on the distance of the leg, the availability of a car and statistical probabilities.
@@ -59,7 +58,7 @@ def main_mode_imputed(row):
     ]
 
     boundaries = boundaries_never_or_no_license if row[s.CAR_AVAIL_COL] == s.CAR_NEVER or row[
-        has_license_imputed] == 0 else boundaries_otherwise
+        "imputed_license"] == s.LICENSE_NO else boundaries_otherwise
 
     for distance, probabilities, modes in boundaries:
         if row[s.LEG_DISTANCE_COL] < distance:
@@ -133,7 +132,7 @@ def is_main_activity(group):
     return is_main_activity_series
 
 
-def connected_activities(household_group):
+def connected_legs(household_group):
     """
     Find connections between trip legs in a household.
     Uses unique_leg_id; lists all legs that are connected to each leg.
@@ -193,7 +192,9 @@ def check_time(leg_to_find, leg_to_compare):
     leg_begin_to_compare = leg_to_compare[s.LEG_START_TIME_COL]
     leg_end_to_compare = leg_to_compare[s.LEG_END_TIME_COL]
 
-    time_range = pd.Timedelta(minutes=5)
+    # Reduce the time range for short legs to avoid false positives (NaN evaluates to False)
+    time_range = pd.Timedelta(minutes=5) if leg_to_find[s.LEG_DURATION_MINUTES_COL] > 5 and leg_to_compare[
+        s.LEG_DURATION_MINUTES_COL] > 5 else pd.Timedelta(minutes=3)
 
     if pd.isnull([leg_begin_to_find, leg_end_to_find, leg_begin_to_compare, leg_end_to_compare]).any():
         return False
@@ -230,19 +231,22 @@ def check_mode(leg_to_find, leg_to_compare):
     return False
 
 
-def check_activity(leg_to_find, leg_to_compare):
+def check_activity(leg_to_find, leg_to_compare):  # TODO: Possibly create a matrix of compatible activities
     compatible_activities = {
         s.ACTIVITY_SHOPPING: [s.ACTIVITY_ERRANDS],
         s.ACTIVITY_ERRANDS: [s.ACTIVITY_SHOPPING, s.ACTIVITY_LEISURE],
-        s.ACTIVITY_LEISURE: [s.ACTIVITY_ERRANDS, s.ACTIVITY_SHOPPING]}
+        s.ACTIVITY_LEISURE: [s.ACTIVITY_ERRANDS, s.ACTIVITY_SHOPPING, s.ACTIVITY_MEETUP],
+        s.ACTIVITY_MEETUP: [s.ACTIVITY_LEISURE]}
 
     type_to_find = leg_to_find[s.LEG_ACTIVITY_COL]
     type_to_compare = leg_to_compare[s.LEG_ACTIVITY_COL]
 
-    if type_to_find == type_to_compare or s.ACTIVITY_ACCOMPANY_ADULT in [type_to_find, type_to_compare]:
+    if (type_to_find == type_to_compare or
+            s.ACTIVITY_ACCOMPANY_ADULT in [type_to_find, type_to_compare] or
+            s.ACTIVITY_PICK_UP_DROP_OFF in [type_to_find, type_to_compare]):
         return True
     elif s.ACTIVITY_UNSPECIFIED in [type_to_find, type_to_compare] or pd.isnull([type_to_find, type_to_compare]).any():
-        logger.warning("Activity Type Undefined")
+        logger.debug("Activity Type Undefined or Null (which usually means person has no legs).")
         return False
     # Assuming trip home
     elif (type_to_find == s.ACTIVITY_HOME and type_to_compare != s.ACTIVITY_WORK) or \
@@ -252,11 +256,12 @@ def check_activity(leg_to_find, leg_to_compare):
     return type_to_compare in compatible_activities.get(type_to_find, [])
 
 
-def is_protagonist(household_group):  # TODO: Finish this
+def is_protagonist(household_group):
     """
-    Check if the person is the 'protagonist' of the connected leg,
-    meaning their target activity will be considered in the location choice.
-    :return: pandas Series indicating if each person is a protagonist (1) or not (0)
+    Identify the 'protagonist' leg among connected legs.
+    The leg with the highest-ranked activity in each group of connected legs is considered the protagonist.
+    Allows to easily add other ranking criteria.
+    :return: pandas Series indicating if each leg is a protagonist (1) or not (0)
     """
     prot_series = pd.Series(0, index=household_group.index)
 
@@ -264,21 +269,36 @@ def is_protagonist(household_group):  # TODO: Finish this
         logger.debug(f"No connections exist for household {household_group[s.HOUSEHOLD_MID_ID_COL].iloc[0]}.")
         return prot_series
 
-    # A person is the protagonist if their activity is the highest ranked in the connected leg
+    # Ranked activities
     activities_ranked = [s.ACTIVITY_WORK, s.ACTIVITY_SHOPPING, s.ACTIVITY_LEISURE]
 
-    highest_rank = 0
-    for idx, row in household_group[household_group['connected_legs'].notna()].iterrows():
-        activity_rank = activities_ranked.index(row['connected_legs']) \
-            if row['connected_legs'] in activities_ranked else 0
-        if activity_rank > highest_rank:
-            highest_rank = activity_rank
+    # Collecting connected legs and their activities in a DataFrame
+    checked_legs = []
+    for idx, row in household_group.iterrows():
+        if not isinstance(row['connected_legs'], list):  # Checking for NaN doesn't work here
+            continue
+        if idx in checked_legs:
+            continue
 
-    for idx, row in household_group[household_group['connected_legs'].notna()].iterrows():
-        if row['connected_legs'] in activities_ranked and activities_ranked.index(
-                row['connected_legs']) == highest_rank:
-            prot_series.at[idx] = 1
-            break  # Only one person can be the protagonist
+        connected_legs = set(row['connected_legs']).union({row["unique_leg_id"]})  # Including the current leg
+        leg_data = []
+        for leg_id in connected_legs:
+            if not all(elem in connected_legs for elem in
+                       household_group.loc[household_group["unique_leg_id"] == leg_id, 'connected_legs'].iloc[0]):
+                logger.warning(f"Leg {leg_id} has inconsistent connections."
+                               f"This might lead to unexpected results.")
+
+            checked_legs.append(household_group.loc[household_group["unique_leg_id"] == leg_id].index[0])
+            leg_activity = household_group.loc[household_group["unique_leg_id"] == leg_id, s.LEG_ACTIVITY_COL].iloc[0]
+            activity_rank = activities_ranked.index(leg_activity) if leg_activity in activities_ranked else -1
+            leg_data.append({'leg_id': leg_id, 'activity': leg_activity, 'activity_rank': activity_rank})
+
+        # Identifying protagonist leg
+        connected_legs_df = pd.DataFrame(leg_data)
+        if not connected_legs_df.empty:
+            connected_legs_df.sort_values(by='activity_rank', ascending=False, inplace=True)
+            protagonist_leg_id = connected_legs_df.iloc[0]['leg_id']
+            prot_series.loc[household_group["unique_leg_id"] == protagonist_leg_id] = 1
 
     return prot_series
 

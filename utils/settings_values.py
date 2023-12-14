@@ -50,6 +50,7 @@ LEG_START_TIME_COL = L_COLUMNS['leg_start_time']
 LEG_END_TIME_COL = L_COLUMNS['leg_end_time']
 LEG_DURATION_MINUTES_COL = L_COLUMNS['leg_duration_minutes']
 LEG_DISTANCE_COL = L_COLUMNS['leg_distance']
+FIRST_LEG_STARTS_AT_HOME_COL = L_COLUMNS['first_leg_starts_at_home']
 
 # Geography-related columns
 TT_MATRIX_CELL_ID_COL = ID_COLUMNS['tt_matrix_cell_id_column']
@@ -93,7 +94,7 @@ MODE_BIKE = VALUE_MAPS['modes']['bike']
 MODE_WALK = VALUE_MAPS['modes']['walk']
 MODE_UNDEFINED = VALUE_MAPS['modes']['undefined']
 
-AVERAGE_ACTIVITY_TIMES_MINUTES = settings['average_activity_times_minutes']
+FIRST_LEG_STARTS_AT_HOME = VALUE_MAPS['misc']['first_leg_starts_at_home']
 
 # Misc
 LOWEST_LEVEL_GEOGRAPHY = settings['lowest_level_geography']
@@ -103,3 +104,20 @@ BASE_DATE = "2020-01-01"  # Arbitrary date for converting times to datetime obje
 SAMPLE_SIZE = settings['sample_size']
 
 N_CLOSEST_CELLS = settings['n_closest_cells']
+DEFAULT_SLACK_FACTOR = settings['default_slack_factor']
+
+
+# Columns that are created by the enhancement pipeline
+ENHANCEMENT_COLUMNS = settings['enhancement_columns']
+RANDOM_LOCATION_COL = ENHANCEMENT_COLUMNS['random_location']
+ACT_DUR_SECONDS_COL = ENHANCEMENT_COLUMNS['activity_duration_seconds']
+NUMBER_OF_LEGS_INCL_IMPUTED_COL = ENHANCEMENT_COLUMNS['number_of_legs_incl_imputed']
+IMPUTED_TIME_COL = ENHANCEMENT_COLUMNS['imputed_time']
+IMPUTED_LEG_COL = ENHANCEMENT_COLUMNS['imputed_leg']
+
+# Column names that are set at runtime
+PROCESSING_COLUMNS = settings['processing_columns']
+
+UNIQUE_LEG_ID_COL = PROCESSING_COLUMNS['unique_leg_id']
+UNIQUE_HH_ID_COL = PROCESSING_COLUMNS['unique_household_id']
+UNIQUE_P_ID_COL = PROCESSING_COLUMNS['unique_person_id']

@@ -216,7 +216,7 @@ def check_mode(leg_to_find, leg_to_compare):
     mode_to_find = leg_to_find[s.LEG_MAIN_MODE_COL]
     mode_to_compare = leg_to_compare[s.LEG_MAIN_MODE_COL]
 
-    if mode_to_find == mode_to_compare:
+    if mode_to_find == mode_to_compare and mode_to_find != s.MODE_UNDEFINED:  # Make sure we don't pair undefined modes
         return True
 
     mode_pairs = {(s.MODE_CAR, s.MODE_RIDE), (s.MODE_RIDE, s.MODE_CAR),
@@ -226,6 +226,7 @@ def check_mode(leg_to_find, leg_to_compare):
 
     if s.MODE_UNDEFINED in [mode_to_find, mode_to_compare]:
         # Assuming if one mode is undefined and the other is car, they pair as ride
+        # The mode is not updated here (in contrast to prev. work), because we don't know yet if the leg is connected.
         return s.MODE_CAR in [mode_to_find, mode_to_compare]
 
     return False
@@ -269,11 +270,24 @@ def is_protagonist(household_group):
         logger.debug(f"No connections exist for household {household_group[s.HOUSEHOLD_MID_ID_COL].iloc[0]}.")
         return prot_series
 
-    # Ranked activities
-    activities_ranked = [s.ACTIVITY_WORK, s.ACTIVITY_SHOPPING, s.ACTIVITY_LEISURE]
+    # Ranked activities (lowest to highest probability of being protagonist). Not an exact science.
+    # Activities not in this list are ranked lowest.
+    activities_ranked = [
+        s.ACTIVITY_ERRANDS,
+        s.ACTIVITY_LEISURE,
+        s.ACTIVITY_MEETUP,
+        s.ACTIVITY_SHOPPING,
+        s.ACTIVITY_EDUCATION,
+        s.ACTIVITY_LESSONS,
+        s.ACTIVITY_SPORTS,
+        s.ACTIVITY_EARLY_EDUCATION,
+        s.ACTIVITY_DAYCARE,  # Likely to be dropped off/picked up
+        s.ACTIVITY_BUSINESS,  # Likely to be accompanied
+        s.ACTIVITY_HOME]
 
-    # Collecting connected legs and their activities in a DataFrame
+    # Keep track of checked legs, so we don't waste time checking them again
     checked_legs = []
+
     for idx, row in household_group.iterrows():
         if not isinstance(row['connected_legs'], list):  # Checking for NaN doesn't work here
             continue

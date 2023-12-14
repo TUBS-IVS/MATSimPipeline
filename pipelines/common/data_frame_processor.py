@@ -299,8 +299,6 @@ class DataFrameProcessor:
         self.df = self.df[~self.df[column_name].isin(values_to_filter)]
         logger.info(f"Number of rows after filtering: {len(self.df)}")
 
-    import pandas as pd
-
     def check_for_merge_suffixes(self, suffixes=('_x', '_y')):
         """
         Check for columns in a DataFrame that have specified merge suffixes.
@@ -317,3 +315,20 @@ class DataFrameProcessor:
 
         logger.info(f"Columns with merge suffixes: {columns_with_suffixes}")
         return columns_with_suffixes
+
+    def set_column_type(self, columns, dtype):
+        """
+        Set the data types of specified columns in the DataFrame, and raise an error if conversion fails
+        or if any column is not found.
+
+        :param columns: List of column names to be converted.
+        :param dtype: The desired data type to convert all specified columns to.
+        """
+        for col in columns:
+            if col not in self.df.columns:
+                raise KeyError(f"Column '{col}' not found in DataFrame.")
+
+            try:
+                self.df[col] = self.df[col].astype(dtype)
+            except (ValueError, TypeError) as e:
+                raise ValueError(f"Error converting column '{col}' to {dtype}: {e}")

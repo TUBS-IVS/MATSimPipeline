@@ -32,7 +32,7 @@ def enhance_travel_survey():
     logger.info(f"Starting popsim_to_matsim_plans pipeline")
 
     # Create unique leg ids in the leg input file if necessary
-    #h.create_unique_leg_ids()
+    h.create_unique_leg_ids()
 
     population = PopulationFrameProcessor()
 
@@ -120,18 +120,28 @@ def enhance_travel_survey():
     population.calculate_activity_duration()
     population.activity_times_distribution_seconds()
     population.leg_duration_distribution_seconds()
-    #population.estimate_leg_times()
+    population.estimate_leg_times()
     # Recalculate after estimating leg times
-    #population.calculate_activity_duration()
+    population.calculate_activity_duration()
 
-    #apply_me = [rules.is_main_activity]
-    #population.apply_group_wise_rules(apply_me, groupby_column="unique_person_id")
-
-    apply_me = [rules.connected_legs, rules.is_protagonist]
-    population.apply_group_wise_rules(apply_me, groupby_column="unique_household_id")
+    population.apply_group_wise_rules([rules.is_main_activity], groupby_column="unique_person_id")
 
     population.adjust_mode_based_on_age()
     population.adjust_mode_based_on_license()
+
+    population.apply_group_wise_rules([rules.connected_legs], groupby_column="unique_household_id")
+    population.close_connected_leg_groups()
+    population.apply_group_wise_rules([rules.is_protagonist], groupby_column="unique_household_id")
+
+    population.adjust_mode_based_on_connected_legs()
+    #
+    # # Savepoint for testing
+    # population.df.to_csv(os.path.join(matsim_pipeline_setup.OUTPUT_DIR, s.POPULATION_ANALYSIS_OUTPUT_FILE), index=False)
+    # logger.info(f"Wrote population output file to {s.POPULATION_ANALYSIS_OUTPUT_FILE}")
+    # population.load_df_from_csv("output/20231209_181124/full_population_frame.csv",
+    #                             if_df_exists='replace')
+    # population.set_column_type([s.LEG_START_TIME_COL, s.LEG_END_TIME_COL], "datetime64[ns]") #testing
+    population.add_return_home_leg()
 
     # population.change_last_leg_activity_to_home()
     population.translate_modes()

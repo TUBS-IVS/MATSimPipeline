@@ -1,7 +1,7 @@
 
-sample_size: 0.5 # 0.1 = 10% of the population
+sample_size: 0.05 # 0.1 = 10% of the population
 n_closest_cells: 5 # Number of cell candidates to consider for main activity location
-
+default_slack_factor: 1.5
 
 
 input_files:
@@ -50,7 +50,7 @@ person_columns:
   person_age: "HP_ALTER"
   car_avail: "P_VAUTO"
   has_license: "P_FS_PKW"
-  number_of_legs: "anzwege1"
+  number_of_legs: "anzwege1" # Legs without rbW
 
 leg_columns:
   leg_target_activity: "W_ZWECK"
@@ -59,6 +59,20 @@ leg_columns:
   leg_end_time: "W_AZ"
   leg_duration_minutes: "wegmin"
   leg_distance: "wegkm"
+  first_leg_starts_at_home: "W_SO1"
+
+enhancement_columns: # Columns created by the enhancement module
+  random_location: "random_location"
+  activity_duration_seconds: "activity_duration_seconds"
+  number_of_legs_incl_imputed: "number_of_legs_incl_imputed"
+  imputed_time: "imputed_time"
+  imputed_leg: "imputed_leg"
+
+processing_columns: # Used by several pipelines. Cols aren't in the outputs, but are in the final analysis dump.
+  unique_leg_id: "unique_leg_id"
+  unique_household_id: "unique_household_id"
+  unique_person_id: "unique_person_id"
+
 
 value_maps: # Values may usually be left empty if they don't exist in the data
   activities:
@@ -98,13 +112,8 @@ value_maps: # Values may usually be left empty if they don't exist in the data
     ride: 3
     other:
     undefined:
-
-average_activity_times_minutes:
-  work: 30
-  lunch: 45
-  gym: 50
-  shopping: 25
-  meeting: 35
+  misc:
+    first_leg_starts_at_home: 1
 
 misc:
   dun_dun_duuun: 1 # Play sound on error

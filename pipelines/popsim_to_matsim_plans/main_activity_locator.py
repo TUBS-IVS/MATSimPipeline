@@ -4,20 +4,20 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 
-from utils import settings_values as s
 from pipelines.common import helpers as h
+from utils import settings_values as s
 from utils.logger import logging
 
 logger = logging.getLogger(__name__)
 
 
-class MainActivityLocator:
+class ActivityLocator:
     """
 
     Normalizing the potentials according to the total main activity demand means that persons will be assigned to the activity
     locations exactly proportional to the location potentials. This also means that secondary activities will have to make do
     with the remaining capacity.
-    :param persons: GeoDataFrame or DataFrame with persons, their home location point, target travel times and activities
+    :param persons: GeoDataFrame or DataFrame with persons, their home location point, target travel times and activities (LEGS = ROWS!!)
     :param capacities: GeoDataFrame, DataFrame or Path to .shp with activity location points and their capacities
     :param cells_shp_path: Path to a shapefile with cells
     :param tt_matrix_csv_path: Path to a csv file with travel times between cells
@@ -27,7 +27,7 @@ class MainActivityLocator:
     :param capacities_geometry_col: Name of the geometry column in the capacities data (if given as a DataFrame)
     """
 
-    def __init__(self, persons, capacities, cells_shp_path, tt_matrix_csv_path, target_crs="EPSG:25832",
+    def __init__(self, persons, capacities, cells_shp_path, tt_matrix_csv_path, slack_factors_csv_path, target_crs="EPSG:25832",
                  persons_crs=None, capacities_crs=None,
                  persons_geometry_col=None, capacities_geometry_col=None):
 
@@ -35,6 +35,7 @@ class MainActivityLocator:
         self.capacity_points_gdf = self.load_data_into_gdf(capacities, capacities_geometry_col, capacities_crs)
         self.cells_gdf: gpd.GeoDataFrame = self.load_data_into_gdf(cells_shp_path)
         self.tt_matrix_df = pd.read_csv(tt_matrix_csv_path)
+        self.slack_factors_df = pd.read_csv(slack_factors_csv_path)
 
         self.target_crs = target_crs
         self.capacity_cells_df = None
@@ -149,10 +150,11 @@ class MainActivityLocator:
         n = s.N_CLOSEST_CELLS
         for _, cell in self.cells_gdf.iterrows():
             capacity_updates = {}
-            grouped_persons = self.persons_gdf.groupby('target_travel_time')
+            persons_in_cell = self.persons_gdf[self.persons_gdf["cell_id"] == cell['cell_id']].groupby(
+                s.LEG_DURATION_MINUTES_COL)
             cell_travel_times = self.tt_matrix_df[self.tt_matrix_df['FROM'] == cell['cell_id']]
 
-            for target_time, group in grouped_persons:
+            for target_time, group in persons_in_cell:
                 candidates = self.get_n_closest_cells(cell_travel_times, target_time, n)
 
                 for _, person in group.iterrows():
@@ -168,7 +170,7 @@ class MainActivityLocator:
             for (cell_id, activity_type), count in capacity_updates.items():
                 self.update_capacity(cell_id, activity_type, count)
 
-#TODO: assignment function multiprocessed, using weighted by overall capacity, not remaining capacity
+    # TODO: assignment function multiprocessed, using weighted by overall capacity, not remaining capacity
 
     def weighted_random_choice(self, candidates, activity_type):
         weights = [self.get_remaining_capacity(cell, activity_type) for cell in candidates]
@@ -214,7 +216,6 @@ class MainActivityLocator:
         :return:
         """
 
-
     def replace_population(self, replace_with, replace_with_crs=None, replace_with_geometry_col=None):
         """
         Replaces the population with a new one while keeping all other current data.
@@ -230,3 +231,108 @@ class MainActivityLocator:
 
     # TODO: keep track of which persons have gotten either primary or secondary activities assigned
     # TODO:
+
+    def calculate_expected_time_with_slack(self, time_from_start_to_via, time_from_via_to_end, activity_from, activity_via,
+                                           activity_to):
+        """
+        Calculate the expected travel time for two legs of a trip, adjusted by a slack factor based on activities.
+
+        :param time_from_start_to_via: Travel time from the start to the via activity.
+        :param time_from_via_to_end: Travel time from the via to the end activity.
+        :param activity_from: The starting activity.
+        :param activity_via: The intermediate (via) activity.
+        :param activity_to: The ending activity.
+        :return: Total adjusted travel time as a float.
+        """
+
+        # Retrieve the slack factor based on activities
+        slack_factor_row = self.slack_factors_df.loc[
+            (self.slack_factors_df['activity_from'] == activity_from) &
+            (self.slack_factors_df['activity_via'] == activity_via) &
+            (self.slack_factors_df['activity_to'] == activity_to)
+            ]
+
+        if not slack_factor_row.empty:
+            slack_factor = slack_factor_row['slack_factor'].iloc[0]
+        else:
+            # Fall back to a default slack factor if not found
+            logger.debug(f"No slack factor found for activities: {activity_from}, {activity_via}, {activity_to}. "
+                         f"Using default slack factor of {s.DEFAULT_SLACK_FACTOR}")
+            slack_factor = s.DEFAULT_SLACK_FACTOR
+
+        # Apply the slack factor to the sum of both leg times
+        expected_time = (time_from_start_to_via + time_from_via_to_end) * slack_factor
+        return expected_time
+
+    def locate_single_activity(self, legs_df, min_tolerance, max_tolerance):
+        """
+        Locate a single activity between two known places using travel time matrix and capacity data.
+        :param legs_df: DataFrame with the legs of a trip, including the activity to be located.
+        :param min_tolerance: Minimum tolerance in minutes.
+        :param max_tolerance: Maximum tolerance in minutes.
+        :return: Cell ID of the best-suited location for the activity, or None if not found.
+        """
+        start_cell = legs_df.iloc[0]['cell_id']
+        end_cell = legs_df.iloc[-1]['cell_id']
+        activity_type = legs_df.iloc[1]['activity_type']
+
+        time_start_to_act = legs_df.iloc[1]['desired_time_from_start']
+        time_act_to_end = legs_df.iloc[1]['desired_time_to_end']
+
+        potential_cells = None
+        step_size = (max_tolerance-min_tolerance)/5
+        tolerance = min_tolerance
+        while potential_cells is None and tolerance <= max_tolerance:
+
+            # Filter cells based on travel time criteria (times in minutes)
+            potential_cells_start = self.tt_matrix_df[(self.tt_matrix_df['from_cell'] == start_cell) &
+                                                      (self.tt_matrix_df['time'] >= time_start_to_act - tolerance) &
+                                                      (self.tt_matrix_df['time'] <= time_start_to_act + tolerance)]
+
+            potential_cells_end = self.tt_matrix_df[(self.tt_matrix_df['to_cell'] == end_cell) &
+                                                    (self.tt_matrix_df['time'] >= time_act_to_end - tolerance) &
+                                                    (self.tt_matrix_df['time'] <= time_act_to_end + tolerance)]
+
+            # Find intersecting cells from both sets
+            potential_cells = set(potential_cells_start['to_cell']).intersection(set(potential_cells_end['from_cell']))
+
+            tolerance += step_size
+
+        # Choose the cell with the highest capacity for the activity type
+        best_cell = self.capacity_points_gdf[self.capacity_points_gdf['cell_id'].isin(potential_cells) &
+                                             (self.capacity_points_gdf['activity_type'] == activity_type)].nlargest(1,
+                                                                                                                    'capacity')
+
+        return best_cell['cell_id'].iloc[0] if not best_cell.empty else None
+
+    def locate_sec_activities(self, legs_to_locate, tolerance):
+        """
+        Locate a series of activities given the known start and end positions.
+
+        :param legs_to_locate: DataFrame with legs of a trip, including known start and end positions.
+        :param tolerance: Tolerance for travel time deviation.
+        :return: Dictionary with cell IDs for each located activity.
+        """
+        located_activities = {}
+        total_legs = len(legs_to_locate)
+
+        if total_legs == 2:  # Directly use locate_single_activity for one intermediate leg
+            activity_cell_id = self.locate_single_activity(legs_to_locate, tolerance)
+            activity_type = legs_to_locate.iloc[1]['activity_type']
+            located_activities[activity_type] = activity_cell_id
+        else:
+            # Break down into overlapping two-leg pairs and locate activities iteratively
+            for i in range(1, total_legs - 1):
+                two_leg_pair = legs_to_locate.iloc[i - 1: i + 2]  # Get two-leg pair
+                expected_time_with_slack = self.calculate_expected_time_with_slack(two_leg_pair)
+
+                # Locate the activity for the current two-leg pair
+                activity_cell_id = self.locate_single_activity(two_leg_pair, expected_time_with_slack, tolerance)
+                activity_type = two_leg_pair.iloc[1]['activity_type']
+
+                if activity_cell_id:
+                    located_activities[activity_type] = activity_cell_id
+
+        return located_activities
+
+

@@ -71,6 +71,8 @@ def popsim_to_matsim_plans_main():
     population.apply_row_wise_rules(apply_me)
     logger.info(f"Population df after applying P row rules: \n{population.df.head()}")
 
+    population.impute_license_status()
+
     apply_me = []
     population.apply_group_wise_rules(apply_me, groupby_column="unique_household_id")
     logger.info(f"Population df after applying P group rules: \n{population.df.head()}")
@@ -126,6 +128,8 @@ def popsim_to_matsim_plans_main():
     population.apply_group_wise_rules(apply_me, groupby_column="unique_household_id")
 
     population.adjust_mode_based_on_age()
+    population.adjust_mode_based_on_license()
+
     population.change_last_leg_activity_to_home()
     population.assign_random_location()
     population.translate_modes()

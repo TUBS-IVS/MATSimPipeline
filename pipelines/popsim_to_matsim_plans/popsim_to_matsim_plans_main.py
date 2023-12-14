@@ -132,6 +132,10 @@ def popsim_to_matsim_plans_main():
 
     population.change_last_leg_activity_to_home()
     population.assign_random_location()
+
+    population.impute_cars_in_household()
+    population.list_cars_in_household()
+
     population.translate_modes()
     population.translate_activities()
 

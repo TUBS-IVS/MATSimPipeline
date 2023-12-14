@@ -313,7 +313,8 @@ def calculate_condition_likelihoods(df, filter_col, target_col) -> dict:
     logger.info(f"{likelihoods}")
     return likelihoods
 
-def calculate_value_frequencies_df(df, filter_col, target_col)->pd.DataFrame:
+
+def calculate_value_frequencies_df(df, filter_col, target_col) -> pd.DataFrame:
     """
     Calculate the normalized frequency of each target value for each unique value in the filter column.
     :param df:
@@ -331,3 +332,23 @@ def calculate_value_frequencies_df(df, filter_col, target_col)->pd.DataFrame:
     logger.info(f"{frequencies_df}")
 
     return frequencies_df
+
+
+def summarize_slack_factors(slack_df):
+    """
+    Take the slack_factors df and summarize them by activities, for
+    use in the activity_placer.
+    :param slack_df:
+    :return:
+    """
+
+    grouped = slack_df.groupby(['start_activity', 'via_activity', 'end_activity'])
+
+    summary_df = grouped['slack_factor'].agg(['median', 'mean', 'std', 'count']).reset_index()
+
+    # Rename columns for clarity
+    summary_df.columns = ['start_activity', 'via_activity', 'end_activity',
+                          'median_slack_factor', 'mean_slack_factor',
+                          'std_slack_factor', 'count_observations']
+
+    return summary_df

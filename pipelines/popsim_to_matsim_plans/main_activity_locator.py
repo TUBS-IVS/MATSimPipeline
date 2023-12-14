@@ -122,7 +122,7 @@ class ActivityLocator:
 
     def get_global_demand(self) -> pd.Series:
         # Aggregate persons per cell and activity type
-        persons_per_cell_type = self.persons_gdf.groupby([s.TT_MATRIX_CELL_ID_COL, s.LEG_ACTIVITY_COL]).size().reset_index(
+        persons_per_cell_type = self.persons_gdf.groupby([s.TT_MATRIX_CELL_ID_COL, s.LEG_TO_ACTIVITY_COL]).size().reset_index(
             name="persons")
 
         # Global aggregation
@@ -158,7 +158,7 @@ class ActivityLocator:
                 candidates = self.get_n_closest_cells(cell_travel_times, target_time, n)
 
                 for _, person in group.iterrows():
-                    target_activity = person[s.LEG_ACTIVITY_COL]
+                    target_activity = person[s.LEG_TO_ACTIVITY_COL]
                     # Evaluate and assign - randomly but weighted by remaining capacity
                     target_cell = self.weighted_random_choice(candidates, target_activity)
                     # Accumulate changes instead of updating immediately

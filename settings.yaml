@@ -43,7 +43,8 @@ geography_columns:  # largest to smallest, as in the popsim settings
 lowest_level_geography: "BAUBLOCKNR"
 
 hh_columns:
-  car_in_hh_column: "auto"
+  car_in_hh_column: "auto"  # "auto" is a boolean column, 1 = yes, 0 = no
+  number_of_cars_column: "H_ANZAUTO"
   region_type_column: "RegioStaR7"
 
 person_columns:
@@ -67,6 +68,8 @@ enhancement_columns: # Columns created by the enhancement module
   number_of_legs_incl_imputed: "number_of_legs_incl_imputed"
   imputed_time: "imputed_time"
   imputed_leg: "imputed_leg"
+  list_of_cars: "car_list"
+  leg_from_activity: "leg_from_activity"
 
 processing_columns: # Used by several pipelines. Cols aren't in the outputs, but are in the final analysis dump.
   unique_leg_id: "unique_leg_id"

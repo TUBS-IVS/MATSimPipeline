@@ -102,7 +102,7 @@ def is_main_activity(group):
         return is_main_activity_series
 
     # If the person has more than one activity, the main activity is the first work activity
-    work_activity_rows = group[group[s.LEG_ACTIVITY_COL] == s.ACTIVITY_WORK]
+    work_activity_rows = group[group[s.LEG_TO_ACTIVITY_COL] == s.ACTIVITY_WORK]
     if not work_activity_rows.empty:
         is_main_activity_series[work_activity_rows.index[0]] = 1
         assert is_main_activity_series.shape[0] == group.shape[0]
@@ -111,7 +111,7 @@ def is_main_activity(group):
 
     # If the person has no work activity, the main activity is the first education activity
     education_activity_rows = group[
-        group[s.LEG_ACTIVITY_COL].isin([s.ACTIVITY_EDUCATION, s.ACTIVITY_EARLY_EDUCATION, s.ACTIVITY_DAYCARE])]
+        group[s.LEG_TO_ACTIVITY_COL].isin([s.ACTIVITY_EDUCATION, s.ACTIVITY_EARLY_EDUCATION, s.ACTIVITY_DAYCARE])]
     if not education_activity_rows.empty:
         is_main_activity_series[education_activity_rows.index[0]] = 1
         assert is_main_activity_series.shape[0] == group.shape[0]
@@ -239,8 +239,8 @@ def check_activity(leg_to_find, leg_to_compare):  # TODO: Possibly create a matr
         s.ACTIVITY_LEISURE: [s.ACTIVITY_ERRANDS, s.ACTIVITY_SHOPPING, s.ACTIVITY_MEETUP],
         s.ACTIVITY_MEETUP: [s.ACTIVITY_LEISURE]}
 
-    type_to_find = leg_to_find[s.LEG_ACTIVITY_COL]
-    type_to_compare = leg_to_compare[s.LEG_ACTIVITY_COL]
+    type_to_find = leg_to_find[s.LEG_TO_ACTIVITY_COL]
+    type_to_compare = leg_to_compare[s.LEG_TO_ACTIVITY_COL]
 
     if (type_to_find == type_to_compare or
             s.ACTIVITY_ACCOMPANY_ADULT in [type_to_find, type_to_compare] or
@@ -303,7 +303,7 @@ def is_protagonist(household_group):
                                f"This might lead to unexpected results.")
 
             checked_legs.append(household_group.loc[household_group["unique_leg_id"] == leg_id].index[0])
-            leg_activity = household_group.loc[household_group["unique_leg_id"] == leg_id, s.LEG_ACTIVITY_COL].iloc[0]
+            leg_activity = household_group.loc[household_group["unique_leg_id"] == leg_id, s.LEG_TO_ACTIVITY_COL].iloc[0]
             activity_rank = activities_ranked.index(leg_activity) if leg_activity in activities_ranked else -1
             leg_data.append({'leg_id': leg_id, 'activity': leg_activity, 'activity_rank': activity_rank})
 

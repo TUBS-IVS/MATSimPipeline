@@ -33,6 +33,7 @@ HOUSEHOLD_MID_ID_COL = ID_COLUMNS['household_mid_id_column']
 HOUSEHOLD_POPSIM_ID_COL = ID_COLUMNS['household_popsim_id_column']
 H_CAR_IN_HH_COL = HH_COLUMNS['car_in_hh_column']
 H_REGION_TYPE_COL = HH_COLUMNS['region_type_column']
+H_NUMBER_OF_CARS_COL = HH_COLUMNS['number_of_cars_column']
 
 # Person-related columns
 PERSON_ID_COL = ID_COLUMNS['person_id_column']
@@ -44,7 +45,7 @@ NUMBER_OF_LEGS_COL = P_COLUMNS['number_of_legs']
 # Leg-related columns
 LEG_ID_COL = ID_COLUMNS['leg_id_column']
 LEG_NON_UNIQUE_ID_COL = ID_COLUMNS['leg_non_unique_id_column']
-LEG_ACTIVITY_COL = L_COLUMNS['leg_target_activity']
+LEG_TO_ACTIVITY_COL = L_COLUMNS['leg_target_activity']
 LEG_MAIN_MODE_COL = L_COLUMNS['leg_main_mode']
 LEG_START_TIME_COL = L_COLUMNS['leg_start_time']
 LEG_END_TIME_COL = L_COLUMNS['leg_end_time']
@@ -114,6 +115,8 @@ ACT_DUR_SECONDS_COL = ENHANCEMENT_COLUMNS['activity_duration_seconds']
 NUMBER_OF_LEGS_INCL_IMPUTED_COL = ENHANCEMENT_COLUMNS['number_of_legs_incl_imputed']
 IMPUTED_TIME_COL = ENHANCEMENT_COLUMNS['imputed_time']
 IMPUTED_LEG_COL = ENHANCEMENT_COLUMNS['imputed_leg']
+LIST_OF_CARS_COL = ENHANCEMENT_COLUMNS['list_of_cars']
+LEG_FROM_ACTIVITY_COL = ENHANCEMENT_COLUMNS['leg_from_activity']
 
 # Column names that are set at runtime
 PROCESSING_COLUMNS = settings['processing_columns']
@@ -121,3 +124,4 @@ PROCESSING_COLUMNS = settings['processing_columns']
 UNIQUE_LEG_ID_COL = PROCESSING_COLUMNS['unique_leg_id']
 UNIQUE_HH_ID_COL = PROCESSING_COLUMNS['unique_household_id']
 UNIQUE_P_ID_COL = PROCESSING_COLUMNS['unique_person_id']
+

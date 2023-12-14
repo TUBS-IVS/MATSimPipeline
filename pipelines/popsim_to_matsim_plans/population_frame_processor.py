@@ -83,19 +83,17 @@ class PopulationFrameProcessor(DataFrameProcessor):
         logger.info(f"Wrote plans to MATSim xml: {output_file}")
         return output_file
 
-    def write_households_to_matsim_xml(self):
+    def write_households_to_matsim_xml(self):  # TODO: finish
         logger.info("Writing households to MATSim xml...")
         output_file = os.path.join(matsim_pipeline_setup.OUTPUT_DIR, "households.xml")
         with open(output_file, 'wb+') as f_write:
-
             households_writer = matsim.writers.HouseholdsWriter(f_write)
             households_writer.start_households()
 
             for _, hh in self.df.groupby([s.UNIQUE_HH_ID_COL]):
-
                 household_id = hh[s.UNIQUE_HH_ID_COL].iloc[0]
                 person_ids = hh[s.UNIQUE_P_ID_COL].unique().tolist()
-                vehicle_ids = hh[s.VEHICLES_COL].iloc[0]
+                vehicle_ids = hh[s.LIST_OF_CARS_COL].iloc[0]
 
                 households_writer.start_household(household_id)
                 households_writer.add_members(person_ids)
@@ -104,11 +102,50 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
             households_writer.end_households()
 
-    def write_facilities_to_matsim_xml(self):
-        raise NotImplementedError
+    def write_facilities_to_matsim_xml(self, facilities_df):  # TODO: finish
+        logger.info("Writing facilities to MATSim xml...")
+        output_file = os.path.join(matsim_pipeline_setup.OUTPUT_DIR, "facilities.xml")
+        with open(output_file, 'wb+') as f_write:
+            facilities_writer = matsim.writers.FacilitiesWriter(f_write)
+            facilities_writer.start_facilities()
+
+            for _, row in self.df.iterrows():
+                facility_id = row['facility_id']
+                x = row['x']
+                y = row['y']
+                activities = row['activities']  # Assuming this is a list of activities
+
+                facilities_writer.start_facility(facility_id, x, y)
+
+                for activity in activities:
+                    facilities_writer.add_activity(activity)
+
+                facilities_writer.end_facility()
+
+            facilities_writer.end_facilities()
 
     def write_vehicles_to_matsim_xml(self):
-        raise NotImplementedError
+        logger.info("Writing vehicles to MATSim xml...")
+        output_file = os.path.join(matsim_pipeline_setup.OUTPUT_DIR, "vehicles.xml")
+        with open(output_file, 'wb+') as f_write:
+            vehicle_writer = matsim.writers.VehiclesWriter(f_write)
+            vehicle_writer.start_vehicle_definitions()
+
+            vehicle_id = "car"
+            length = 7.5
+            width = 1.0
+            pce = 1.0
+            network_mode = "car"
+
+            vehicle_writer.add_vehicle_type(vehicle_id=vehicle_id, length=length, width=width, pce=pce,
+                                            network_mode=network_mode)
+
+            for _, hh in self.df.groupby([s.UNIQUE_HH_ID_COL]):
+                vehicle_ids: list = hh[s.LIST_OF_CARS_COL].iloc[0]
+                for vehicle_id in vehicle_ids:
+                    vehicle_writer.add_vehicle(vehicle_id=vehicle_id, vehicle_type="car")
+
+            vehicle_writer.end_vehicle_definitions()
 
     def change_last_leg_activity_to_home(self) -> None:
         """
@@ -120,9 +157,9 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
         is_last_leg = self.df[s.PERSON_ID_COL].ne(self.df[s.PERSON_ID_COL].shift(-1))
 
-        number_of_rows_to_change = len(self.df[is_last_leg & (self.df[s.LEG_ACTIVITY_COL] != s.ACTIVITY_HOME)])
+        number_of_rows_to_change = len(self.df[is_last_leg & (self.df[s.LEG_TO_ACTIVITY_COL] != s.ACTIVITY_HOME)])
 
-        self.df.loc[is_last_leg, s.LEG_ACTIVITY_COL] = s.ACTIVITY_HOME
+        self.df.loc[is_last_leg, s.LEG_TO_ACTIVITY_COL] = s.ACTIVITY_HOME
         logger.info(f"Changed last leg activity to home for {number_of_rows_to_change} of {len(self.df)} rows.")
 
     def adjust_mode_based_on_age(self):
@@ -229,14 +266,14 @@ class PopulationFrameProcessor(DataFrameProcessor):
             s.ACTIVITY_LESSONS: "leisure",
             s.ACTIVITY_UNSPECIFIED: "other",
         }
-        self.df['activity_translated_string'] = self.df[s.LEG_ACTIVITY_COL].map(activity_translation)
+        self.df['activity_translated_string'] = self.df[s.LEG_TO_ACTIVITY_COL].map(activity_translation)
         logger.info(f"Translated activities.")
 
     def write_stats(self, stat_by_columns: list = None):
         logger.info(f"Exporting stats...")
 
         stat_by_columns = [col for col in s.GEO_COLUMNS if col in self.df.columns]
-        stat_by_columns.append(s.LEG_ACTIVITY_COL)
+        stat_by_columns.append(s.LEG_TO_ACTIVITY_COL)
         # stat_by_columns.extend(["unique_household_id", "unique_person_id"])  # Very large files
         # non_stat_by_columns = [col for col in self.df.columns if col not in stat_by_columns]
 
@@ -255,7 +292,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
         Returns a pd DataFrame with the average duration and standard deviation for each activity type.
         """
         # Ignore negative and zero values
-        result = self.df[self.df["activity_duration_seconds"] > 0].groupby(s.LEG_ACTIVITY_COL)["activity_duration_seconds"].agg(
+        result = self.df[self.df["activity_duration_seconds"] > 0].groupby(s.LEG_TO_ACTIVITY_COL)[
+            "activity_duration_seconds"].agg(
             ['mean', 'std'])
         logger.info(f"Activity times distribution in seconds (mean and std): \n{result}")
         return result
@@ -267,7 +305,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
         """
         # Ignore negative values and values > 5 hours (these might be errors or error codes)
         filtered_df = self.df[(self.df[s.LEG_DURATION_MINUTES_COL] > 0) & (self.df[s.LEG_DURATION_MINUTES_COL] <= 300)]
-        result = filtered_df.groupby(s.LEG_ACTIVITY_COL)[s.LEG_DURATION_MINUTES_COL].agg(['mean', 'std']) * 60
+        result = filtered_df.groupby(s.LEG_TO_ACTIVITY_COL)[s.LEG_DURATION_MINUTES_COL].agg(['mean', 'std']) * 60
         logger.info(f"Leg times distribution in seconds (mean and std): \n{result}")
         return result
 
@@ -282,7 +320,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
         first_legs['timestamp'] = first_legs['leg_start_time'].view(np.int64)
 
         # Group by activity type and calculate mean and std of timestamps
-        result = first_legs.groupby(s.LEG_ACTIVITY_COL)['timestamp'].agg(['mean', 'std'])
+        result = first_legs.groupby(s.LEG_TO_ACTIVITY_COL)['timestamp'].agg(['mean', 'std'])
 
         result['mean'] = pd.to_datetime(result['mean'])
         result['std'] = pd.to_timedelta(result['std'])
@@ -305,7 +343,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
             if pd.isna(group.at[group.index[0], s.LEG_NON_UNIQUE_ID_COL]):
                 logger.debug(f"Person {person_id} has no legs. Skipping...")
                 continue
-            if group[s.LEG_ACTIVITY_COL].iloc[-1] == s.ACTIVITY_HOME:
+            if group[s.LEG_TO_ACTIVITY_COL].iloc[-1] == s.ACTIVITY_HOME:
                 logger.debug(f"Person {person_id} already has a home leg. Skipping...")
                 continue
             logger.debug(f"Adding return home leg for person {person_id}...")
@@ -328,7 +366,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
             # Estimate activity duration:
             last_leg = group.iloc[-1]
             similar_persons = self.find_similar_persons(last_leg, 100)
-            activity_time = similar_persons[similar_persons[s.LEG_ACTIVITY_COL] == last_leg[s.LEG_ACTIVITY_COL]][
+            activity_time = similar_persons[similar_persons[s.LEG_TO_ACTIVITY_COL] == last_leg[s.LEG_TO_ACTIVITY_COL]][
                 'activity_duration_seconds'].mean()
             if pd.isna(activity_time):
                 logger.info(f"Person {person_id} has no similar persons with the same last activity. ")
@@ -340,7 +378,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
             home_leg["unique_leg_id"] = rules.unique_leg_id(home_leg)
             home_leg[s.LEG_START_TIME_COL] = last_leg[s.LEG_END_TIME_COL] + pd.Timedelta(seconds=activity_time)
             home_leg[s.LEG_END_TIME_COL] = home_leg[s.LEG_START_TIME_COL] + pd.Timedelta(minutes=home_leg_duration)
-            home_leg[s.LEG_ACTIVITY_COL] = s.ACTIVITY_HOME
+            home_leg[s.LEG_TO_ACTIVITY_COL] = s.ACTIVITY_HOME
             home_leg[s.LEG_DURATION_MINUTES_COL] = home_leg_duration
             home_leg[s.LEG_DISTANCE_COL] = None  # Could also be estimated, but isn't necessary for the current use case
             home_leg[s.IMPUTED_LEG_COL] = 1
@@ -513,7 +551,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
                             if idx == first_index:  # Start of the day
                                 similar_persons_same_activity = similar_persons_with_last_legs.loc[
-                                    (similar_persons_with_last_legs[s.LEG_ACTIVITY_COL] == row[s.LEG_ACTIVITY_COL]) &
+                                    (similar_persons_with_last_legs[s.LEG_TO_ACTIVITY_COL] == row[s.LEG_TO_ACTIVITY_COL]) &
                                     (similar_persons_with_last_legs[s.LEG_NON_UNIQUE_ID_COL] == 1), s.LEG_START_TIME_COL]
                                 if similar_persons_same_activity.empty:
                                     logger.info(f"Person {person_id} has no similar persons with the same first activity."
@@ -528,7 +566,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
                             else:  # Other leg start times
                                 prev_end_time = person.at[idx - 1, s.LEG_END_TIME_COL]
                                 similar_persons_same_activity = similar_persons_no_last_legs.loc[
-                                    similar_persons_no_last_legs[s.LEG_ACTIVITY_COL] == person.loc[idx - 1, s.LEG_ACTIVITY_COL],
+                                    similar_persons_no_last_legs[s.LEG_TO_ACTIVITY_COL] == person.loc[
+                                        idx - 1, s.LEG_TO_ACTIVITY_COL],
                                     "activity_duration_seconds"]
                                 if similar_persons_same_activity.empty:
                                     logger.info(f"Person {person_id} has no similar persons with the same activity. "
@@ -540,8 +579,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
                             # Leg duration
                             similar_persons_same_activity = similar_persons_with_last_legs.loc[
-                                similar_persons_with_last_legs[s.LEG_ACTIVITY_COL] == row[
-                                    s.LEG_ACTIVITY_COL], s.LEG_DURATION_MINUTES_COL]
+                                similar_persons_with_last_legs[s.LEG_TO_ACTIVITY_COL] == row[
+                                    s.LEG_TO_ACTIVITY_COL], s.LEG_DURATION_MINUTES_COL]
                             if similar_persons_same_activity.empty:
                                 logger.info(f"Person {person_id} has no similar persons with the same activity. "
                                             f"Lowering standards.")
@@ -562,7 +601,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
                     loop += 1
 
                 logger.info(
-                    f"Person {person_id} updated times: \n{person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL, s.LEG_ACTIVITY_COL]]}")
+                    f"Person {person_id} updated times: \n{person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL, s.LEG_TO_ACTIVITY_COL]]}")
                 if person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]].isna().any().any():
                     logger.warning(f"Person {person_id} still has missing times. "
                                    f"Check the data and try again. Skipping...")
@@ -738,47 +777,104 @@ class PopulationFrameProcessor(DataFrameProcessor):
         logger.info("Closed connected leg groups.")
 
     def add_from_activity(self):
-        # Sort the DataFrame by person ID and leg number
-        self.df.sort_values(by=['person_id', 'leg_number'], inplace=True)
+        """
+        Add a 'from_activity' column to the DataFrame, which is the to_activity of the previous leg.
+        For the first leg of each person, set 'from_activity' based on 'starts_at_home' (-> home or unspecified).
+        :return:
+        """
+        logger.info("Adding from_activity column...")
+        # Sort the DataFrame by person ID and leg number (the df should usually already be sorted this way)
+        self.df.sort_values(by=[s.UNIQUE_P_ID_COL, s.LEG_NON_UNIQUE_ID_COL], inplace=True)
 
         # Shift the 'to_activity' down to create 'from_activity' for each group
-        self.df['from_activity'] = self.df.groupby('person_id')[s.LEG_ACTIVITY_COL].shift(1)
+        self.df[s.LEG_FROM_ACTIVITY_COL] = self.df.groupby(s.UNIQUE_P_ID_COL)[s.LEG_TO_ACTIVITY_COL].shift(1)
 
         # For the first leg of each person, set 'from_activity' based on 'starts_at_home'
         self.df.loc[(self.df[s.LEG_NON_UNIQUE_ID_COL] == 1) & (
-                self.df[s.FIRST_LEG_STARTS_AT_HOME_COL] == s.FIRST_LEG_STARTS_AT_HOME), 'from_activity'] = s.ACTIVITY_HOME
+                self.df[s.FIRST_LEG_STARTS_AT_HOME_COL] == s.FIRST_LEG_STARTS_AT_HOME), s.LEG_FROM_ACTIVITY_COL] = s.ACTIVITY_HOME
         self.df.loc[(self.df[s.LEG_NON_UNIQUE_ID_COL] == 1) & (
-                self.df[s.FIRST_LEG_STARTS_AT_HOME_COL] != s.FIRST_LEG_STARTS_AT_HOME), 'from_activity'] = s.ACTIVITY_UNSPECIFIED
+                self.df[
+                    s.FIRST_LEG_STARTS_AT_HOME_COL] != s.FIRST_LEG_STARTS_AT_HOME), s.LEG_FROM_ACTIVITY_COL] = s.ACTIVITY_UNSPECIFIED
 
         # Handle cases with no legs (NA in leg_number)
-        self.df.loc[self.df[s.LEG_NON_UNIQUE_ID_COL].isna(), 'from_activity'] = None
+        self.df.loc[self.df[s.LEG_NON_UNIQUE_ID_COL].isna(), s.LEG_FROM_ACTIVITY_COL] = None
+        logger.info("Added from_activity column.")
 
     def calculate_slack_factors(self):
         slack_factors = []
 
-        for person_id, person_trips in self.df.groupby('person_id'):
+        for person_id, person_trips in self.df.groupby(s.UNIQUE_P_ID_COL):
+            logger.debug(f"Searching slack factors at person {person_id}...")
             # Sort by ordered_id to ensure sequence
-            person_trips = person_trips.sort_values(by='ordered_id')
+            person_trips = person_trips.sort_values(by=s.LEG_NON_UNIQUE_ID_COL)
 
             # Find indirect routes by checking consecutive legs
             for i in range(len(person_trips) - 1):
                 first_leg = person_trips.iloc[i]
                 second_leg = person_trips.iloc[i + 1]
 
-                if first_leg['to_activity'] == second_leg['from_activity']:
-                    # Direct route distance
-                    direct_trip = self.df[(self.df['person_id'] == person_id) &
-                                          (self.df['from_activity'] == first_leg['from_activity']) &
-                                          (self.df['to_activity'] == second_leg['to_activity'])]
+                # This should always be true, except for missing data
+                if first_leg[s.LEG_TO_ACTIVITY_COL] == second_leg[s.LEG_FROM_ACTIVITY_COL]:
+                    # Find direct trip in both directions
+                    direct_trip = self.df[
+                        (self.df[s.UNIQUE_P_ID_COL] == person_id) &
+                        ((self.df[s.LEG_FROM_ACTIVITY_COL] == first_leg[s.LEG_FROM_ACTIVITY_COL]) &
+                         (self.df[s.LEG_TO_ACTIVITY_COL] == second_leg[s.LEG_TO_ACTIVITY_COL]) |
+                         (self.df[s.LEG_FROM_ACTIVITY_COL] == second_leg[s.LEG_TO_ACTIVITY_COL]) &
+                         (self.df[s.LEG_TO_ACTIVITY_COL] == first_leg[s.LEG_FROM_ACTIVITY_COL]))
+                        ]
 
                     if not direct_trip.empty:
-                        direct_distance = direct_trip.iloc[0]['distance']
-                        indirect_distance = first_leg['distance'] + second_leg['distance']
+                        direct_distance = direct_trip.iloc[0][s.LEG_DURATION_MINUTES_COL]
+                        indirect_distance = first_leg[s.LEG_DURATION_MINUTES_COL] + second_leg[s.LEG_DURATION_MINUTES_COL]
                         slack_factor = indirect_distance / direct_distance
-                        slack_factors.append((person_id, first_leg['from_activity'],
-                                              first_leg['to_activity'],
-                                              second_leg['to_activity'], slack_factor))
+                        if slack_factor < 1:
+                            logger.debug(f"Found an unrealistic slack factor of {slack_factor} for person {person_id} "
+                                         f"Skipping...")
+                            continue
+                        slack_factors.append((person_id,
+                                              first_leg[s.H_REGION_TYPE_COL],
+                                              first_leg[s.PERSON_AGE_COL],
+                                              first_leg[s.LEG_FROM_ACTIVITY_COL],
+                                              first_leg[s.LEG_TO_ACTIVITY_COL],
+                                              second_leg[s.LEG_TO_ACTIVITY_COL],
+                                              slack_factor))
+                        logger.debug(f"Found a slack factor of {slack_factor} for person {person_id} ")
 
-        return pd.DataFrame(slack_factors, columns=['person_id', 'start_activity',
-                                                    'middle_activity', 'end_activity',
+        return pd.DataFrame(slack_factors, columns=[s.UNIQUE_P_ID_COL,
+                                                    s.H_REGION_TYPE_COL,
+                                                    s.PERSON_AGE_COL,
+                                                    'start_activity',
+                                                    'via_activity',
+                                                    'end_activity',
                                                     'slack_factor'])
+
+    def list_cars_in_household(self):
+        """
+        Create a list of cars with unique ids in each household and add it to the DataFrame.
+        """
+        # Group by household
+        hhs = self.df.groupby(s.UNIQUE_HH_ID_COL)
+
+        for household_id, hh in hhs:
+            number_of_cars: int = hh[s.H_NUMBER_OF_CARS_COL].iloc[0]
+            if number_of_cars == 0:
+                continue
+            if number_of_cars > 30:
+                logger.debug(f"Household {household_id} has {number_of_cars} cars. "
+                             f"This is either a code for unknown number of cars or likely an error. Skipping...")
+                continue
+            # Generate unique car IDs for each household
+            car_ids = [f"{household_id}_veh_{i + 1}" for i in range(hh[s.H_NUMBER_OF_CARS_COL].iloc[0])]
+            self.df.at[hh.index[0], s.LIST_OF_CARS_COL] = car_ids
+
+    def impute_cars_in_household(self):
+        """
+        Impute the number of cars in a household if unknown, based on the number of cars in similar households.
+        """
+        self.df.loc[self.df[s.H_NUMBER_OF_CARS_COL] == 99, s.H_NUMBER_OF_CARS_COL] = None
+        logger.info(f"Imputing cars in household for {self.df[s.H_NUMBER_OF_CARS_COL].isna().sum()} of "
+                    f"{len(self.df)} rows...")
+
+        # Set all other unknown values to 0
+        self.df.loc[self.df[s.H_NUMBER_OF_CARS_COL].isna, s.H_NUMBER_OF_CARS_COL] = 0

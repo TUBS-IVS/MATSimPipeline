@@ -341,6 +341,9 @@ def summarize_slack_factors(slack_df):
     :param slack_df:
     :return:
     """
+    logger.info(f"Summarizing slack factors for {len(slack_df)} rows...")
+    slack_df = slack_df[(slack_df['slack_factor'] > 1) & (slack_df['slack_factor'] < 50)]
+    logger.info(f"Dropped outliers and false positives, {len(slack_df)} rows remaining.")
 
     grouped = slack_df.groupby(['start_activity', 'via_activity', 'end_activity'])
 
@@ -350,5 +353,5 @@ def summarize_slack_factors(slack_df):
     summary_df.columns = ['start_activity', 'via_activity', 'end_activity',
                           'median_slack_factor', 'mean_slack_factor',
                           'std_slack_factor', 'count_observations']
-
+    logger.info(f"Summarized slack factors for {len(summary_df)} unique activity combinations.")
     return summary_df

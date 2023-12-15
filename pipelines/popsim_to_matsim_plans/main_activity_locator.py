@@ -305,7 +305,7 @@ class ActivityLocator:
 
         return best_cell['cell_id'].iloc[0] if not best_cell.empty else None
 
-    def locate_sec_activities(self, legs_to_locate, tolerance):
+    def locate_sec_activities(self, legs_to_locate, tolerance):  # TODO: this is unfinished
         """
         Locate a series of activities given the known start and end positions.
 

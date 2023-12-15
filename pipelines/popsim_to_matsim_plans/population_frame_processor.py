@@ -828,7 +828,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
                         direct_distance = direct_trip.iloc[0][s.LEG_DURATION_MINUTES_COL]
                         indirect_distance = first_leg[s.LEG_DURATION_MINUTES_COL] + second_leg[s.LEG_DURATION_MINUTES_COL]
                         slack_factor = indirect_distance / direct_distance
-                        if slack_factor < 1:
+                        if slack_factor < 1 or slack_factor > 50:
                             logger.debug(f"Found an unrealistic slack factor of {slack_factor} for person {person_id} "
                                          f"Skipping...")
                             continue
@@ -853,9 +853,10 @@ class PopulationFrameProcessor(DataFrameProcessor):
         """
         Create a list of cars with unique ids in each household and add it to the DataFrame.
         """
+        logger.info("Listing cars in household...")
         # Group by household
         hhs = self.df.groupby(s.UNIQUE_HH_ID_COL)
-
+        total_cars = 0
         for household_id, hh in hhs:
             number_of_cars: int = hh[s.H_NUMBER_OF_CARS_COL].iloc[0]
             if number_of_cars == 0:
@@ -864,9 +865,14 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 logger.debug(f"Household {household_id} has {number_of_cars} cars. "
                              f"This is either a code for unknown number of cars or likely an error. Skipping...")
                 continue
+
+            total_cars += number_of_cars
+
             # Generate unique car IDs for each household
-            car_ids = [f"{household_id}_veh_{i + 1}" for i in range(hh[s.H_NUMBER_OF_CARS_COL].iloc[0])]
+            car_ids = [f"{household_id}_veh_{i + 1}" for i in range(number_of_cars)]
             self.df.at[hh.index[0], s.LIST_OF_CARS_COL] = car_ids
+
+        logger.info(f"Listed {total_cars} cars in {len(hhs)} households.")
 
     def impute_cars_in_household(self):
         """

@@ -108,8 +108,6 @@ def analyze_influence_on_slack(slack_df):
 
     # Fit the linear regression model
     model = sm.OLS(y, X).fit()
-
-    # Return the summary of the regression
     return model.summary()
 
 

@@ -1,7 +1,7 @@
 import pandas as pd
 import seaborn as sns
 from matplotlib import pyplot as plt
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import OneHotEncoder
 import statsmodels.api as sm
 
 
@@ -100,23 +100,38 @@ class DataframeAnalysis:
             plt.show()
 
 
-def analyze_influence_on_slack(slack_df):
-    # Prepare the independent variables (X) and the dependent variable (y)
-    X = slack_df[[s.H_REGION_TYPE_COL, s.PERSON_AGE_COL, 'start_activity', 'via_activity', 'end_activity']]
+def analyze_influence_on_slack(df):
+    logger.info(f"Analyzing influence on slack factor, {len(df)} rows.")
+    df = df[(df['slack_factor'] > 1) & (df['slack_factor'] < 50)].reset_index(drop=True)
+    logger.info(f"Dropped outliers and false positives, {len(df)} rows remaining.")
+
+    # One-hot encode the categorical variables
+    encoder = OneHotEncoder(drop='first')  # Drop first column to avoid multicollinearity
+    categorical_columns = [s.H_REGION_TYPE_COL, 'start_activity', 'via_activity', 'end_activity']
+    encoded_vars = encoder.fit_transform(df[categorical_columns])
+    encoded_vars_df = pd.DataFrame(encoded_vars.toarray(), columns=encoder.get_feature_names_out(categorical_columns))
+
+    # Combine with the original DataFrame
+    X = pd.concat([df[[s.PERSON_AGE_COL]].reset_index(drop=True), encoded_vars_df], axis=1)
     X = sm.add_constant(X)  # Add a constant to the model
-    y = slack_df['slack_factor']
+    y = df['slack_factor']
 
     # Fit the linear regression model
     model = sm.OLS(y, X).fit()
+
+    # Return the summary of the regression
     return model.summary()
 
 
-df = h.read_csv("data/MiD2017_Wege_edited.csv")
-# analysis = DataframeAnalysis(df)
-columns_to_plot = []
-# columns_to_plot.extend(s.L_COLUMNS.values())
-columns_to_plot.extend(s.P_COLUMNS.values())
-columns_to_plot.extend(s.HH_COLUMNS.values())
-# analysis.plot_valid_vs_anomalous(columns_to_plot)
-for col in s.L_COLUMNS.values():
-    h.plot_column(df, col)
+# df = h.read_csv("data/MiD2017_Wege_edited.csv")
+# # analysis = DataframeAnalysis(df)
+# columns_to_plot = []
+# # columns_to_plot.extend(s.L_COLUMNS.values())
+# columns_to_plot.extend(s.P_COLUMNS.values())
+# columns_to_plot.extend(s.HH_COLUMNS.values())
+# # analysis.plot_valid_vs_anomalous(columns_to_plot)
+# for col in s.L_COLUMNS.values():
+#     h.plot_column(df, col)
+
+slack_df = h.read_csv("output/20231215_001306/slack_factors.csv")
+print(analyze_influence_on_slack(slack_df))

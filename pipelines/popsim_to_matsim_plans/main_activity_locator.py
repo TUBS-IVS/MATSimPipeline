@@ -242,7 +242,7 @@ class ActivityLocator:
         :param activity_from: The starting activity.
         :param activity_via: The intermediate (via) activity.
         :param activity_to: The ending activity.
-        :return: Total adjusted travel time as a float.
+        :return: Expected travel time of the direct trip in minutes.
         """
 
         # Retrieve the slack factor based on activities
@@ -264,25 +264,31 @@ class ActivityLocator:
         expected_time = (time_from_start_to_via + time_from_via_to_end) * slack_factor
         return expected_time
 
-    def locate_single_activity(self, legs_df, min_tolerance, max_tolerance):
+    def locate_single_activity(self, start_cell, end_cell, activity_type, time_start_to_act, time_act_to_end,
+                               min_tolerance=None, max_tolerance=None):
         """
         Locate a single activity between two known places using travel time matrix and capacity data.
-        :param legs_df: DataFrame with the legs of a trip, including the activity to be located.
+        When the maximum tolerance is exceeded, the tolerance is increased rapidly to find any viable location,
+        with a logged warning. If this still fails, a random cell is returned to keep the pipeline running,
+        with a logged error.
+        :param start_cell: Cell ID of the starting location.
+        :param end_cell: Cell ID of the ending location.
+        :param activity_type: Activity type of the activity to locate.
+        :param time_start_to_act: Travel time from the start to the activity in minutes.
+        :param time_act_to_end: Travel time from the activity to the end in minutes.
         :param min_tolerance: Minimum tolerance in minutes.
         :param max_tolerance: Maximum tolerance in minutes.
-        :return: Cell ID of the best-suited location for the activity, or None if not found.
+        :return: Cell ID of the best-suited location for the activity.
         """
-        start_cell = legs_df.iloc[0]['cell_id']
-        end_cell = legs_df.iloc[-1]['cell_id']
-        activity_type = legs_df.iloc[1]['activity_type']
+        if min_tolerance is None:
+            min_tolerance = 2
+        if max_tolerance is None:
+            max_tolerance = 15
 
-        time_start_to_act = legs_df.iloc[1]['desired_time_from_start']
-        time_act_to_end = legs_df.iloc[1]['desired_time_to_end']
-
-        potential_cells = None
-        step_size = (max_tolerance-min_tolerance)/5
+        step_size = max((max_tolerance - min_tolerance) / 5, 2)
         tolerance = min_tolerance
-        while potential_cells is None and tolerance <= max_tolerance:
+        exceed_max_tolerance_turns = 5
+        while True:
 
             # Filter cells based on travel time criteria (times in minutes)
             potential_cells_start = self.tt_matrix_df[(self.tt_matrix_df['from_cell'] == start_cell) &
@@ -295,19 +301,35 @@ class ActivityLocator:
 
             # Find intersecting cells from both sets
             potential_cells = set(potential_cells_start['to_cell']).intersection(set(potential_cells_end['from_cell']))
-
-            tolerance += step_size
+            if potential_cells:
+                break
+            if tolerance <= max_tolerance:
+                tolerance += step_size
+            else:
+                # If max tolerance is exceeded, go mad to find a cell
+                tolerance += (step_size * 5)
+                exceed_max_tolerance_turns -= 1
+                logger.warning(
+                    f"Exceeding maximum tolerance of {max_tolerance} minutes to find viable location. Tolerance is now {tolerance} minutes.")
+                if exceed_max_tolerance_turns == 0:
+                    logger.error(
+                        f"No cell found for activity type {activity_type} between cells {start_cell} and {end_cell}."
+                        f"Returning random cell to keep the pipeline running.")
+                    return random.choice(self.capacity_points_gdf['cell_id'].unique())
 
         # Choose the cell with the highest capacity for the activity type
         best_cell = self.capacity_points_gdf[self.capacity_points_gdf['cell_id'].isin(potential_cells) &
                                              (self.capacity_points_gdf['activity_type'] == activity_type)].nlargest(1,
                                                                                                                     'capacity')
-
+        if best_cell.empty:  # For whatever reason
+            logger.error(f"No cell found for activity type {activity_type} between cells {start_cell} and {end_cell}."
+                         f"Returning random cell to keep the pipeline running.")
+            return random.choice(self.capacity_points_gdf['cell_id'].unique())
         return best_cell['cell_id'].iloc[0] if not best_cell.empty else None
 
-    def locate_sec_activities(self, legs_to_locate, tolerance):  # TODO: this is unfinished
+    def locate_multiple_activities(self, legs_to_locate, tolerance):
         """
-        Locate a series of activities given the known start and end positions.
+        Iteratively locate a series of activities in a trip.
 
         :param legs_to_locate: DataFrame with legs of a trip, including known start and end positions.
         :param tolerance: Tolerance for travel time deviation.
@@ -315,24 +337,294 @@ class ActivityLocator:
         """
         located_activities = {}
         total_legs = len(legs_to_locate)
+        estimated_times = []
 
-        if total_legs == 2:  # Directly use locate_single_activity for one intermediate leg
-            activity_cell_id = self.locate_single_activity(legs_to_locate, tolerance)
-            activity_type = legs_to_locate.iloc[1]['activity_type']
-            located_activities[activity_type] = activity_cell_id
-        else:
-            # Break down into overlapping two-leg pairs and locate activities iteratively
+        # Iteratively break down the trip and estimate times
+        while total_legs > 2:
             for i in range(1, total_legs - 1):
-                two_leg_pair = legs_to_locate.iloc[i - 1: i + 2]  # Get two-leg pair
-                expected_time_with_slack = self.calculate_expected_time_with_slack(two_leg_pair)
+                # Get the time for the current and next leg
+                time_current_leg = legs_to_locate.iloc[i][s.LEG_DURATION_MINUTES_COL]
+                time_next_leg = legs_to_locate.iloc[i + 1][s.LEG_DURATION_MINUTES_COL]
 
-                # Locate the activity for the current two-leg pair
-                activity_cell_id = self.locate_single_activity(two_leg_pair, expected_time_with_slack, tolerance)
-                activity_type = two_leg_pair.iloc[1]['activity_type']
+                # Activities for the current segment
+                activity_from = legs_to_locate.iloc[i - 1][s.LEG_ACTIVITY_COL]
+                activity_via = legs_to_locate.iloc[i][s.LEG_ACTIVITY_COL]
+                activity_to = legs_to_locate.iloc[i + 1][s.LEG_ACTIVITY_COL]
 
-                if activity_cell_id:
-                    located_activities[activity_type] = activity_cell_id
+                # Calculate expected time with slack
+                expected_time = self.calculate_expected_time_with_slack(time_current_leg, time_next_leg, activity_from,
+                                                                        activity_via, activity_to)
+                estimated_times.append((activity_via, expected_time))
+
+            # Remove the activity that has been processed and update total_legs
+            legs_to_locate = legs_to_locate.drop(legs_to_locate.index[1])
+            total_legs -= 1
+
+        # Locate each activity based on the estimated times
+        for activity, time in estimated_times:
+            activity_leg = legs_to_locate[legs_to_locate[s.LEG_ACTIVITY_COL] == activity]
+            cell_id = self.locate_single_activity(activity_leg, time, tolerance)
+            located_activities[activity] = cell_id
 
         return located_activities
+
+    def locate_activities_iteratively(self, legs_to_locate, tolerance):
+        """
+        Iteratively locate multiple activities in a trip by simplifying the trip
+        into solvable segments and then locating each activity.
+
+        :param legs_to_locate: DataFrame with legs of a trip, including start and end.
+        :param tolerance: Tolerance for travel time deviation.
+        :return: Ordered dictionary with cell IDs for each located activity.
+        """
+        from collections import OrderedDict
+
+        # Step 0: Initialize an ordered dictionary to remember the located activities
+        located_activities = OrderedDict()
+
+        # Step 1: Iteratively break down the trip into two-leg segments
+        while len(legs_to_locate) > 2:
+            # Step 2: Get distances for pairs of activities that have one in between
+            for i in range(1, len(legs_to_locate) - 2, 2):
+                activity_from = legs_to_locate.iloc[i]['activity_type']
+                activity_via = legs_to_locate.iloc[i + 1]['activity_type']
+                activity_to = legs_to_locate.iloc[i + 2]['activity_type']
+                time_from = legs_to_locate.iloc[i]['desired_time_from_start']
+                time_to = legs_to_locate.iloc[i + 2]['desired_time_to_end']
+
+                # Calculate expected time with slack for each segment
+                expected_time = self.calculate_expected_time_with_slack(time_from, time_to, activity_from, activity_via,
+                                                                        activity_to)
+
+                # Save the calculated expected time
+                located_activities[(activity_from, activity_via, activity_to)] = expected_time
+
+            # Remove the last activity that has been processed to simplify the chain
+            legs_to_locate = legs_to_locate.iloc[:-1]
+
+        # Step 3: Locate each activity using the saved expected times
+        for (activity_from, activity_via, activity_to), time in located_activities.items():
+            # Locate each activity as a one-activity problem using the expected time
+            located_cell_id = self.locate_single_activity(activity_from, activity_via, activity_to, time, tolerance)
+            located_activities[activity_via] = located_cell_id
+
+        return located_activities
+
+    def locate_sec_chain(self, legs_to_locate):  # TODO: refactor as recursive function
+        num_legs = len(legs_to_locate)
+        if num_legs == 2:
+            # Locate the activity between the two known locations
+            self.locate_single_activity(legs_to_locate.iloc[0]['cell_from'],
+                                        legs_to_locate.iloc[1]['cell_to'],
+                                        legs_to_locate.iloc[0][s.LEG_TO_ACTIVITY_COL],
+                                        legs_to_locate.iloc[0][s.LEG_DURATION_MINUTES_COL],
+                                        legs_to_locate.iloc[1][s.LEG_DURATION_MINUTES_COL],
+                                        1, 10)
+        elif num_legs == 3:
+            # Calc time from start to second activity
+            time_Start_B = self.calculate_expected_time_with_slack(legs_to_locate.iloc[0][s.LEG_DURATION_MINUTES_COL],
+                                                               legs_to_locate.iloc[1][s.LEG_DURATION_MINUTES_COL],
+                                                               legs_to_locate.iloc[0][s.LEG_FROM_ACTIVITY_COL],
+                                                               legs_to_locate.iloc[0][s.LEG_TO_ACTIVITY_COL],
+                                                               legs_to_locate.iloc[1][s.LEG_TO_ACTIVITY_COL])
+
+            # Locate second activity
+            cell_B = self.locate_single_activity(legs_to_locate.iloc[0]['cell_from'],
+                                                 legs_to_locate.iloc[2]['cell_to'],
+                                                 legs_to_locate.iloc[1][s.LEG_TO_ACTIVITY_COL],
+                                                 time_Start_B,
+                                                 legs_to_locate.iloc[2][s.LEG_DURATION_MINUTES_COL])
+
+            # Locate first activity
+            cell_A = self.locate_single_activity(legs_to_locate.iloc[0]['cell_from'],
+                                                 cell_B,
+                                                 legs_to_locate.iloc[0][s.LEG_TO_ACTIVITY_COL],
+                                                 legs_to_locate.iloc[0][s.LEG_DURATION_MINUTES_COL],
+                                                 legs_to_locate.iloc[1][s.LEG_DURATION_MINUTES_COL])
+
+            # Save cells
+            legs_to_locate.iloc[0]['cell_to'] = cell_A
+            legs_to_locate.iloc[1]['cell_from'] = cell_A
+            legs_to_locate.iloc[1]['cell_to'] = cell_B
+            legs_to_locate.iloc[2]['cell_from'] = cell_B
+
+        elif num_legs == 4:
+            # Calc time from start to second activity
+            time_Start_B = self.calculate_expected_time_with_slack(legs_to_locate.iloc[0][s.LEG_DURATION_MINUTES_COL],
+                                                               legs_to_locate.iloc[1][s.LEG_DURATION_MINUTES_COL],
+                                                               legs_to_locate.iloc[0][s.LEG_FROM_ACTIVITY_COL],
+                                                               legs_to_locate.iloc[0][s.LEG_TO_ACTIVITY_COL],
+                                                               legs_to_locate.iloc[1][s.LEG_TO_ACTIVITY_COL])
+            # Calc time from second activity to end
+            time_B_End = self.calculate_expected_time_with_slack(legs_to_locate.iloc[2][s.LEG_DURATION_MINUTES_COL],
+                                                               legs_to_locate.iloc[3][s.LEG_DURATION_MINUTES_COL],
+                                                               legs_to_locate.iloc[2][s.LEG_FROM_ACTIVITY_COL],
+                                                               legs_to_locate.iloc[2][s.LEG_TO_ACTIVITY_COL],
+                                                               legs_to_locate.iloc[3][s.LEG_TO_ACTIVITY_COL])
+
+            # Locate second activity
+            cell_B = self.locate_single_activity(legs_to_locate.iloc[0]['cell_from'],
+                                                 legs_to_locate.iloc[2]['cell_to'],
+                                                 legs_to_locate.iloc[1][s.LEG_TO_ACTIVITY_COL],
+                                                 time_Start_B,
+                                                 time_B_End)
+
+            # Locate first activity
+            cell_A = self.locate_single_activity(legs_to_locate.iloc[0]['cell_from'],
+                                                 cell_B,
+                                                 legs_to_locate.iloc[0][s.LEG_TO_ACTIVITY_COL],
+                                                 legs_to_locate.iloc[0][s.LEG_DURATION_MINUTES_COL],
+                                                 legs_to_locate.iloc[1][s.LEG_DURATION_MINUTES_COL])
+
+            # Locate third activity
+            cell_C = self.locate_single_activity(cell_B,
+                                                 legs_to_locate.iloc[3]['cell_to'],
+                                                 legs_to_locate.iloc[2][s.LEG_TO_ACTIVITY_COL],
+                                                 legs_to_locate.iloc[2][s.LEG_DURATION_MINUTES_COL],
+                                                 legs_to_locate.iloc[3][s.LEG_DURATION_MINUTES_COL])
+
+            # Save cells
+            legs_to_locate.iloc[0]['cell_to'] = cell_A
+            legs_to_locate.iloc[1]['cell_from'] = cell_A
+            legs_to_locate.iloc[1]['cell_to'] = cell_B
+            legs_to_locate.iloc[2]['cell_from'] = cell_B
+            legs_to_locate.iloc[2]['cell_to'] = cell_C
+            legs_to_locate.iloc[3]['cell_from'] = cell_C
+
+        elif num_legs == 5:
+            # Calc time from start to second activity
+            time_Start_B = self.calculate_expected_time_with_slack(legs_to_locate.iloc[0][s.LEG_DURATION_MINUTES_COL],
+                                                               legs_to_locate.iloc[1][s.LEG_DURATION_MINUTES_COL],
+                                                               legs_to_locate.iloc[0][s.LEG_FROM_ACTIVITY_COL],
+                                                               legs_to_locate.iloc[0][s.LEG_TO_ACTIVITY_COL],
+                                                               legs_to_locate.iloc[1][s.LEG_TO_ACTIVITY_COL])
+            # Calc time from second activity to fourth activity
+            time_B_D = self.calculate_expected_time_with_slack(legs_to_locate.iloc[2][s.LEG_DURATION_MINUTES_COL],
+                                                               legs_to_locate.iloc[3][s.LEG_DURATION_MINUTES_COL],
+                                                               legs_to_locate.iloc[2][s.LEG_FROM_ACTIVITY_COL],
+                                                               legs_to_locate.iloc[2][s.LEG_TO_ACTIVITY_COL],
+                                                               legs_to_locate.iloc[3][s.LEG_TO_ACTIVITY_COL])
+
+            # Calc time from start to fourth activity
+            time_Start_D = self.calculate_expected_time_with_slack(time_Start_B,
+                                                               time_B_D,
+                                                               legs_to_locate.iloc[0][s.LEG_FROM_ACTIVITY_COL],
+                                                               legs_to_locate.iloc[1][s.LEG_TO_ACTIVITY_COL],
+                                                               legs_to_locate.iloc[3][s.LEG_TO_ACTIVITY_COL])
+
+            # Locate fourth activity
+            cell_D = self.locate_single_activity(legs_to_locate.iloc[0]['cell_from'],
+                                                 legs_to_locate.iloc[4]['cell_to'],
+                                                 legs_to_locate.iloc[3][s.LEG_TO_ACTIVITY_COL],
+                                                 time_Start_D,
+                                                 legs_to_locate.iloc[4][s.LEG_DURATION_MINUTES_COL])
+
+            # Locate second activity
+            cell_B = self.locate_single_activity(legs_to_locate.iloc[0]['cell_from'],
+                                                 cell_D,
+                                                 legs_to_locate.iloc[1][s.LEG_TO_ACTIVITY_COL],
+                                                 time_Start_B,
+                                                 time_B_D)
+
+            # Locate first activity
+            cell_A = self.locate_single_activity(legs_to_locate.iloc[0]['cell_from'],
+                                                 cell_B,
+                                                 legs_to_locate.iloc[0][s.LEG_TO_ACTIVITY_COL],
+                                                 legs_to_locate.iloc[0][s.LEG_DURATION_MINUTES_COL],
+                                                 legs_to_locate.iloc[1][s.LEG_DURATION_MINUTES_COL])
+
+            # Locate third activity
+            cell_C = self.locate_single_activity(cell_B,
+                                                 cell_D,
+                                                 legs_to_locate.iloc[2][s.LEG_TO_ACTIVITY_COL],
+                                                 legs_to_locate.iloc[2][s.LEG_DURATION_MINUTES_COL],
+                                                 legs_to_locate.iloc[3][s.LEG_DURATION_MINUTES_COL])
+
+            # Save cells
+            legs_to_locate.iloc[0]['cell_to'] = cell_A
+            legs_to_locate.iloc[1]['cell_from'] = cell_A
+            legs_to_locate.iloc[1]['cell_to'] = cell_B
+            legs_to_locate.iloc[2]['cell_from'] = cell_B
+            legs_to_locate.iloc[2]['cell_to'] = cell_C
+            legs_to_locate.iloc[3]['cell_from'] = cell_C
+            legs_to_locate.iloc[3]['cell_to'] = cell_D
+            legs_to_locate.iloc[4]['cell_from'] = cell_D
+
+
+        elif num_legs == 6:
+            # Calc time from start to second activity
+            time_Start_B = self.calculate_expected_time_with_slack(legs_to_locate.iloc[0][s.LEG_DURATION_MINUTES_COL],
+                                                               legs_to_locate.iloc[1][s.LEG_DURATION_MINUTES_COL],
+                                                               legs_to_locate.iloc[0][s.LEG_FROM_ACTIVITY_COL],
+                                                               legs_to_locate.iloc[0][s.LEG_TO_ACTIVITY_COL],
+                                                               legs_to_locate.iloc[1][s.LEG_TO_ACTIVITY_COL])
+            # Calc time from second activity to fourth activity
+            time_B_D = self.calculate_expected_time_with_slack(legs_to_locate.iloc[2][s.LEG_DURATION_MINUTES_COL],
+                                                               legs_to_locate.iloc[3][s.LEG_DURATION_MINUTES_COL],
+                                                               legs_to_locate.iloc[2][s.LEG_FROM_ACTIVITY_COL],
+                                                               legs_to_locate.iloc[2][s.LEG_TO_ACTIVITY_COL],
+                                                               legs_to_locate.iloc[3][s.LEG_TO_ACTIVITY_COL])
+            # Calc time from fourth activity to end activity
+            time_D_End = self.calculate_expected_time_with_slack(legs_to_locate.iloc[4][s.LEG_DURATION_MINUTES_COL],
+                                                               legs_to_locate.iloc[5][s.LEG_DURATION_MINUTES_COL],
+                                                               legs_to_locate.iloc[4][s.LEG_FROM_ACTIVITY_COL],
+                                                               legs_to_locate.iloc[4][s.LEG_TO_ACTIVITY_COL],
+                                                               legs_to_locate.iloc[5][s.LEG_TO_ACTIVITY_COL])
+
+            # Calc time from start to fourth activity
+            time_Start_D = self.calculate_expected_time_with_slack(time_Start_B,
+                                                               time_B_D,
+                                                               legs_to_locate.iloc[0][s.LEG_FROM_ACTIVITY_COL],
+                                                               legs_to_locate.iloc[1][s.LEG_TO_ACTIVITY_COL],
+                                                               legs_to_locate.iloc[3][s.LEG_TO_ACTIVITY_COL])
+
+            # Locate fourth activity
+            cell_D = self.locate_single_activity(legs_to_locate.iloc[0]['cell_from'],
+                                                    legs_to_locate.iloc[5]['cell_to'],
+                                                    legs_to_locate.iloc[3][s.LEG_TO_ACTIVITY_COL],
+                                                    time_Start_D,
+                                                    time_D_End)
+
+            # Locate second activity
+            cell_B = self.locate_single_activity(legs_to_locate.iloc[0]['cell_from'],
+                                                    cell_D,
+                                                    legs_to_locate.iloc[1][s.LEG_TO_ACTIVITY_COL],
+                                                    time_Start_B,
+                                                    time_B_D)
+
+            # Locate first activity
+            cell_A = self.locate_single_activity(legs_to_locate.iloc[0]['cell_from'],
+                                                    cell_B,
+                                                    legs_to_locate.iloc[0][s.LEG_TO_ACTIVITY_COL],
+                                                    legs_to_locate.iloc[0][s.LEG_DURATION_MINUTES_COL],
+                                                    legs_to_locate.iloc[1][s.LEG_DURATION_MINUTES_COL])
+
+            # Locate third activity
+            cell_C = self.locate_single_activity(cell_B,
+                                                    cell_D,
+                                                    legs_to_locate.iloc[2][s.LEG_TO_ACTIVITY_COL],
+                                                    legs_to_locate.iloc[2][s.LEG_DURATION_MINUTES_COL],
+                                                    legs_to_locate.iloc[3][s.LEG_DURATION_MINUTES_COL])
+
+            # Locate fifth activity
+            cell_E = self.locate_single_activity(cell_D,
+                                                    legs_to_locate.iloc[5]['cell_to'],
+                                                    legs_to_locate.iloc[4][s.LEG_TO_ACTIVITY_COL],
+                                                    legs_to_locate.iloc[4][s.LEG_DURATION_MINUTES_COL],
+                                                    legs_to_locate.iloc[5][s.LEG_DURATION_MINUTES_COL])
+
+            # Save cells
+            legs_to_locate.iloc[0]['cell_to'] = cell_A
+            legs_to_locate.iloc[1]['cell_from'] = cell_A
+            legs_to_locate.iloc[1]['cell_to'] = cell_B
+            legs_to_locate.iloc[2]['cell_from'] = cell_B
+            legs_to_locate.iloc[2]['cell_to'] = cell_C
+            legs_to_locate.iloc[3]['cell_from'] = cell_C
+            legs_to_locate.iloc[3]['cell_to'] = cell_D
+            legs_to_locate.iloc[4]['cell_from'] = cell_D
+            legs_to_locate.iloc[4]['cell_to'] = cell_E
+            legs_to_locate.iloc[5]['cell_from'] = cell_E
+
+
 
 

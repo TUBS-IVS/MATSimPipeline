@@ -815,9 +815,13 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
                 # This should always be true, except for missing data
                 if first_leg[s.LEG_TO_ACTIVITY_COL] == second_leg[s.LEG_FROM_ACTIVITY_COL]:
-                    # Find direct trip in both directions
+
                     direct_trip = self.df[
                         (self.df[s.UNIQUE_P_ID_COL] == person_id) &
+                        # Exclude the two legs we're checking
+                        (self.df[s.LEG_NON_UNIQUE_ID_COL] != first_leg[s.LEG_NON_UNIQUE_ID_COL]) &
+                        (self.df[s.LEG_NON_UNIQUE_ID_COL] != second_leg[s.LEG_NON_UNIQUE_ID_COL]) &
+                        # Find direct trip in both directions
                         ((self.df[s.LEG_FROM_ACTIVITY_COL] == first_leg[s.LEG_FROM_ACTIVITY_COL]) &
                          (self.df[s.LEG_TO_ACTIVITY_COL] == second_leg[s.LEG_TO_ACTIVITY_COL]) |
                          (self.df[s.LEG_FROM_ACTIVITY_COL] == second_leg[s.LEG_TO_ACTIVITY_COL]) &
@@ -874,7 +878,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
         logger.info(f"Listed {total_cars} cars in {len(hhs)} households.")
 
-    def impute_cars_in_household(self):
+    def impute_cars_in_household(self):  # TODO: add some actual imputation
         """
         Impute the number of cars in a household if unknown, based on the number of cars in similar households.
         """
@@ -884,3 +888,33 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
         # Set all other unknown values to 0
         self.df.loc[self.df[s.H_NUMBER_OF_CARS_COL].isna, s.H_NUMBER_OF_CARS_COL] = 0
+
+    def mark_mirroring_main_activities(self, duration_threshold=60):  # TODO sat. morning: finish this
+        """
+        Mark activities that mirror the peron's main activity; activities that still likely represent the same main activity, but
+        are separated by a different, short, activity (e.g. a lunch break between two work activities).
+        :param duration_threshold:
+        :return:
+        """
+        # Vectorized because it's insanely faster than looping
+        # Create shifted columns for comparison
+        self.df['next_person_id'] = self.df['person_id'].shift(-1)
+        self.df['next_act_dur'] = self.df['act_dur'].shift(-1)
+        self.df['next_next_activity'] = self.df['activity'].shift(-2)
+        self.df['next_next_person_id'] = self.df['person_id'].shift(-2)
+
+        # Condition for short duration activity following a main activity
+        short_duration_condition = (self.df['is_main'] == 1) & \
+                                   (self.df['next_person_id'] == self.df['person_id']) & \
+                                   (self.df['next_act_dur'] < duration_threshold)
+
+        # Condition for the same activity after the short duration activity
+        same_activity_condition = (self.df['next_next_activity'] == self.df['activity']) & \
+                                  (self.df['next_next_person_id'] == self.df['person_id'])
+
+        # Combine conditions and assign to the new column
+        self.df['mirrors_main_activity'] = ((short_duration_condition & same_activity_condition).shift(2).fillna(False)).astype(
+            int)
+
+        # Drop the temporary shifted columns
+        self.df.drop(['next_person_id', 'next_act_dur', 'next_next_activity', 'next_next_person_id'], axis=1, inplace=True)

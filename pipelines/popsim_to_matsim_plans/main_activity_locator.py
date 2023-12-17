@@ -20,21 +20,21 @@ class ActivityLocator:
     :param persons: GeoDataFrame or DataFrame with persons, their home location point, target travel times and activities (LEGS = ROWS!!)
     :param capacities: GeoDataFrame, DataFrame or Path to .shp with activity location points and their capacities
     :param cells_shp_path: Path to a shapefile with cells
-    :param tt_matrix_csv_path: Path to a csv file with travel times between cells
+    :param tt_matrices: Dictionary of travel time matrix dfs, with the mode and time (hour) as keys
     :param persons_crs: CRS of the persons data (if given as a DataFrame)
     :param capacities_crs: CRS of the capacities data (if given as a DataFrame)
     :param persons_geometry_col: Name of the geometry column in the persons data (if given as a DataFrame)
     :param capacities_geometry_col: Name of the geometry column in the capacities data (if given as a DataFrame)
     """
 
-    def __init__(self, persons, capacities, cells_shp_path, tt_matrix_csv_path, slack_factors_csv_path, target_crs="EPSG:25832",
+    def __init__(self, persons, capacities, cells_shp_path, tt_matrices: dict, slack_factors_csv_path, target_crs="EPSG:25832",
                  persons_crs=None, capacities_crs=None,
                  persons_geometry_col=None, capacities_geometry_col=None):
 
         self.persons_gdf = self.load_data_into_gdf(persons, persons_geometry_col, persons_crs)
         self.capacity_points_gdf = self.load_data_into_gdf(capacities, capacities_geometry_col, capacities_crs)
         self.cells_gdf: gpd.GeoDataFrame = self.load_data_into_gdf(cells_shp_path)
-        self.tt_matrix_df = pd.read_csv(tt_matrix_csv_path)
+        self.tt_matrices = tt_matrices
         self.slack_factors_df = pd.read_csv(slack_factors_csv_path)
 
         self.target_crs = target_crs
@@ -83,6 +83,12 @@ class ActivityLocator:
         if self.cells_gdf.crs != common_crs:
             logger.info(f"Matching CRS of cells data from {self.cells_gdf.crs} to {common_crs}...")
             self.cells_gdf = self.cells_gdf.to_crs(common_crs)
+
+    # def combine_tt_matrices(self, df_car, df_pt):
+    #     df_car = df_car.rename(columns={'VALUE': 'time_car'})
+    #     df_pt = df_pt.rename(columns={'VALUE': 'time_pt'})
+    #     combined_df = pd.merge(df_car, df_pt, on=['FROM', 'TO'], how='outer')
+    #     return combined_df
 
     def assign_cells_to_persons(self):
         # Perform spatial join to find the cell each person is in
@@ -145,13 +151,14 @@ class ActivityLocator:
 
         return self.capacity_cells_df
 
-    def assign_persons_to_cells(self):
+    def assign_persons_to_cells(self):  # TODO: group by mode and time to get right tt df
 
         n = s.N_CLOSEST_CELLS
         for _, cell in self.cells_gdf.iterrows():
             capacity_updates = {}
             persons_in_cell = self.persons_gdf[self.persons_gdf["cell_id"] == cell['cell_id']].groupby(
                 s.LEG_DURATION_MINUTES_COL)
+            cell_travel_times = self.tt_matrices['car'][self.tt_matrices['car']['FROM'] == cell['cell_id']]
             cell_travel_times = self.tt_matrix_df[self.tt_matrix_df['FROM'] == cell['cell_id']]
 
             for target_time, group in persons_in_cell:
@@ -327,90 +334,7 @@ class ActivityLocator:
             return random.choice(self.capacity_points_gdf['cell_id'].unique())
         return best_cell['cell_id'].iloc[0] if not best_cell.empty else None
 
-    def locate_multiple_activities(self, legs_to_locate, tolerance):
-        """
-        Iteratively locate a series of activities in a trip.
-
-        :param legs_to_locate: DataFrame with legs of a trip, including known start and end positions.
-        :param tolerance: Tolerance for travel time deviation.
-        :return: Dictionary with cell IDs for each located activity.
-        """
-        located_activities = {}
-        total_legs = len(legs_to_locate)
-        estimated_times = []
-
-        # Iteratively break down the trip and estimate times
-        while total_legs > 2:
-            for i in range(1, total_legs - 1):
-                # Get the time for the current and next leg
-                time_current_leg = legs_to_locate.iloc[i][s.LEG_DURATION_MINUTES_COL]
-                time_next_leg = legs_to_locate.iloc[i + 1][s.LEG_DURATION_MINUTES_COL]
-
-                # Activities for the current segment
-                activity_from = legs_to_locate.iloc[i - 1][s.LEG_ACTIVITY_COL]
-                activity_via = legs_to_locate.iloc[i][s.LEG_ACTIVITY_COL]
-                activity_to = legs_to_locate.iloc[i + 1][s.LEG_ACTIVITY_COL]
-
-                # Calculate expected time with slack
-                expected_time = self.calculate_expected_time_with_slack(time_current_leg, time_next_leg, activity_from,
-                                                                        activity_via, activity_to)
-                estimated_times.append((activity_via, expected_time))
-
-            # Remove the activity that has been processed and update total_legs
-            legs_to_locate = legs_to_locate.drop(legs_to_locate.index[1])
-            total_legs -= 1
-
-        # Locate each activity based on the estimated times
-        for activity, time in estimated_times:
-            activity_leg = legs_to_locate[legs_to_locate[s.LEG_ACTIVITY_COL] == activity]
-            cell_id = self.locate_single_activity(activity_leg, time, tolerance)
-            located_activities[activity] = cell_id
-
-        return located_activities
-
-    def locate_activities_iteratively(self, legs_to_locate, tolerance):
-        """
-        Iteratively locate multiple activities in a trip by simplifying the trip
-        into solvable segments and then locating each activity.
-
-        :param legs_to_locate: DataFrame with legs of a trip, including start and end.
-        :param tolerance: Tolerance for travel time deviation.
-        :return: Ordered dictionary with cell IDs for each located activity.
-        """
-        from collections import OrderedDict
-
-        # Step 0: Initialize an ordered dictionary to remember the located activities
-        located_activities = OrderedDict()
-
-        # Step 1: Iteratively break down the trip into two-leg segments
-        while len(legs_to_locate) > 2:
-            # Step 2: Get distances for pairs of activities that have one in between
-            for i in range(1, len(legs_to_locate) - 2, 2):
-                activity_from = legs_to_locate.iloc[i]['activity_type']
-                activity_via = legs_to_locate.iloc[i + 1]['activity_type']
-                activity_to = legs_to_locate.iloc[i + 2]['activity_type']
-                time_from = legs_to_locate.iloc[i]['desired_time_from_start']
-                time_to = legs_to_locate.iloc[i + 2]['desired_time_to_end']
-
-                # Calculate expected time with slack for each segment
-                expected_time = self.calculate_expected_time_with_slack(time_from, time_to, activity_from, activity_via,
-                                                                        activity_to)
-
-                # Save the calculated expected time
-                located_activities[(activity_from, activity_via, activity_to)] = expected_time
-
-            # Remove the last activity that has been processed to simplify the chain
-            legs_to_locate = legs_to_locate.iloc[:-1]
-
-        # Step 3: Locate each activity using the saved expected times
-        for (activity_from, activity_via, activity_to), time in located_activities.items():
-            # Locate each activity as a one-activity problem using the expected time
-            located_cell_id = self.locate_single_activity(activity_from, activity_via, activity_to, time, tolerance)
-            located_activities[activity_via] = located_cell_id
-
-        return located_activities
-
-    def locate_sec_chain(self, legs_to_locate):  # TODO: refactor as recursive function
+    def locate_sec_chain(self, legs_to_locate):  # TODO: refactor as recursive functions
         num_legs = len(legs_to_locate)
         if num_legs == 2:
             # Locate the activity between the two known locations

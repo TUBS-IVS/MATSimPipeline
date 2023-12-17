@@ -145,14 +145,15 @@ def enhance_travel_survey():
     population.df[s.FIRST_LEG_STARTS_AT_HOME_COL] = s.FIRST_LEG_STARTS_AT_HOME  # TESTING
     # population.change_last_leg_activity_to_home()
 
-    population.list_cars_in_household()  # TESTING
+    population.list_cars_in_household()  # TESTING, should be in main pipeline
 
     population.add_from_activity()
+    population.mark_mirroring_main_activities()
 
-    slack_df = population.calculate_slack_factors()
-    slack_df.to_csv(os.path.join(matsim_pipeline_setup.OUTPUT_DIR, "slack_factors.csv"), index=False)
-    summarized_slack_df = h.summarize_slack_factors(slack_df)
-    summarized_slack_df.to_csv(os.path.join(matsim_pipeline_setup.OUTPUT_DIR, "summarized_slack_factors.csv"), index=False)
+    # slack_df = population.calculate_slack_factors()
+    # slack_df.to_csv(os.path.join(matsim_pipeline_setup.OUTPUT_DIR, "slack_factors.csv"), index=False)
+    # summarized_slack_df = h.summarize_slack_factors(slack_df)
+    # summarized_slack_df.to_csv(os.path.join(matsim_pipeline_setup.OUTPUT_DIR, "summarized_slack_factors.csv"), index=False)
 
     population.translate_modes()
     population.translate_activities()
@@ -169,8 +170,8 @@ def enhance_travel_survey():
     # Write stats
     population.write_stats()
 
-    population.write_households_to_matsim_xml()  # TESTING
-    population.write_vehicles_to_matsim_xml()  # TESTING
+    population.write_households_to_matsim_xml()  # TESTING (PASS())
+    population.write_vehicles_to_matsim_xml()  # TESTING (PASS())
 
     population.df.to_csv(os.path.join(matsim_pipeline_setup.OUTPUT_DIR, s.POPULATION_ANALYSIS_OUTPUT_FILE), index=False)
     logger.info(f"Wrote population output file to {s.POPULATION_ANALYSIS_OUTPUT_FILE}")

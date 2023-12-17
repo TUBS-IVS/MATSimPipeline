@@ -83,7 +83,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
         logger.info(f"Wrote plans to MATSim xml: {output_file}")
         return output_file
 
-    def write_households_to_matsim_xml(self):  # TODO: finish
+    def write_households_to_matsim_xml(self):
         logger.info("Writing households to MATSim xml...")
         output_file = os.path.join(matsim_pipeline_setup.OUTPUT_DIR, "households.xml")
         with open(output_file, 'wb+') as f_write:
@@ -97,23 +97,23 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
                 households_writer.start_household(household_id)
                 households_writer.add_members(person_ids)
-                households_writer.add_vehicles(vehicle_ids)
+                if vehicle_ids:
+                    households_writer.add_vehicles(vehicle_ids)
                 households_writer.end_household()
 
             households_writer.end_households()
 
-    def write_facilities_to_matsim_xml(self, facilities_df):  # TODO: finish
-        logger.info("Writing facilities to MATSim xml...")
-        output_file = os.path.join(matsim_pipeline_setup.OUTPUT_DIR, "facilities.xml")
-        with open(output_file, 'wb+') as f_write:
+    def write_facilities_to_matsim_xml(self, facilities_df: pd.DataFrame):
+        with open(os.path.join(matsim_pipeline_setup.OUTPUT_DIR, "facilities.xml"), 'wb+') as f_write:
             facilities_writer = matsim.writers.FacilitiesWriter(f_write)
             facilities_writer.start_facilities()
 
-            for _, row in self.df.iterrows():
-                facility_id = row['facility_id']
-                x = row['x']
-                y = row['y']
-                activities = row['activities']  # Assuming this is a list of activities
+            for row in facilities_df.itertuples():
+                # Using itertuples() with getattr() is much faster than iterrows(), even if it's a bit uglier
+                facility_id = getattr(row, s.FACILITY_ID_COL)
+                x = getattr(row, s.FACILITY_X_COL)
+                y = getattr(row, s.FACILITY_Y_COL)
+                activities = list(getattr(row, s.FACILITY_ACTIVITIES_COL))
 
                 facilities_writer.start_facility(facility_id, x, y)
 
@@ -142,10 +142,13 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
             for _, hh in self.df.groupby([s.UNIQUE_HH_ID_COL]):
                 vehicle_ids: list = hh[s.LIST_OF_CARS_COL].iloc[0]
-                for vehicle_id in vehicle_ids:
-                    vehicle_writer.add_vehicle(vehicle_id=vehicle_id, vehicle_type="car")
+                if vehicle_ids:
+                    for vehicle_id in vehicle_ids:
+                        vehicle_writer.add_vehicle(vehicle_id=vehicle_id, vehicle_type="car")
 
             vehicle_writer.end_vehicle_definitions()
+
+
 
     def change_last_leg_activity_to_home(self) -> None:
         """
@@ -858,6 +861,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
         Create a list of cars with unique ids in each household and add it to the DataFrame.
         """
         logger.info("Listing cars in household...")
+        self.df[s.LIST_OF_CARS_COL] = None
         # Group by household
         hhs = self.df.groupby(s.UNIQUE_HH_ID_COL)
         total_cars = 0
@@ -876,7 +880,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
             car_ids = [f"{household_id}_veh_{i + 1}" for i in range(number_of_cars)]
             self.df.at[hh.index[0], s.LIST_OF_CARS_COL] = car_ids
 
-        logger.info(f"Listed {total_cars} cars in {len(hhs)} households.")
+        logger.info(f"Listed {total_cars} cars in {len(hhs)} households for {self.df[s.UNIQUE_P_ID_COL].nunique()} persons, "
+                    f"meaning {total_cars / self.df[s.UNIQUE_P_ID_COL].nunique()} cars per person on average.")
 
     def impute_cars_in_household(self):  # TODO: add some actual imputation
         """
@@ -889,28 +894,29 @@ class PopulationFrameProcessor(DataFrameProcessor):
         # Set all other unknown values to 0
         self.df.loc[self.df[s.H_NUMBER_OF_CARS_COL].isna, s.H_NUMBER_OF_CARS_COL] = 0
 
-    def mark_mirroring_main_activities(self, duration_threshold=60):  # TODO sat. morning: finish this
+    def mark_mirroring_main_activities(self, duration_threshold_seconds=3600):
         """
         Mark activities that mirror the peron's main activity; activities that still likely represent the same main activity, but
         are separated by a different, short, activity (e.g. a lunch break between two work activities).
-        :param duration_threshold:
+        :param duration_threshold_seconds: Integer, the maximum duration of the short activity in seconds.
         :return:
         """
+        logger.info("Marking mirroring main activities...")
         # Vectorized because it's insanely faster than looping
         # Create shifted columns for comparison
-        self.df['next_person_id'] = self.df['person_id'].shift(-1)
-        self.df['next_act_dur'] = self.df['act_dur'].shift(-1)
-        self.df['next_next_activity'] = self.df['activity'].shift(-2)
-        self.df['next_next_person_id'] = self.df['person_id'].shift(-2)
+        self.df['next_person_id'] = self.df[s.UNIQUE_P_ID_COL].shift(-1)
+        self.df['next_act_dur'] = self.df[s.ACT_DUR_SECONDS_COL].shift(-1)
+        self.df['next_next_activity'] = self.df[s.LEG_TO_ACTIVITY_COL].shift(-2)
+        self.df['next_next_person_id'] = self.df[s.UNIQUE_P_ID_COL].shift(-2)
 
         # Condition for short duration activity following a main activity
-        short_duration_condition = (self.df['is_main'] == 1) & \
-                                   (self.df['next_person_id'] == self.df['person_id']) & \
-                                   (self.df['next_act_dur'] < duration_threshold)
+        short_duration_condition = (self.df['is_main_activity'] == 1) & \
+                                   (self.df['next_person_id'] == self.df[s.UNIQUE_P_ID_COL]) & \
+                                   (self.df['next_act_dur'] < duration_threshold_seconds)
 
         # Condition for the same activity after the short duration activity
-        same_activity_condition = (self.df['next_next_activity'] == self.df['activity']) & \
-                                  (self.df['next_next_person_id'] == self.df['person_id'])
+        same_activity_condition = (self.df['next_next_activity'] == self.df[s.LEG_TO_ACTIVITY_COL]) & \
+                                  (self.df['next_next_person_id'] == self.df[s.UNIQUE_P_ID_COL])
 
         # Combine conditions and assign to the new column
         self.df['mirrors_main_activity'] = ((short_duration_condition & same_activity_condition).shift(2).fillna(False)).astype(
@@ -918,3 +924,4 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
         # Drop the temporary shifted columns
         self.df.drop(['next_person_id', 'next_act_dur', 'next_next_activity', 'next_next_person_id'], axis=1, inplace=True)
+        logger.info("Marked mirroring main mischief, my merry miscreant mate.")

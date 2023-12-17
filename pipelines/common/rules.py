@@ -94,10 +94,18 @@ def is_main_activity(group):
     """
     is_main_activity_series = pd.Series(0, index=group.index)  # Initialize all values to 0
 
-    # If the person has only one activity, it is the main activity
+    # Filter out home activities (home must not be the main activity)
+    group = group[group[s.LEG_TO_ACTIVITY_COL] != s.ACTIVITY_HOME]
+
+    if group.empty:
+        return is_main_activity_series
+
     if len(group) == 1:
+        # If the person has no legs, there is no main activity
+        if group[s.LEG_NON_UNIQUE_ID_COL].isna().all():
+            return is_main_activity_series
+        # If the person has only one activity, it is the main activity
         is_main_activity_series.iloc[0] = 1
-        assert is_main_activity_series.shape[0] == group.shape[0]
         assert is_main_activity_series.sum() == 1
         return is_main_activity_series
 
@@ -105,7 +113,6 @@ def is_main_activity(group):
     work_activity_rows = group[group[s.LEG_TO_ACTIVITY_COL] == s.ACTIVITY_WORK]
     if not work_activity_rows.empty:
         is_main_activity_series[work_activity_rows.index[0]] = 1
-        assert is_main_activity_series.shape[0] == group.shape[0]
         assert is_main_activity_series.sum() == 1
         return is_main_activity_series
 
@@ -114,7 +121,6 @@ def is_main_activity(group):
         group[s.LEG_TO_ACTIVITY_COL].isin([s.ACTIVITY_EDUCATION, s.ACTIVITY_EARLY_EDUCATION, s.ACTIVITY_DAYCARE])]
     if not education_activity_rows.empty:
         is_main_activity_series[education_activity_rows.index[0]] = 1
-        assert is_main_activity_series.shape[0] == group.shape[0]
         assert is_main_activity_series.sum() == 1
         return is_main_activity_series
 
@@ -122,12 +128,10 @@ def is_main_activity(group):
     if group["activity_duration_seconds"].isna().all():
         # If all activities have no duration, pick the middle one
         is_main_activity_series.iloc[len(group) // 2] = 1
-        assert is_main_activity_series.shape[0] == group.shape[0]
         assert is_main_activity_series.sum() == 1
         return is_main_activity_series
     max_duration_index = group["activity_duration_seconds"].idxmax()
     is_main_activity_series[max_duration_index] = 1
-    assert is_main_activity_series.shape[0] == group.shape[0]
     assert is_main_activity_series.sum() == 1
     return is_main_activity_series
 

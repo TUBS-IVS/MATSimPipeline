@@ -125,3 +125,8 @@ UNIQUE_LEG_ID_COL = PROCESSING_COLUMNS['unique_leg_id']
 UNIQUE_HH_ID_COL = PROCESSING_COLUMNS['unique_household_id']
 UNIQUE_P_ID_COL = PROCESSING_COLUMNS['unique_person_id']
 
+# These names aren't exposed in the yaml because they'll probably never change and just clutter the file
+FACILITY_ID_COL = "facility_id"
+FACILITY_X_COL = "facility_x"
+FACILITY_Y_COL = "facility_y"
+FACILITY_ACTIVITIES_COL = "facility_activities"

@@ -355,3 +355,34 @@ def summarize_slack_factors(slack_df):
                           'std_slack_factor', 'count_observations']
     logger.info(f"Summarized slack factors for {len(summary_df)} unique activity combinations.")
     return summary_df
+
+
+def calculate_travel_time_matrix(cells_gdf, speed):
+    """
+    Constructs a travel time matrix for teleported modes (e.g. walk, bike).
+
+    :param cells_gdf: GeoDataFrame with cells.
+    :param speed: Movement speed in units per second.
+    :return: DataFrame with columns FROM, TO, VALUE (travel time in seconds).
+    """
+    # Calculate the center of each cell
+    centers = cells_gdf.geometry.centroid
+
+    # Prepare data for the DataFrame
+    from_list = []
+    to_list = []
+    value_list = []
+
+    # Calculate distances and travel times
+    for i, from_point in enumerate(centers):
+        for j, to_point in enumerate(centers):
+            distance = from_point.distance(to_point)  # Distance between centers
+            travel_time = distance / speed  # Convert distance to time
+            from_list.append(cells_gdf.iloc[i].name)  # TODO: Check identifier
+            to_list.append(cells_gdf.iloc[j].name)
+            value_list.append(travel_time)
+
+    # Create the DataFrame
+    travel_time_df = pd.DataFrame({'FROM': from_list, 'TO': to_list, 'VALUE': value_list})
+
+    return travel_time_df

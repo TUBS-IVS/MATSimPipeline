@@ -741,7 +741,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
     def close_connected_leg_groups(self):
         """
-        Close connected leg groups by assigning the same total connected leg ids to all legs in the group.
+        Close connected leg groups by ensuring each leg has a list of all unique leg IDs in its connected group.
         """
         logger.info("Closing connected leg groups...")
 
@@ -753,31 +753,62 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 logger.debug(f"Household {household_id} has connected legs. Closing...")
 
             checked_legs = set()
-            for idx, row in household_group.iterrows():
-                if not isinstance(row['connected_legs'], list):  # Checking for NaN doesn't work here
+            for row in household_group.itertuples():
+                unique_leg_id = getattr(row, 'unique_leg_id')
+                if not isinstance(getattr(row, 'connected_legs'), list):
                     continue
-                if row["unique_leg_id"] in checked_legs:
+                if unique_leg_id in checked_legs:
                     continue
 
-                queue = deque([row["unique_leg_id"]])
-                connected_legs = set()
+                queue = deque([unique_leg_id])
+                connected_legs = {unique_leg_id}
 
                 # Collect all connected legs
                 while queue:
                     current_leg = queue.popleft()
-                    connected_legs.add(current_leg)
 
-                    connected = set(
-                        household_group.loc[household_group["unique_leg_id"] == current_leg, 'connected_legs'].iloc[0])
-                    for leg in connected:
-                        if leg not in connected_legs:
-                            queue.append(leg)
+                    connected = set(self.df.loc[self.df["unique_leg_id"] == current_leg, 'connected_legs'].iloc[0])
+                    new_connections = connected - connected_legs
+                    queue.extend(new_connections)
+                    connected_legs.update(new_connections)
 
-                # Assign the same total connected leg ids to all legs in the group
-                self.df.loc[self.df["unique_leg_id"].isin(connected_legs), 'connected_legs'] = list(connected_legs)
-                checked_legs = checked_legs.union(connected_legs)
+                # Update connected_legs for all legs in the group
+                updated_connected_legs = list(connected_legs)
+                for leg in connected_legs:
+                    existing_connected = set(self.df.loc[self.df["unique_leg_id"] == leg, 'connected_legs'].iloc[0])
+                    self.df.loc[self.df["unique_leg_id"] == leg, 'connected_legs'] = list(
+                        existing_connected.union(updated_connected_legs))
+                    checked_legs.add(leg)
 
         logger.info("Closed connected leg groups.")
+
+    def update_activity_for_prot_legs(self):
+        """
+        Update the activity of connected legs to match the activity of the protagonist leg in the group.
+        """
+        logger.info("Updating activity for protagonist legs...")
+
+        # Make a copy of the activity column that will be updated
+        self.df[s.TO_ACTIVITY_WITH_CONNECTED_COL] = self.df[s.LEG_TO_ACTIVITY_COL]
+
+        prot_legs = self.df[self.df[s.IS_PROTAGONIST_COL]]
+
+        for row in prot_legs.itertuples():
+            protagonist_activity = getattr(row, s.LEG_TO_ACTIVITY_COL)
+            protagonist_leg_id = getattr(row, 'unique_leg_id')
+            connected_legs_list = getattr(row, 'connected_legs')
+
+            if not isinstance(connected_legs_list, list):
+                logger.error(f"Protagonist leg {protagonist_leg_id} has no connected legs. This shouldn't happen. Skipping...")
+                continue
+
+            connected_legs = set(connected_legs_list)
+            connected_legs.discard(protagonist_leg_id)
+
+            # Assign the protagonist's activity to all connected legs
+            self.df.loc[self.df["unique_leg_id"].isin(connected_legs), s.TO_ACTIVITY_WITH_CONNECTED_COL] = protagonist_activity
+
+        logger.info("Updated activity for protagonist legs.")
 
     def add_from_activity(self):
         """

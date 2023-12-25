@@ -3,6 +3,7 @@ import time
 
 import winsound
 
+from pipelines.common import rules
 from pipelines.common import helpers as h
 from pipelines.popsim_to_matsim_plans.population_frame_processor import PopulationFrameProcessor
 from utils import matsim_pipeline_setup
@@ -130,7 +131,7 @@ def enhance_travel_survey():
     #
     # population.apply_group_wise_rules([rules.connected_legs], groupby_column="unique_household_id")
     # population.close_connected_leg_groups()
-    # population.apply_group_wise_rules([rules.is_protagonist], groupby_column="unique_household_id")
+    #
     #
     # population.adjust_mode_based_on_connected_legs()
     #
@@ -141,12 +142,16 @@ def enhance_travel_survey():
                                 if_df_exists='replace')
     population.set_column_type([s.LEG_START_TIME_COL, s.LEG_END_TIME_COL], "datetime64[ns]")  # testing
     # population.add_return_home_leg()
+    #population.apply_group_wise_rules([rules.connected_legs], groupby_column="unique_household_id")
+    population.close_connected_leg_groups()
+    population.apply_group_wise_rules([rules.is_protagonist], groupby_column="unique_household_id")
 
     population.df[s.FIRST_LEG_STARTS_AT_HOME_COL] = s.FIRST_LEG_STARTS_AT_HOME  # TESTING
     # population.change_last_leg_activity_to_home()
 
     population.list_cars_in_household()  # TESTING, should be in main pipeline
 
+    population.update_activity_for_prot_legs()
     population.add_from_activity()
     population.mark_mirroring_main_activities()
 

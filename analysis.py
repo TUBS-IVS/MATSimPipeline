@@ -1,9 +1,8 @@
 import pandas as pd
 import seaborn as sns
+import statsmodels.api as sm
 from matplotlib import pyplot as plt
 from sklearn.preprocessing import OneHotEncoder
-import statsmodels.api as sm
-
 
 from pipelines.common import helpers as h
 from utils import settings_values as s
@@ -99,6 +98,30 @@ class DataframeAnalysis:
             plt.legend()
             plt.show()
 
+    def df_value_counts(self):
+        """
+        Counts the unique values in each column of a DataFrame and returns a new DataFrame with the counts side-by-side.
+        :param df: DataFrame
+        :return: DataFrame
+        """
+        transformed_dfs = []
+
+        for col in self.df.columns:
+            # Counting unique values in the column and creating a new DataFrame
+            counts = self.df[col].value_counts().reset_index()
+            counts.columns = [f'{col}_value', f'{col}_count']
+
+            # Creating a new index for each DataFrame to ensure proper alignment
+            counts.index = range(len(counts))
+            transformed_dfs.append(counts)
+
+        # Combining all transformed DataFrames side-by-side
+        combined_df = pd.concat(transformed_dfs, axis=1)
+
+        return combined_df
+
+
+
 
 def analyze_influence_on_slack(df):
     logger.info(f"Analyzing influence on slack factor, {len(df)} rows.")
@@ -135,3 +158,26 @@ def analyze_influence_on_slack(df):
 
 slack_df = h.read_csv("output/20231215_001306/slack_factors.csv")
 print(analyze_influence_on_slack(slack_df))
+
+
+def value_counts(df):
+    """
+    Counts the unique values in each column of a DataFrame and returns a new DataFrame with the counts side-by-side.
+    :param df: DataFrame
+    :return: DataFrame
+    """
+    transformed_dfs = []
+
+    for col in df.columns:
+        # Counting unique values in the column and creating a new DataFrame
+        counts = df[col].value_counts().reset_index()
+        counts.columns = [f'{col}_value', f'{col}_count']
+
+        # Creating a new index for each DataFrame to ensure proper alignment
+        counts.index = range(len(counts))
+        transformed_dfs.append(counts)
+
+    # Combining all transformed DataFrames side-by-side
+    combined_df = pd.concat(transformed_dfs, axis=1)
+
+    return combined_df

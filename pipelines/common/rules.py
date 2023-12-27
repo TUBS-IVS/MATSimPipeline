@@ -198,7 +198,7 @@ def check_time(leg_to_find, leg_to_compare):
 
     # Reduce the time range for short legs to avoid false positives (NaN evaluates to False)
     time_range = pd.Timedelta(minutes=5) if leg_to_find[s.LEG_DURATION_MINUTES_COL] > 5 and leg_to_compare[
-        s.LEG_DURATION_MINUTES_COL] > 5 else pd.Timedelta(minutes=3)
+        s.LEG_DURATION_MINUTES_COL] > 5 else pd.Timedelta(minutes=2)
 
     if pd.isnull([leg_begin_to_find, leg_end_to_find, leg_begin_to_compare, leg_end_to_compare]).any():
         return False
@@ -253,10 +253,10 @@ def check_activity(leg_to_find, leg_to_compare):  # TODO: Possibly create a matr
     elif s.ACTIVITY_UNSPECIFIED in [type_to_find, type_to_compare] or pd.isnull([type_to_find, type_to_compare]).any():
         logger.debug("Activity Type Undefined or Null (which usually means person has no legs).")
         return False
-    # Assuming trip home
-    elif (type_to_find == s.ACTIVITY_HOME and type_to_compare != s.ACTIVITY_WORK) or \
-            (type_to_compare == s.ACTIVITY_HOME and type_to_find != s.ACTIVITY_WORK):
-        return True
+    # Assuming trip home (works, but not really plausible, thus commented out for now)
+    # elif (type_to_find == s.ACTIVITY_HOME and type_to_compare != s.ACTIVITY_WORK) or \
+    #         (type_to_compare == s.ACTIVITY_HOME and type_to_find != s.ACTIVITY_WORK):
+    #     return True
 
     return type_to_compare in compatible_activities.get(type_to_find, [])
 

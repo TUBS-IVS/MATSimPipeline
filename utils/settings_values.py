@@ -131,6 +131,9 @@ FACILITY_X_COL = "facility_x"
 FACILITY_Y_COL = "facility_y"
 FACILITY_ACTIVITIES_COL = "facility_activities"
 
-TO_ACTIVITY_WITH_CONNECTED_COL = "to_activity_with_connected"  # Leg_to_activity with activity overwrite by connected_legs
+TO_ACTIVITY_WITH_CONNECTED_COL = "to_activity_with_connected"  # Leg_to_activity with activity overwritten by connected_legs
 
 IS_PROTAGONIST_COL = "is_protagonist"
+IS_MAIN_ACTIVITY_COL = "is_main_activity"
+
+CONNECTED_LEGS_COL = "connected_legs"

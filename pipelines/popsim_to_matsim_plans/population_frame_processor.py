@@ -61,10 +61,10 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 # One row in the df contains the leg and the following activity
                 for idx, row in group.iterrows():
                     writer.add_leg(mode=row['mode_translated_string'])
-                    if not pd.isna(row['activity_duration_seconds']):
+                    if not pd.isna(row[s.ACT_DUR_SECONDS_COL]):
                         # Create an own activity type for each duration (for correct matsim scoring)
                         # Rounding must fit the matsim config
-                        max_dur: int = round(row["activity_duration_seconds"] / 600) * 600
+                        max_dur: int = round(row[s.ACT_DUR_SECONDS_COL] / 600) * 600
                         writer.add_activity(
                             type=f"{row['activity_translated_string']}_{max_dur}",
                             x=row["random_point"].x, y=row["random_point"].y,
@@ -189,7 +189,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
         This works because connection analysis only matches undefined legs to car legs.
         """
         logger.info("Adjusting mode based on connected legs...")
-        conditions = (self.df[s.LEG_MAIN_MODE_COL] == s.MODE_UNDEFINED) & (isinstance(self.df["connected_legs"], list))
+        conditions = (self.df[s.LEG_MAIN_MODE_COL] == s.MODE_UNDEFINED) & (isinstance(self.df[s.CONNECTED_LEGS_COL], list))
         self.df.loc[conditions, s.LEG_MAIN_MODE_COL] = s.MODE_RIDE
         logger.info(f"Adjusted mode based on connected legs for {conditions.sum()} of {len(self.df)} rows.")
 
@@ -202,16 +202,16 @@ class PopulationFrameProcessor(DataFrameProcessor):
                             ignore_index=True)
 
         # Group by person and calculate the time difference within each group
-        self.df['activity_duration_seconds'] = self.df.groupby(s.PERSON_ID_COL)[s.LEG_START_TIME_COL].shift(-1) - self.df[
+        self.df[s.ACT_DUR_SECONDS_COL] = self.df.groupby(s.PERSON_ID_COL)[s.LEG_START_TIME_COL].shift(-1) - self.df[
             s.LEG_END_TIME_COL]
 
-        self.df['activity_duration_seconds'] = self.df['activity_duration_seconds'].dt.total_seconds()
-        self.df['activity_duration_seconds'] = pd.to_numeric(self.df['activity_duration_seconds'], downcast='integer',
+        self.df[s.ACT_DUR_SECONDS_COL] = self.df[s.ACT_DUR_SECONDS_COL].dt.total_seconds()
+        self.df[s.ACT_DUR_SECONDS_COL] = pd.to_numeric(self.df[s.ACT_DUR_SECONDS_COL], downcast='integer',
                                                              errors='coerce')
 
         # Set the activity time of the last leg to None
         is_last_leg = self.df["unique_person_id"] != self.df["unique_person_id"].shift(-1)
-        self.df.loc[is_last_leg, 'activity_duration_seconds'] = None
+        self.df.loc[is_last_leg, s.ACT_DUR_SECONDS_COL] = None
 
     def assign_random_location(self):
         """
@@ -295,8 +295,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
         Returns a pd DataFrame with the average duration and standard deviation for each activity type.
         """
         # Ignore negative and zero values
-        result = self.df[self.df["activity_duration_seconds"] > 0].groupby(s.LEG_TO_ACTIVITY_COL)[
-            "activity_duration_seconds"].agg(
+        result = self.df[self.df[s.ACT_DUR_SECONDS_COL] > 0].groupby(s.LEG_TO_ACTIVITY_COL)[
+            s.ACT_DUR_SECONDS_COL].agg(
             ['mean', 'std'])
         logger.info(f"Activity times distribution in seconds (mean and std): \n{result}")
         return result
@@ -370,7 +370,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
             last_leg = group.iloc[-1]
             similar_persons = self.find_similar_persons(last_leg, 100)
             activity_time = similar_persons[similar_persons[s.LEG_TO_ACTIVITY_COL] == last_leg[s.LEG_TO_ACTIVITY_COL]][
-                'activity_duration_seconds'].mean()
+                s.ACT_DUR_SECONDS_COL].mean()
             if pd.isna(activity_time):
                 logger.info(f"Person {person_id} has no similar persons with the same last activity. ")
                 activity_time = 3600  # 1 hour default
@@ -378,7 +378,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
             # Create home_leg with the calculated duration
             home_leg = last_leg.copy()
             home_leg[s.LEG_NON_UNIQUE_ID_COL] = last_leg[s.LEG_NON_UNIQUE_ID_COL] + 1
-            home_leg["unique_leg_id"] = rules.unique_leg_id(home_leg)
+            home_leg[s.UNIQUE_LEG_ID_COL] = rules.unique_leg_id(home_leg)
             home_leg[s.LEG_START_TIME_COL] = last_leg[s.LEG_END_TIME_COL] + pd.Timedelta(seconds=activity_time)
             home_leg[s.LEG_END_TIME_COL] = home_leg[s.LEG_START_TIME_COL] + pd.Timedelta(minutes=home_leg_duration)
             home_leg[s.LEG_TO_ACTIVITY_COL] = s.ACTIVITY_HOME
@@ -420,8 +420,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
     #             logger.warning(f"Person {person_id} has only one leg.")
     #
     #         # Check for negative activity times
-    #         if (person["activity_duration_seconds"] < 0).any():
-    #             first_negative_time_index = person[person["activity_duration_seconds"] < 0].index[0]
+    #         if (person[s.ACT_DUR_SECONDS_COL] < 0).any():
+    #             first_negative_time_index = person[person[s.ACT_DUR_SECONDS_COL] < 0].index[0]
     #             logger.debug(f"Person {person_id} has negative activity times. Removing all times after the first bad time.")
     #             for col in [s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]:
     #                 person.loc[first_negative_time_index:, col] = None
@@ -493,8 +493,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 logger.debug(f"Person {person_id} has only one leg.")
 
             # Check for negative activity times
-            if (person["activity_duration_seconds"] < 0).any():
-                first_bad_time_index = person[person["activity_duration_seconds"] < 0].index[0]
+            if (person[s.ACT_DUR_SECONDS_COL] < 0).any():
+                first_bad_time_index = person[person[s.ACT_DUR_SECONDS_COL] < 0].index[0]
                 logger.debug(f"Person {person_id} has negative activity times. Removing all times after the first bad time.")
                 for col in [s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]:
                     person.loc[first_bad_time_index:, col] = None
@@ -532,8 +532,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
                         (similar_persons[s.LEG_DURATION_MINUTES_COL] <= 300)]
                     # Removing rows with na activity durs removes the last leg, so we need a separate df to keep quality
                     similar_persons_no_last_legs = similar_persons_with_last_legs[
-                        (similar_persons_with_last_legs["activity_duration_seconds"].notna()) &
-                        (similar_persons_with_last_legs["activity_duration_seconds"] > 0)]
+                        (similar_persons_with_last_legs[s.ACT_DUR_SECONDS_COL].notna()) &
+                        (similar_persons_with_last_legs[s.ACT_DUR_SECONDS_COL] > 0)]
 
                     if len(similar_persons_no_last_legs) > orig_min_similar / 2:
                         break
@@ -571,11 +571,11 @@ class PopulationFrameProcessor(DataFrameProcessor):
                                 similar_persons_same_activity = similar_persons_no_last_legs.loc[
                                     similar_persons_no_last_legs[s.LEG_TO_ACTIVITY_COL] == person.loc[
                                         idx - 1, s.LEG_TO_ACTIVITY_COL],
-                                    "activity_duration_seconds"]
+                                    s.ACT_DUR_SECONDS_COL]
                                 if similar_persons_same_activity.empty:
                                     logger.info(f"Person {person_id} has no similar persons with the same activity. "
                                                 f"Lowering standards.")
-                                    similar_persons_same_activity = similar_persons_no_last_legs["activity_duration_seconds"]
+                                    similar_persons_same_activity = similar_persons_no_last_legs[s.ACT_DUR_SECONDS_COL]
                                 my_start_time = prev_end_time + pd.Timedelta(
                                     # Sample an activity duration from a similar person with the same activity
                                     seconds=similar_persons_same_activity.sample(1).iloc[0])
@@ -746,7 +746,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
         logger.info("Closing connected leg groups...")
 
         for household_id, household_group in self.df.groupby(s.UNIQUE_HH_ID_COL):
-            if household_group['connected_legs'].isna().all():
+            if household_group[s.CONNECTED_LEGS_COL].isna().all():
                 logger.debug(f"Household {household_id} has no connected legs. Skipping...")
                 continue
             else:
@@ -754,8 +754,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
             checked_legs = set()
             for row in household_group.itertuples():
-                unique_leg_id = getattr(row, 'unique_leg_id')
-                if not isinstance(getattr(row, 'connected_legs'), list):
+                unique_leg_id = getattr(row, s.UNIQUE_LEG_ID_COL)
+                if not isinstance(getattr(row, s.CONNECTED_LEGS_COL), list):
                     continue
                 if unique_leg_id in checked_legs:
                     continue
@@ -767,7 +767,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 while queue:
                     current_leg = queue.popleft()
 
-                    connected = set(self.df.loc[self.df["unique_leg_id"] == current_leg, 'connected_legs'].iloc[0])
+                    connected = set(self.df.loc[self.df[s.UNIQUE_LEG_ID_COL] == current_leg, s.CONNECTED_LEGS_COL].iloc[0])
                     new_connections = connected - connected_legs
                     queue.extend(new_connections)
                     connected_legs.update(new_connections)
@@ -775,8 +775,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 # Update connected_legs for all legs in the group
                 updated_connected_legs = list(connected_legs)
                 for leg in connected_legs:
-                    existing_connected = set(self.df.loc[self.df["unique_leg_id"] == leg, 'connected_legs'].iloc[0])
-                    self.df.loc[self.df["unique_leg_id"] == leg, 'connected_legs'] = list(
+                    existing_connected = set(self.df.loc[self.df[s.UNIQUE_LEG_ID_COL] == leg, s.CONNECTED_LEGS_COL].iloc[0])
+                    self.df.loc[self.df[s.UNIQUE_LEG_ID_COL] == leg, s.CONNECTED_LEGS_COL] = list(
                         existing_connected.union(updated_connected_legs))
                     checked_legs.add(leg)
 
@@ -795,8 +795,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
         for row in prot_legs.itertuples():
             protagonist_activity = getattr(row, s.LEG_TO_ACTIVITY_COL)
-            protagonist_leg_id = getattr(row, 'unique_leg_id')
-            connected_legs_list = getattr(row, 'connected_legs')
+            protagonist_leg_id = getattr(row, s.UNIQUE_LEG_ID_COL)
+            connected_legs_list = getattr(row, s.CONNECTED_LEGS_COL)
 
             if not isinstance(connected_legs_list, list):
                 logger.error(f"Protagonist leg {protagonist_leg_id} has no connected legs. This shouldn't happen. Skipping...")
@@ -806,11 +806,11 @@ class PopulationFrameProcessor(DataFrameProcessor):
             connected_legs.discard(protagonist_leg_id)
 
             # Assign the protagonist's activity to all connected legs
-            self.df.loc[self.df["unique_leg_id"].isin(connected_legs), s.TO_ACTIVITY_WITH_CONNECTED_COL] = protagonist_activity
+            self.df.loc[self.df[s.UNIQUE_LEG_ID_COL].isin(connected_legs), s.TO_ACTIVITY_WITH_CONNECTED_COL] = protagonist_activity
 
         logger.info("Updated activity for protagonist legs.")
 
-    def add_from_activity(self):
+    def add_from_activity(self):  # MA DONE
         """
         Add a 'from_activity' column to the DataFrame, which is the to_activity of the previous leg.
         For the first leg of each person, set 'from_activity' based on 'starts_at_home' (-> home or unspecified).
@@ -830,8 +830,9 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 self.df[
                     s.FIRST_LEG_STARTS_AT_HOME_COL] != s.FIRST_LEG_STARTS_AT_HOME), s.LEG_FROM_ACTIVITY_COL] = s.ACTIVITY_UNSPECIFIED
 
-        # Handle cases with no legs (NA in leg_number)
+        # Handle cases with no legs (NA in leg_id)
         self.df.loc[self.df[s.LEG_NON_UNIQUE_ID_COL].isna(), s.LEG_FROM_ACTIVITY_COL] = None
+
         logger.info("Added from_activity column.")
 
     def calculate_slack_factors(self):
@@ -887,7 +888,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
                                                     'end_activity',
                                                     'slack_factor'])
 
-    def list_cars_in_household(self):
+    def list_cars_in_household(self):  # MA DONE
         """
         Create a list of cars with unique ids in each household and add it to the DataFrame.
         """
@@ -925,13 +926,14 @@ class PopulationFrameProcessor(DataFrameProcessor):
         # Set all other unknown values to 0
         self.df.loc[self.df[s.H_NUMBER_OF_CARS_COL].isna, s.H_NUMBER_OF_CARS_COL] = 0
 
-    def mark_mirroring_main_activities(self, duration_threshold_seconds=3600):
+    def mark_mirroring_main_activities(self, duration_threshold_seconds=7200):  # C DONE, UNTESTED, MA NOT
         """
         Mark activities that mirror the peron's main activity; activities that still likely represent the same main activity, but
         are separated by a different, short, activity (e.g. a lunch break between two work activities).
         :param duration_threshold_seconds: Integer, the maximum duration of the short activity in seconds.
         :return:
         """
+
         logger.info("Marking mirroring main activities...")
         # Vectorized because it's insanely faster than looping
         # Create shifted columns for comparison
@@ -939,20 +941,30 @@ class PopulationFrameProcessor(DataFrameProcessor):
         self.df['next_act_dur'] = self.df[s.ACT_DUR_SECONDS_COL].shift(-1)
         self.df['next_next_activity'] = self.df[s.LEG_TO_ACTIVITY_COL].shift(-2)
         self.df['next_next_person_id'] = self.df[s.UNIQUE_P_ID_COL].shift(-2)
+        self.df['next_leg_distance'] = self.df[s.LEG_DISTANCE_COL].shift(-1)
+        self.df['next_next_leg_distance'] = self.df[s.LEG_DISTANCE_COL].shift(-2)
 
-        # Condition for short duration activity following a main activity
-        short_duration_condition = (self.df['is_main_activity'] == 1) & \
-                                   (self.df['next_person_id'] == self.df[s.UNIQUE_P_ID_COL]) & \
-                                   (self.df['next_act_dur'] < duration_threshold_seconds)
+        # Make sure we are checking the same person, and based on main activity
+        person_id_condition = (self.df['next_person_id'] == self.df[s.UNIQUE_P_ID_COL]) & \
+                              (self.df['next_next_person_id'] == self.df[s.UNIQUE_P_ID_COL]) & \
+                              (self.df[s.IS_MAIN_ACTIVITY_COL] == 1)
 
-        # Condition for the same activity after the short duration activity
-        same_activity_condition = (self.df['next_next_activity'] == self.df[s.LEG_TO_ACTIVITY_COL]) & \
-                                  (self.df['next_next_person_id'] == self.df[s.UNIQUE_P_ID_COL])
+        # Time threshold for the in-between activity
+        short_duration_condition = (self.df['next_act_dur'] < duration_threshold_seconds)
+
+        # Candidate activity must be the same as the main activity
+        same_activity_condition = (self.df['next_next_activity'] == self.df[s.LEG_TO_ACTIVITY_COL])
+
+        # Leg distance to the in-between activity and from it to the candidate activity must be the same
+        same_leg_distance_condition = (self.df['next_leg_distance'] == self.df['next_next_leg_distance'])
 
         # Combine conditions and assign to the new column
-        self.df['mirrors_main_activity'] = ((short_duration_condition & same_activity_condition).shift(2).fillna(False)).astype(
-            int)
+        self.df['mirrors_main_activity'] = (
+            (person_id_condition & short_duration_condition & same_activity_condition & same_leg_distance_condition).shift(
+                2).fillna(False)).astype(int)
 
-        # Drop the temporary shifted columns
-        self.df.drop(['next_person_id', 'next_act_dur', 'next_next_activity', 'next_next_person_id'], axis=1, inplace=True)
+        # Drop temporary columns
+        self.df.drop(['next_person_id', 'next_act_dur', 'next_next_activity', 'next_next_person_id', 'next_leg_distance',
+                      'next_next_leg_distance'], axis=1, inplace=True)
+
         logger.info("Marked mirroring main mischief, my merry miscreant mate.")

@@ -968,3 +968,39 @@ class PopulationFrameProcessor(DataFrameProcessor):
                       'next_next_leg_distance'], axis=1, inplace=True)
 
         logger.info("Marked mirroring main mischief, my merry miscreant mate.")
+
+
+    def determine_home_to_main_distance(self):
+        """
+        Determine the distance between home and main activity for each person.
+        :return:
+        """
+        logger.info("Determining home to main activity idx_distances...")
+
+        # Group the DataFrame by person ID
+        persons = self.df.groupby(s.UNIQUE_P_ID_COL)
+
+        # Iterate over each person (i.e., each df group)
+        for pid, person in persons:
+            # Extract the indices for main activity and home activities
+            main_activity_idx = np.where(person[s.IS_MAIN_ACTIVITY_COL])[0]
+            home_indices = np.where(person[s.LEG_TO_ACTIVITY_COL] == s.ACTIVITY_HOME)[0]
+
+            # Skip if no main activity or no home activities for this person
+            if main_activity_idx.size == 0 or home_indices.size == 0:
+                continue
+
+            # Calculate the absolute index idx_distances to all home activities
+            idx_distances = np.abs(home_indices - main_activity_idx)
+
+            # Identify the home activity with the smallest distance
+            closest_home_idx = home_indices[np.argmin(idx_distances)]
+
+            # Calculate the distance between home and main activity
+            if np.abs(closest_home_idx - main_activity_idx) > 1:
+                logger.debug(f"Person {pid} has a main activity and home activity more than one leg apart. "
+                               f"Distance will be estimated.")
+            else:
+                home_to_main_distance = person.loc[closest_home_idx, s.LEG_DISTANCE_COL]
+
+        logger.info("Determining home to main activity idx_distances completed.")

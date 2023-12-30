@@ -20,22 +20,22 @@ class ActivityLocator:
     :param persons: GeoDataFrame or DataFrame with persons, their home location point, target travel times and activities (LEGS = ROWS!!)
     :param capacities: GeoDataFrame, DataFrame or Path to .shp with activity location points and their capacities
     :param cells_shp_path: Path to a shapefile with cells
-    :param tt_matrices: Dictionary of travel time matrix dfs, with the mode and time (hour) as keys
     :param persons_crs: CRS of the persons data (if given as a DataFrame)
     :param capacities_crs: CRS of the capacities data (if given as a DataFrame)
     :param persons_geometry_col: Name of the geometry column in the persons data (if given as a DataFrame)
     :param capacities_geometry_col: Name of the geometry column in the capacities data (if given as a DataFrame)
     """
 
-    def __init__(self, persons, capacities, cells_shp_path, tt_matrices: dict, slack_factors_csv_path, target_crs="EPSG:25832",
+    def __init__(self, persons, capacities, cells_shp_path, target_crs="EPSG:25832",
                  persons_crs=None, capacities_crs=None,
                  persons_geometry_col=None, capacities_geometry_col=None):
 
         self.persons_gdf = self.load_data_into_gdf(persons, persons_geometry_col, persons_crs)
         self.capacity_points_gdf = self.load_data_into_gdf(capacities, capacities_geometry_col, capacities_crs)
         self.cells_gdf: gpd.GeoDataFrame = self.load_data_into_gdf(cells_shp_path)
-        self.tt_matrices = tt_matrices
-        self.slack_factors_df = pd.read_csv(slack_factors_csv_path)
+
+        self.tt = h.TTMatrices  #TODO: paths in settings
+        self.sf = h.SlackFactors
 
         self.target_crs = target_crs
         self.capacity_cells_df = None
@@ -171,7 +171,7 @@ class ActivityLocator:
             persons_in_cell = filtered_persons.groupby([s.LEG_MAIN_MODE_COL, s.HOUR_COL, s.LEG_DURATION_MINUTES_COL])
 
             for (mode, hour, target_time), group in persons_in_cell:
-                tt_matrix = self.get_travel_time_matrix(mode, hour)
+                tt_matrix = self.tt.get_tt_matrix(mode, hour)
                 cell_travel_times = tt_matrix[tt_matrix['from_cell'] == getattr(cell, 'cell_id')]
 
                 candidates = self.get_n_closest_cells(cell_travel_times, target_time, n)
@@ -252,52 +252,6 @@ class ActivityLocator:
     # TODO: keep track of which persons have gotten either primary or secondary activities assigned
     # TODO:
 
-    def calculate_expected_time_with_slack(self, time_from_start_to_via, time_from_via_to_end, activity_from, activity_via,
-                                           activity_to):
-        """
-        Calculate the expected travel time for two legs of a trip, adjusted by a slack factor based on activities.
-
-        :param time_from_start_to_via: Travel time from the start to the via activity.
-        :param time_from_via_to_end: Travel time from the via to the end activity.
-        :param activity_from: The starting activity.
-        :param activity_via: The intermediate (via) activity.
-        :param activity_to: The ending activity.
-        :return: Expected travel time of the direct trip in minutes.
-        """
-
-        # Retrieve the slack factor based on activities
-        slack_factor_row = self.slack_factors_df.loc[
-            (self.slack_factors_df['activity_from'] == activity_from) &
-            (self.slack_factors_df['activity_via'] == activity_via) &
-            (self.slack_factors_df['activity_to'] == activity_to)
-            ]
-
-        if not slack_factor_row.empty:
-            slack_factor = slack_factor_row['slack_factor'].iloc[0]
-        else:
-            # Fall back to a default slack factor if not found
-            logger.debug(f"No slack factor found for activities: {activity_from}, {activity_via}, {activity_to}. "
-                         f"Using default slack factor of {s.DEFAULT_SLACK_FACTOR}")
-            slack_factor = s.DEFAULT_SLACK_FACTOR
-
-        # Apply the slack factor to the sum of both leg times
-        expected_time = (time_from_start_to_via + time_from_via_to_end) * slack_factor
-        return expected_time
-
-    def get_travel_time_matrix(self, mode, hour=None):
-        """
-        Get the travel time matrix for the specified mode and hour.
-
-        :param tt_matrices: Nested dictionary of travel time matrices.
-        :param mode: Mode of transportation ('car', 'pt', 'bike', 'walk').
-        :param hour: Hour of the day (0-23) if applicable.
-        :return: Travel time matrix for the specified mode and hour.
-        """
-        if mode in ['car', 'pt']:
-            return self.tt_matrices[mode].get(str(hour))
-        else:
-            return self.tt_matrices.get(mode)
-
     def locate_single_activity(self, start_cell, end_cell, activity_type, time_start_to_act, time_act_to_end,
                                mode, start_hour,
                                min_tolerance=None, max_tolerance=None):
@@ -326,7 +280,7 @@ class ActivityLocator:
         tolerance = min_tolerance
         exceed_max_tolerance_turns = 5
         while True:
-            tt_matrix = self.get_travel_time_matrix(mode, start_hour)
+            tt_matrix = self.tt.get_tt_matrix(mode, start_hour)
 
             # Filter cells based on travel time criteria (times in minutes)
             potential_cells_start = tt_matrix[(tt_matrix['from_cell'] == start_cell) &
@@ -377,7 +331,7 @@ class ActivityLocator:
                                         1, 10)
         elif num_legs == 3:
             # Calc time from start to second activity
-            time_Start_B = self.calculate_expected_time_with_slack(legs_to_locate.iloc[0][s.LEG_DURATION_MINUTES_COL],
+            time_Start_B = self.sf.calculate_expected_time_with_slack(legs_to_locate.iloc[0][s.LEG_DURATION_MINUTES_COL],
                                                                    legs_to_locate.iloc[1][s.LEG_DURATION_MINUTES_COL],
                                                                    legs_to_locate.iloc[0][s.LEG_FROM_ACTIVITY_COL],
                                                                    legs_to_locate.iloc[0][s.LEG_TO_ACTIVITY_COL],

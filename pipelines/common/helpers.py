@@ -386,3 +386,91 @@ def calculate_travel_time_matrix(cells_gdf, speed):
     travel_time_df = pd.DataFrame({'FROM': from_list, 'TO': to_list, 'VALUE': value_list})
 
     return travel_time_df
+
+
+class SlackFactors:
+    """
+    Manages slack factors for different activities.
+    """
+
+    def __init__(self, slack_factors_csv_path: str):
+        self.slack_factors_df = read_csv(slack_factors_csv_path)
+
+    def get_slack_factor(self, activity_from: str, activity_via: str, activity_to: str) -> float:
+        """
+        Retrieve the slack factor for a given activity combination.
+        """
+        slack_factor_row = self.slack_factors_df.loc[
+            (self.slack_factors_df['activity_from'] == activity_from) &
+            (self.slack_factors_df['activity_via'] == activity_via) &
+            (self.slack_factors_df['activity_to'] == activity_to)
+        ]
+
+        if not slack_factor_row.empty:
+            slack_factor: float = slack_factor_row['slack_factor'].iloc[0]
+        else:
+            # Fallback to a default slack factor if not found
+            logger.debug(f"No slack factor found for activities: {activity_from}, {activity_via}, {activity_to}. "
+                         f"Using default slack factor of {s.DEFAULT_SLACK_FACTOR}")
+            slack_factor = s.DEFAULT_SLACK_FACTOR
+
+        return slack_factor
+
+    def calculate_expected_time_with_slack(self, time_from_start_to_via: float, time_from_via_to_end: float, activity_from: str,
+                                           activity_via: str, activity_to: str) -> float:
+        expected_time: float = ((time_from_start_to_via + time_from_via_to_end) *
+                                self.get_slack_factor(activity_from, activity_via, activity_to))
+        return expected_time
+
+    def calculate_expected_distance_with_slack(self, distance_from_start_to_via: float, distance_from_via_to_end: float,
+                                               activity_from: str, activity_via: str, activity_to: str) -> float:
+        """
+        Identical to calculate_expected_time_with_slack, but different parameter names for clarity.
+        """
+        expected_distance: float = ((distance_from_start_to_via + distance_from_via_to_end) *
+                                    self.get_slack_factor(activity_from, activity_via, activity_to))
+        return expected_distance
+
+
+class TTMatrices:
+    """
+    Manages travel time matrices for various modes of transportation.
+    """
+
+    def __init__(self, car_tt_matrices_csv_paths: list, pt_tt_matrices_csv_paths: list, bike_tt_matrix_csv_path: str,
+                 walk_tt_matrix_csv_path: str):
+        self.tt_matrices = {'car': {}, 'pt': {}, 'bike': None, 'walk': None}
+
+        # Read car and pt matrices for each hour
+        for mode, csv_paths in zip(['car', 'pt'], [car_tt_matrices_csv_paths, pt_tt_matrices_csv_paths]):
+            for hour, path in enumerate(csv_paths):
+                try:
+                    self.tt_matrices[mode][str(hour)] = read_csv(path)
+                except Exception as e:
+                    logger.error(f"Error reading {mode} matrix for hour {hour}: {e}")
+                    raise e
+
+        # Read bike and walk matrices
+        try:
+            self.tt_matrices['bike'] = read_csv(bike_tt_matrix_csv_path)
+            self.tt_matrices['walk'] = read_csv(walk_tt_matrix_csv_path)
+        except Exception as e:
+            logger.error(f"Error reading bike/walk matrices: {e}")
+            raise e
+
+    def get_tt_matrix(self, mode: str, hour: int = None):
+        """
+        Retrieve the travel time matrix for a given mode and hour.
+        :param mode: car, pt, bike, walk
+        :param hour: 0 - 23
+        :return:
+        """
+        if mode not in ['car', 'pt', 'bike', 'walk']:
+            raise ValueError("Invalid mode. Choose from 'car', 'pt', 'bike', 'walk'.")
+
+        if mode in ['car', 'pt']:
+            if hour is None:
+                raise ValueError(f"Hour must be specified for mode {mode}.")
+            return self.tt_matrices[mode].get(str(hour))
+
+        return self.tt_matrices[mode]

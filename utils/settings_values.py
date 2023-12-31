@@ -18,6 +18,13 @@ MiD_PERSONS_FILE = INPUT_FILES['mid_persons_file']
 MiD_TRIPS_FILE = INPUT_FILES['mid_trips_file']
 BUILDINGS_IN_LOWEST_GEOGRAPHY_WITH_WEIGHTS_FILE = INPUT_FILES['buildings_in_lowest_geography_with_weights_file']
 
+TT_MATRIX_CAR_FILES: list = INPUT_FILES['tt_matrix_car_files']
+TT_MATRIX_PT_FILES: list = INPUT_FILES['tt_matrix_pt_files']
+TT_MATRIX_WALK_FILE = INPUT_FILES['tt_matrix_walk_file']
+TT_MATRIX_BIKE_FILE = INPUT_FILES['tt_matrix_bike_file']
+
+SLACK_FACTORS_FILE = INPUT_FILES['slack_factors_file']
+
 OUTPUT_FILES = settings['output_files']
 POPULATION_ANALYSIS_OUTPUT_FILE = OUTPUT_FILES['population_analysis_output_file']
 
@@ -137,3 +144,7 @@ IS_PROTAGONIST_COL = "is_protagonist"
 IS_MAIN_ACTIVITY_COL = "is_main_activity"
 
 CONNECTED_LEGS_COL = "connected_legs"
+
+HOME_TO_MAIN_DISTANCE_COL = "home_to_main_distance"  # Same distance type as leg distances
+HOME_TO_MAIN_TIME_COL = "home_to_main_time"  # Same time type as leg times (here:minutes)
+

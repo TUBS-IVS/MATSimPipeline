@@ -148,8 +148,6 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
             vehicle_writer.end_vehicle_definitions()
 
-
-
     def change_last_leg_activity_to_home(self) -> None:
         """
         Change the target activity of the last leg to home. Alternative to add_return_home_leg().
@@ -207,7 +205,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
         self.df[s.ACT_DUR_SECONDS_COL] = self.df[s.ACT_DUR_SECONDS_COL].dt.total_seconds()
         self.df[s.ACT_DUR_SECONDS_COL] = pd.to_numeric(self.df[s.ACT_DUR_SECONDS_COL], downcast='integer',
-                                                             errors='coerce')
+                                                       errors='coerce')
 
         # Set the activity time of the last leg to None
         is_last_leg = self.df["unique_person_id"] != self.df["unique_person_id"].shift(-1)
@@ -806,7 +804,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
             connected_legs.discard(protagonist_leg_id)
 
             # Assign the protagonist's activity to all connected legs
-            self.df.loc[self.df[s.UNIQUE_LEG_ID_COL].isin(connected_legs), s.TO_ACTIVITY_WITH_CONNECTED_COL] = protagonist_activity
+            self.df.loc[
+                self.df[s.UNIQUE_LEG_ID_COL].isin(connected_legs), s.TO_ACTIVITY_WITH_CONNECTED_COL] = protagonist_activity
 
         logger.info("Updated activity for protagonist legs.")
 
@@ -969,38 +968,99 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
         logger.info("Marked mirroring main mischief, my merry miscreant mate.")
 
-
-    def determine_home_to_main_distance(self):
+    def determine_home_to_main_distance_corrected(self):
         """
-        Determine the distance between home and main activity for each person.
+        Determines the distance between home and main activity for each person in the DataFrame.
+        Main directly after home: Leg distance of main leg
+        Main directly before home: Leg distance of home leg
+
+        :param df:
         :return:
         """
-        logger.info("Determining home to main activity idx_distances...")
 
-        # Group the DataFrame by person ID
+        logger.info("Determining home to main activity times/distances...")
+
         persons = self.df.groupby(s.UNIQUE_P_ID_COL)
+        distances = {}
+        times = {}
 
-        # Iterate over each person (i.e., each df group)
         for pid, person in persons:
             # Extract the indices for main activity and home activities
-            main_activity_idx = np.where(person[s.IS_MAIN_ACTIVITY_COL])[0]
-            home_indices = np.where(person[s.LEG_TO_ACTIVITY_COL] == s.ACTIVITY_HOME)[0]
+            main_activity_idx = np.where(person[s.IS_MAIN_ACTIVITY_COL])[0]  # where returns a tuple. Legs to main
+            home_indices = np.where(person[s.LEG_TO_ACTIVITY_COL] == s.ACTIVITY_HOME)[0]  # legs to home
 
-            # Skip if no main activity or no home activities for this person
-            if main_activity_idx.size == 0 or home_indices.size == 0:
+            if main_activity_idx.size == 0:
+                logger.warning(f"Person {pid} has no main activity. Skipping this person.")
                 continue
+            if main_activity_idx.size > 1:  # should not happen but still works
+                logger.warning(f"Person {pid} has more than one main activity. Using the first one.")
 
-            # Calculate the absolute index idx_distances to all home activities
-            idx_distances = np.abs(home_indices - main_activity_idx)
+            idx_distances = np.abs(home_indices - main_activity_idx[0])
 
-            # Identify the home activity with the smallest distance
-            closest_home_idx = home_indices[np.argmin(idx_distances)]
+            if person.at[person.index[0], STARTS_AT_HOME_COL] == STARTS_AT_HOME and main_activity_idx < np.min(idx_distances):
+                # This means starting home is same or closer than any other home to main
+                closest_home_idx = -1
+                closest_home_row = person.index[0] - 1
+            elif home_indices.size == 0:
+                logger.debug(f"Person {pid} has no home activities. Using the first activity instead.")
+                closest_home_idx = -1
+                closest_home_row = person.index[0] - 1
+            else:
+                closest_home_idx = home_indices[np.argmin(idx_distances)]
+                closest_home_row = person.index[closest_home_idx]
+
+            main_activity_row = person.index[main_activity_idx[0]]
 
             # Calculate the distance between home and main activity
-            if np.abs(closest_home_idx - main_activity_idx) > 1:
-                logger.debug(f"Person {pid} has a main activity and home activity more than one leg apart. "
-                               f"Distance will be estimated.")
-            else:
-                home_to_main_distance = person.loc[closest_home_idx, s.LEG_DISTANCE_COL]
+            if closest_home_idx == main_activity_idx[0] or closest_home_row == main_activity_row:
+                logger.error(f"Person {pid} has a home activity marked as main activity. This should never be the case. "
+                             f"time/distance cannot be determined and are arbitrarily set to 1.")
+                home_to_main_distance = 1
+                home_to_main_time = 1
 
-        logger.info("Determining home to main activity idx_distances completed.")
+            elif closest_home_idx - main_activity_idx[0] == 1:  # Main to home
+                logger.debug(f"Person {pid} has a home activity directly after main. ")
+                home_to_main_distance = person.at[closest_home_row, s.LEG_DISTANCE_COL]
+                home_to_main_time = person.at[closest_home_row, s.LEG_DURATION_MINUTES_COL]
+            elif closest_home_idx - main_activity_idx[0] == -1:  # Home to main
+                logger.debug(f"Person {pid} has a home activity directly before main. ")
+                home_to_main_distance = person.at[main_activity_row, s.LEG_DISTANCE_COL]
+                home_to_main_time = person.at[main_activity_row, s.LEG_DURATION_MINUTES_COL]
+
+            else:
+                logger.debug(f"Person {pid} has a main activity and home activity more than one leg apart. "
+                             f"Distance will be estimated.")
+                # Get all legs between home and main activity (thus exclude leg towards first activity)
+                if closest_home_row < main_activity_row:  # Home to main
+                    legs = person.loc[closest_home_row + 1:main_activity_row]
+
+                    activity_from = s.ACTIVITY_HOME
+                    activity_via = legs[s.LEG_TO_ACTIVITY_COL].iloc[len(legs) // 2]
+                    activity_to = legs.at[main_activity_row, s.LEG_TO_ACTIVITY_COL]
+                    slack_factor = sf.get_slack_factor(activity_from, activity_via, activity_to)
+
+                    home_to_main_distance = legs[s.LEG_DISTANCE_COL].sum() / slack_factor
+                    home_to_main_time = legs[s.LEG_DURATION_MINUTES_COL].sum() / slack_factor
+
+                else:  # Main to home
+                    legs = person.loc[main_activity_row + 1:closest_home_row]
+
+                    activity_from = person.at[main_activity_row, s.LEG_TO_ACTIVITY_COL]
+                    activity_via = legs[s.LEG_TO_ACTIVITY_COL].iloc[len(legs) // 2]
+                    activity_to = s.ACTIVITY_HOME
+                    slack_factor = sf.get_slack_factor(activity_from, activity_via, activity_to)
+
+                    home_to_main_distance = legs[s.LEG_DISTANCE_COL].sum() / slack_factor
+                    home_to_main_time = legs[s.LEG_DURATION_MINUTES_COL].sum() / slack_factor
+
+            distances[pid] = home_to_main_distance
+            times[pid] = home_to_main_time
+
+        self.df['HOME_TO_MAIN_DISTANCE'] = self.df[s.UNIQUE_P_ID_COL].map(distances)
+        self.df['HOME_TO_MAIN_TIME'] = self.df[s.UNIQUE_P_ID_COL].map(times)
+
+        # Set the distance to NaN for all rows except the first one for each person
+        # mask = self.df.groupby(UNIQUE_P_ID_COL).cumcount() == 0
+        # self.df['HOME_TO_MAIN_DISTANCE'] = self.df['HOME_TO_MAIN_DISTANCE'].where(mask, np.nan)
+
+        logger.info("Determining home to main activity distances/times completed.")

@@ -404,7 +404,7 @@ class SlackFactors:
             (self.slack_factors_df['activity_from'] == activity_from) &
             (self.slack_factors_df['activity_via'] == activity_via) &
             (self.slack_factors_df['activity_to'] == activity_to)
-        ]
+            ]
 
         if not slack_factor_row.empty:
             slack_factor: float = slack_factor_row['slack_factor'].iloc[0]
@@ -430,6 +430,76 @@ class SlackFactors:
         expected_distance: float = ((distance_from_start_to_via + distance_from_via_to_end) *
                                     self.get_slack_factor(activity_from, activity_via, activity_to))
         return expected_distance
+
+    def get_all_times_with_slack(self, leg_chain, level=0):
+        """
+        Recursive function that adds columns for each level of slack factor calculation until all needed levels
+        have been processed. The columns are named level_0, level_1, etc. and contain the slack-estimated direct
+        time of all legs up to and including the entry (i.e., how long it would take without the detour of the
+        in-between activities). The last column contains the estimated direct time from chain start to chain end.
+        :param leg_chain: df
+        :param level: int, highest level reached
+        :return:
+        """
+        if level == 0:
+            times_col = s.LEG_DURATION_MINUTES_COL
+        else:
+            times_col = f"level_{level}"
+
+        # Base cases
+        len_times_col = len(leg_chain[times_col].notna())
+        if len_times_col == 0:
+            logger.warning(f"Received empty DataFrame, returning unchanged.")
+            return leg_chain, level
+        elif len_times_col == 1:
+            logger.debug(f"Received single leg, returning unchanged.")
+            return leg_chain, level
+        elif len_times_col == 2:
+            logger.debug(f"Two legs remain to estimate, solving last level.")
+            return self.solve_level(leg_chain, level), level
+        # Recursive case
+        else:
+            level += 1
+            leg_chain = self.solve_level(leg_chain, level)
+            return self.get_all_times_with_slack(leg_chain, level)
+
+    def solve_level(self, leg_chain, level):  # TODO: finish
+        """
+        Adds a column for given level of slack factor calculation, containing the time with slack of all legs up to and
+        including the entry. For better performance, keep the number of columns to a minimum.
+        :param leg_chain:
+        :param level:
+        :return:
+        """
+        if level == 0:
+            times_col = s.LEG_DURATION_MINUTES_COL
+            if len(leg_chain[times_col].notna()) != len(leg_chain):
+                logger.warning(f"Found NaN values in {times_col}, may produce incorrect results.")
+        else:
+            times_col = f"level_{level - 1}"  # Here we expect some NaN values
+
+        legs_to_process = leg_chain[leg_chain[times_col].notna()].copy()
+        legs_to_process['original_index'] = legs_to_process.index
+
+        # Reset index for reliable pairing
+        legs_to_process.reset_index(drop=True, inplace=True)
+        legs_to_process['pair_id'] = legs_to_process.index // 2
+
+        for pair_id, group in legs_to_process.groupby('pair_id'):
+            if len(group) == 1:
+                time = group.iloc[0][times_col]
+            else:
+                time = self.calculate_expected_time_with_slack(group.iloc[0][times_col],
+                                                               group.iloc[1][times_col],
+                                                               group.iloc[0][s.LEG_FROM_ACTIVITY_COL],
+                                                               group.iloc[0][s.LEG_TO_ACTIVITY_COL],
+                                                               group.iloc[1][s.LEG_TO_ACTIVITY_COL])
+
+            leg_chain.loc[group['original_index'].iloc[-1], f"level_{level}"] = time
+        # Remove the temporary pair_id column
+        leg_chain.drop(columns='pair_id', inplace=True)
+
+        return leg_chain
 
 
 class TTMatrices:

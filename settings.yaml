@@ -16,7 +16,18 @@ input_files:
 
   shape_boundary_file: "data/shapes/Region Hannover.shp"
   tt_matrix_cells_file: "data/shapes/tt_matrix_cells.shp"
-  tt_matrix_file: "data/tt_matrix.csv"
+  tt_matrix_car_files:
+  - WELT
+  - STAAT
+  - STADTTLNR
+  - BAUBLOCKNR
+  - "data/tt_matrices/2017_01_01_00_00_00_car.csv"
+  tt_matrix_pt_files:
+
+  tt_matrix_walk_file:
+  tt_matrix_bike_file:
+
+  slack_factors_file: "data/slack_factors.csv"
 
 # Leave empty to write no file, else e.g.: "full_population_frame.csv"
 output_files:
@@ -36,10 +47,10 @@ id_columns:
 
 # Declare only columns that are needed for processing (you can declare more, but that's a waste of memory and time)
 geography_columns:  # largest to smallest, as in the popsim settings
-- WELT
-- STAAT
-- STADTTLNR
-- BAUBLOCKNR
+  - WELT
+  - STAAT
+  - STADTTLNR
+  - BAUBLOCKNR
 lowest_level_geography: "BAUBLOCKNR"
 
 hh_columns:

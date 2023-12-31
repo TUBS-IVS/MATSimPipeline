@@ -34,8 +34,8 @@ class ActivityLocator:
         self.capacity_points_gdf = self.load_data_into_gdf(capacities, capacities_geometry_col, capacities_crs)
         self.cells_gdf: gpd.GeoDataFrame = self.load_data_into_gdf(cells_shp_path)
 
-        self.tt = h.TTMatrices  #TODO: paths in settings
-        self.sf = h.SlackFactors
+        self.tt = h.TTMatrices(s.TT_MATRIX_CAR_FILES, s.TT_MATRIX_PT_FILES, s.TT_MATRIX_BIKE_FILE, s.TT_MATRIX_WALK_FILE)
+        self.sf = h.SlackFactors(s.SLACK_FACTORS_FILE)
 
         self.target_crs = target_crs
         self.capacity_cells_df = None
@@ -359,13 +359,13 @@ class ActivityLocator:
 
         elif num_legs == 4:
             # Calc time from start to second activity
-            time_Start_B = self.calculate_expected_time_with_slack(legs_to_locate.iloc[0][s.LEG_DURATION_MINUTES_COL],
+            time_Start_B = self.sf.calculate_expected_time_with_slack(legs_to_locate.iloc[0][s.LEG_DURATION_MINUTES_COL],
                                                                    legs_to_locate.iloc[1][s.LEG_DURATION_MINUTES_COL],
                                                                    legs_to_locate.iloc[0][s.LEG_FROM_ACTIVITY_COL],
                                                                    legs_to_locate.iloc[0][s.LEG_TO_ACTIVITY_COL],
                                                                    legs_to_locate.iloc[1][s.LEG_TO_ACTIVITY_COL])
             # Calc time from second activity to end
-            time_B_End = self.calculate_expected_time_with_slack(legs_to_locate.iloc[2][s.LEG_DURATION_MINUTES_COL],
+            time_B_End = self.sf.calculate_expected_time_with_slack(legs_to_locate.iloc[2][s.LEG_DURATION_MINUTES_COL],
                                                                  legs_to_locate.iloc[3][s.LEG_DURATION_MINUTES_COL],
                                                                  legs_to_locate.iloc[2][s.LEG_FROM_ACTIVITY_COL],
                                                                  legs_to_locate.iloc[2][s.LEG_TO_ACTIVITY_COL],
@@ -402,20 +402,20 @@ class ActivityLocator:
 
         elif num_legs == 5:
             # Calc time from start to second activity
-            time_Start_B = self.calculate_expected_time_with_slack(legs_to_locate.iloc[0][s.LEG_DURATION_MINUTES_COL],
+            time_Start_B = self.sf.calculate_expected_time_with_slack(legs_to_locate.iloc[0][s.LEG_DURATION_MINUTES_COL],
                                                                    legs_to_locate.iloc[1][s.LEG_DURATION_MINUTES_COL],
                                                                    legs_to_locate.iloc[0][s.LEG_FROM_ACTIVITY_COL],
                                                                    legs_to_locate.iloc[0][s.LEG_TO_ACTIVITY_COL],
                                                                    legs_to_locate.iloc[1][s.LEG_TO_ACTIVITY_COL])
             # Calc time from second activity to fourth activity
-            time_B_D = self.calculate_expected_time_with_slack(legs_to_locate.iloc[2][s.LEG_DURATION_MINUTES_COL],
+            time_B_D = self.sf.calculate_expected_time_with_slack(legs_to_locate.iloc[2][s.LEG_DURATION_MINUTES_COL],
                                                                legs_to_locate.iloc[3][s.LEG_DURATION_MINUTES_COL],
                                                                legs_to_locate.iloc[2][s.LEG_FROM_ACTIVITY_COL],
                                                                legs_to_locate.iloc[2][s.LEG_TO_ACTIVITY_COL],
                                                                legs_to_locate.iloc[3][s.LEG_TO_ACTIVITY_COL])
 
             # Calc time from start to fourth activity
-            time_Start_D = self.calculate_expected_time_with_slack(time_Start_B,
+            time_Start_D = self.sf.calculate_expected_time_with_slack(time_Start_B,
                                                                    time_B_D,
                                                                    legs_to_locate.iloc[0][s.LEG_FROM_ACTIVITY_COL],
                                                                    legs_to_locate.iloc[1][s.LEG_TO_ACTIVITY_COL],
@@ -462,26 +462,26 @@ class ActivityLocator:
 
         elif num_legs == 6:
             # Calc time from start to second activity
-            time_Start_B = self.calculate_expected_time_with_slack(legs_to_locate.iloc[0][s.LEG_DURATION_MINUTES_COL],
+            time_Start_B = self.sf.calculate_expected_time_with_slack(legs_to_locate.iloc[0][s.LEG_DURATION_MINUTES_COL],
                                                                    legs_to_locate.iloc[1][s.LEG_DURATION_MINUTES_COL],
                                                                    legs_to_locate.iloc[0][s.LEG_FROM_ACTIVITY_COL],
                                                                    legs_to_locate.iloc[0][s.LEG_TO_ACTIVITY_COL],
                                                                    legs_to_locate.iloc[1][s.LEG_TO_ACTIVITY_COL])
             # Calc time from second activity to fourth activity
-            time_B_D = self.calculate_expected_time_with_slack(legs_to_locate.iloc[2][s.LEG_DURATION_MINUTES_COL],
+            time_B_D = self.sf.calculate_expected_time_with_slack(legs_to_locate.iloc[2][s.LEG_DURATION_MINUTES_COL],
                                                                legs_to_locate.iloc[3][s.LEG_DURATION_MINUTES_COL],
                                                                legs_to_locate.iloc[2][s.LEG_FROM_ACTIVITY_COL],
                                                                legs_to_locate.iloc[2][s.LEG_TO_ACTIVITY_COL],
                                                                legs_to_locate.iloc[3][s.LEG_TO_ACTIVITY_COL])
             # Calc time from fourth activity to end activity
-            time_D_End = self.calculate_expected_time_with_slack(legs_to_locate.iloc[4][s.LEG_DURATION_MINUTES_COL],
+            time_D_End = self.sf.calculate_expected_time_with_slack(legs_to_locate.iloc[4][s.LEG_DURATION_MINUTES_COL],
                                                                  legs_to_locate.iloc[5][s.LEG_DURATION_MINUTES_COL],
                                                                  legs_to_locate.iloc[4][s.LEG_FROM_ACTIVITY_COL],
                                                                  legs_to_locate.iloc[4][s.LEG_TO_ACTIVITY_COL],
                                                                  legs_to_locate.iloc[5][s.LEG_TO_ACTIVITY_COL])
 
             # Calc time from start to fourth activity
-            time_Start_D = self.calculate_expected_time_with_slack(time_Start_B,
+            time_Start_D = self.sf.calculate_expected_time_with_slack(time_Start_B,
                                                                    time_B_D,
                                                                    legs_to_locate.iloc[0][s.LEG_FROM_ACTIVITY_COL],
                                                                    legs_to_locate.iloc[1][s.LEG_TO_ACTIVITY_COL],

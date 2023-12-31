@@ -127,7 +127,7 @@ def is_main_activity(group):
     # If the person has no work or education activity, the main activity is the longest activity
     if group["activity_duration_seconds"].isna().all():
         # If all activities have no duration, pick the middle one
-        is_main_activity_series.iloc[len(group) // 2] = 1
+        is_main_activity_series.iloc[len(group) // 2] = 1  # Integer division
         assert is_main_activity_series.sum() == 1
         return is_main_activity_series
     max_duration_index = group["activity_duration_seconds"].idxmax()

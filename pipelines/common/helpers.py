@@ -544,3 +544,31 @@ class TTMatrices:
             return self.tt_matrices[mode].get(str(hour))
 
         return self.tt_matrices[mode]
+
+    def get_travel_time(self, cell_from, cell_to, mode, hour=None):
+        """
+        Get the travel time between two cells for a specified mode and time of day.
+
+        :param cell_from: Starting cell id.
+        :param cell_to: Destination cell id.
+        :param mode: Mode of transportation (car, pt, bike, walk).
+        :param hour: Hour of the day for modes with time-dependent matrices (car, pt). 0-23.
+        :return: Travel time between the two cells.
+        """
+        if mode not in ['car', 'pt', 'bike', 'walk']:
+            raise ValueError("Invalid mode. Choose from 'car', 'pt', 'bike', 'walk'.")
+
+        tt_matrix = self.get_tt_matrix(mode, hour)
+
+        filtered_matrix = tt_matrix[(tt_matrix['FROM'] == cell_from) & (tt_matrix['TO'] == cell_to)]
+
+        # Extract travel time from the filtered row
+        if not filtered_matrix.empty:
+            travel_time = filtered_matrix['VALUE'].iloc[0]
+        else:
+            logger.error(f"No travel time found for cells {cell_from} and {cell_to}. Using default value of 20 minutes.")
+            travel_time = 20
+
+        return travel_time
+
+

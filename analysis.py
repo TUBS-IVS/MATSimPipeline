@@ -3,6 +3,8 @@ import seaborn as sns
 import statsmodels.api as sm
 from matplotlib import pyplot as plt
 from sklearn.preprocessing import OneHotEncoder
+import numpy as np
+
 
 from pipelines.common import helpers as h
 from utils import settings_values as s
@@ -181,3 +183,29 @@ def value_counts(df):
     combined_df = pd.concat(transformed_dfs, axis=1)
 
     return combined_df
+
+def plot_sigmoid():
+    # Adjusting Delta T to 30 minutes and recalculating the sigmoid function values
+    delta_T = 20
+    time_diff_range = np.arange(0, 60, 0.1)
+    beta_values = [-0.25, -0.2, -0.15, -0.1]
+    colors = ['blue', 'green', 'red', 'grey']  # 'blue', 'green', 'red', 'grey'
+
+    # Plotting
+    plt.figure(figsize=(10, 6))
+    for beta_val, color in zip(beta_values, colors):
+        sigmoid_values = 1 / (1 + np.exp(-beta_val * (time_diff_range - delta_T)))
+        plt.plot(time_diff_range, sigmoid_values, label=f'β = {beta_val}', color=color)
+
+    plt.xlabel('Time Differential (Minutes)')
+    plt.ylabel('Sigmoid Value')
+    # plt.title('Sigmoid Function with ΔT = 30 Minutes')
+    # plt.axvline(x=10, color='blue', linestyle='--', label='10 min')
+    # plt.axvline(x=20, color='green', linestyle='--', label='20 min')
+    # plt.axvline(x=30, color='red', linestyle='--', label='30 min (ΔT Adjusted)')
+    # plt.axvline(x=40, color='grey', linestyle='--', label='40 min')
+    plt.grid(True)
+    plt.legend()
+    plt.show()
+
+plot_sigmoid()

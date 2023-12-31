@@ -145,6 +145,9 @@ IS_MAIN_ACTIVITY_COL = "is_main_activity"
 
 CONNECTED_LEGS_COL = "connected_legs"
 
-HOME_TO_MAIN_DISTANCE_COL = "home_to_main_distance"  # Same distance type as leg distances
+HOME_TO_MAIN_DIST_COL = "home_to_main_distance"  # Same distance type as leg distances
 HOME_TO_MAIN_TIME_COL = "home_to_main_time"  # Same time type as leg times (here:minutes)
+
+MAIN_MODE_TO_MAIN_ACT_TIMEBASED_COL = "main_mode_to_main_act_timebased"
+MAIN_MODE_TO_MAIN_ACT_DISTBASED_COL = "main_mode_to_main_act_distbased"
 

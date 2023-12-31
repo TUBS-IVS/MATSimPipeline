@@ -175,7 +175,10 @@ class ActivityLocator:
                 cell_travel_times = tt_matrix[tt_matrix['from_cell'] == getattr(cell, 'cell_id')]
 
                 candidates = self.get_n_closest_cells(cell_travel_times, target_time, n)
-
+                candidate_potentials = self.capacity_cells_df[self.capacity_cells_df['cell_id'].isin(candidates['to_cell'])]  # TODO: check
+                # check if any entry is below one
+                if candidate_potentials['normalized_capacities'].min() < 1:
+                    pass
                 for person in group.itertuples(index=False):
                     target_activity = getattr(person, s.LEG_TO_ACTIVITY_COL)
                     target_cell = self.weighted_random_choice(candidates, target_activity)
@@ -319,7 +322,7 @@ class ActivityLocator:
             return random.choice(self.capacity_points_gdf['cell_id'].unique())
         return best_cell['cell_id'].iloc[0] if not best_cell.empty else None
 
-    def locate_sec_chain(self, legs_to_locate):  # TODO: refactor as recursive functions
+    def locate_sec_chain_long(self, legs_to_locate):  # TODO: refactor as recursive functions
         num_legs = len(legs_to_locate)
         if num_legs == 2:
             # Locate the activity between the two known locations
@@ -533,3 +536,43 @@ class ActivityLocator:
             legs_to_locate.iloc[4]['cell_from'] = cell_D
             legs_to_locate.iloc[4]['cell_to'] = cell_E
             legs_to_locate.iloc[5]['cell_from'] = cell_E
+
+
+    def locate_sec_chain(self, legs_to_locate):
+        """
+        Locates any leg chain between two known locations using travel time matrix and capacity data.
+        :param legs_to_locate: DataFrame with the legs to locate. Must have the following columns:
+        cell_from, cell_to, activity_type, duration, mode, hour
+        For explanation of the algorithm, see the thesis.
+        :return: DataFrame with a new column with cells assigned to each leg.
+        """
+        legs_with_estimated_direct_times, highest_level = self.sf.get_all_times_with_slack(legs_to_locate)
+
+        # Normalize the estimated times given the known direct time between start and end
+        # Get the direct time
+        # Get all modes and their
+
+        # Get the direct time between those cells
+        direct_time = self.tt.get_travel_time(legs_to_locate.iloc[0]['cell_from'], legs_to_locate.iloc[-1]['cell_to'], XXX)
+        # Given that we are using cells, only adjust once the difference passes the tolerance
+
+        # Locate activities top-down, starting with the second-highest level
+        for level in range(highest_level - 1, 0, -1):
+            if level == 0:
+                times_col = s.LEG_DURATION_MINUTES_COL
+                if len(legs_to_locate[times_col].notna()) != len(legs_to_locate):
+                    logger.warning(f"Found NaN values in {times_col}, may produce incorrect results.")
+            else:
+                times_col = f"level_{level}"  # Here we expect some NaN values
+
+            # Get "meta-legs" for this level
+            legs_to_process = legs_to_locate[legs_to_locate[times_col].notna()].copy()
+            legs_to_process['original_index'] = legs_to_process.index
+
+            # Reset index for reliable pairing
+            legs_to_process.reset_index(drop=True, inplace=True)
+            legs_to_process['pair_id'] = legs_to_process.index // 2
+
+            self.locate_sec_chain_long(legs_to_locate_level)
+            # Get leg pairs where the middle activity needs to be located and send to the single activity locator
+

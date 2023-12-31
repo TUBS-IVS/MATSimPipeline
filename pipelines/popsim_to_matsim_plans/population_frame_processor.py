@@ -27,6 +27,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
     def __init__(self, df: pd.DataFrame = None, id_column: str = None):
         super().__init__(df, id_column)
+        self.sf = h.SlackFactors(s.SLACK_FACTORS_FILE)
 
     def distribute_by_weights(self, weights_df: pd.DataFrame, cell_id_col: str, cut_missing_ids: bool = False):
         self.df = h.distribute_by_weights(self.df, weights_df, cell_id_col, cut_missing_ids)
@@ -667,9 +668,12 @@ class PopulationFrameProcessor(DataFrameProcessor):
         for min_matches in range(len(attributes), 0, -1):  # Decrease criteria to a minimum of 1 attributes
             attribute_combinations = itertools.combinations(attributes, min_matches)
             for combination in attribute_combinations:
-                similar_persons = self.df
-                for attr in combination:
-                    similar_persons = similar_persons[similar_persons[attr] == person[attr]]
+
+                condition = (self.df[list(combination)] == person[list(combination)]).all(axis=1)
+                similar_persons = self.df[condition]
+                # similar_persons = self.df  # old slower way
+                # for attr in combination:
+                #     similar_persons = similar_persons[similar_persons[attr] == person[attr]]
 
                 if len(similar_persons) >= min_similar:
                     logger.debug(f"Found {len(similar_persons)} similar persons for {person[s.UNIQUE_P_ID_COL]} "
@@ -775,7 +779,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 for leg in connected_legs:
                     existing_connected = set(self.df.loc[self.df[s.UNIQUE_LEG_ID_COL] == leg, s.CONNECTED_LEGS_COL].iloc[0])
                     self.df.loc[self.df[s.UNIQUE_LEG_ID_COL] == leg, s.CONNECTED_LEGS_COL] = list(
-                        existing_connected.union(updated_connected_legs))
+                        existing_connected.union(updated_connected_legs))  # TODO: fix
                     checked_legs.add(leg)
 
         logger.info("Closed connected leg groups.")
@@ -968,14 +972,12 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
         logger.info("Marked mirroring main mischief, my merry miscreant mate.")
 
-    def determine_home_to_main_distance_corrected(self):
+    def find_home_to_main_distance(self):  #TODO:test
         """
         Determines the distance between home and main activity for each person in the DataFrame.
         Main directly after home: Leg distance of main leg
         Main directly before home: Leg distance of home leg
-
-        :param df:
-        :return:
+        :return: Adds column with the distance to the DataFrame.
         """
 
         logger.info("Determining home to main activity times/distances...")
@@ -997,8 +999,9 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
             idx_distances = np.abs(home_indices - main_activity_idx[0])
 
-            if person.at[person.index[0], STARTS_AT_HOME_COL] == STARTS_AT_HOME and main_activity_idx < np.min(idx_distances):
-                # This means starting home is same or closer than any other home to main
+            if (person.at[person.index[0], s.FIRST_LEG_STARTS_AT_HOME] == s.FIRST_LEG_STARTS_AT_HOME and
+                    main_activity_idx < np.min(
+                        idx_distances)):  # This means starting home is same or closer than any other home to main
                 closest_home_idx = -1
                 closest_home_row = person.index[0] - 1
             elif home_indices.size == 0:
@@ -1034,33 +1037,63 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 if closest_home_row < main_activity_row:  # Home to main
                     legs = person.loc[closest_home_row + 1:main_activity_row]
 
-                    activity_from = s.ACTIVITY_HOME
-                    activity_via = legs[s.LEG_TO_ACTIVITY_COL].iloc[len(legs) // 2]
-                    activity_to = legs.at[main_activity_row, s.LEG_TO_ACTIVITY_COL]
-                    slack_factor = sf.get_slack_factor(activity_from, activity_via, activity_to)
-
-                    home_to_main_distance = legs[s.LEG_DISTANCE_COL].sum() / slack_factor
-                    home_to_main_time = legs[s.LEG_DURATION_MINUTES_COL].sum() / slack_factor
+                    legs, level = self.sf.get_all_times_with_slack(legs)
+                    home_to_main_time = legs[f"level_{level}"].dropna().index[0]
+                    home_to_main_distance = None  # We cannot correctly determine this without an own function (yes, really)
+                    # and it's not needed nor worth the effort here. Also, this serves as a marker for estimated time.
 
                 else:  # Main to home
                     legs = person.loc[main_activity_row + 1:closest_home_row]
 
-                    activity_from = person.at[main_activity_row, s.LEG_TO_ACTIVITY_COL]
-                    activity_via = legs[s.LEG_TO_ACTIVITY_COL].iloc[len(legs) // 2]
-                    activity_to = s.ACTIVITY_HOME
-                    slack_factor = sf.get_slack_factor(activity_from, activity_via, activity_to)
-
-                    home_to_main_distance = legs[s.LEG_DISTANCE_COL].sum() / slack_factor
-                    home_to_main_time = legs[s.LEG_DURATION_MINUTES_COL].sum() / slack_factor
+                    legs, level = self.sf.get_all_times_with_slack(legs)
+                    home_to_main_time = legs[f"level_{level}"].dropna().index[0]
+                    home_to_main_distance = None
 
             distances[pid] = home_to_main_distance
             times[pid] = home_to_main_time
 
-        self.df['HOME_TO_MAIN_DISTANCE'] = self.df[s.UNIQUE_P_ID_COL].map(distances)
-        self.df['HOME_TO_MAIN_TIME'] = self.df[s.UNIQUE_P_ID_COL].map(times)
+        self.df[s.HOME_TO_MAIN_DIST_COL] = self.df[s.UNIQUE_P_ID_COL].map(distances)
+        self.df[s.HOME_TO_MAIN_TIME_COL] = self.df[s.UNIQUE_P_ID_COL].map(times)
 
         # Set the distance to NaN for all rows except the first one for each person
         # mask = self.df.groupby(UNIQUE_P_ID_COL).cumcount() == 0
         # self.df['HOME_TO_MAIN_DISTANCE'] = self.df['HOME_TO_MAIN_DISTANCE'].where(mask, np.nan)
 
         logger.info("Determining home to main activity distances/times completed.")
+
+    def find_main_mode_to_main_act(self):  #TODO: test
+        """
+        Determines the main mode used to reach the main activity from either the closest previous home activity
+        or the start of the day if there is no home activity before.
+        Main mode is the mode with the longest total use time.
+        """
+        # Group by unique person ID
+        persons = self.df.groupby(s.UNIQUE_P_ID_COL)
+
+        # Initialize a dictionary to store the main mode for each person
+        main_modes_time = {}
+        main_modes_dist = {}
+
+        for pid, person in persons:
+            # Find the main activity
+            main_activity_idx = person[person[s.IS_MAIN_ACTIVITY_COL] == 1].index[0]
+
+            # Find the closest previous home activity or the start of the day
+            home_indices = person[person[s.LEG_TO_ACTIVITY_COL] == s.ACTIVITY_HOME].index
+            start_idx = home_indices[home_indices < main_activity_idx].max() if not home_indices.empty else person.index[0]
+
+            # Calculate the total use time for each mode
+            mode_times = person.loc[start_idx:main_activity_idx].groupby(s.LEG_MAIN_MODE_COL)[s.LEG_DURATION_MINUTES_COL].sum()
+            mode_distances = person.loc[start_idx:main_activity_idx].groupby(s.LEG_MAIN_MODE_COL)[s.LEG_DISTANCE_COL].sum()
+
+            main_mode_time_base = mode_times.idxmax()
+            main_mode_dist_base = mode_distances.idxmax()
+
+            # Store the main mode for the person
+            main_modes_time[pid] = main_mode_time_base
+            main_modes_dist[pid] = main_mode_dist_base
+
+        # Add a new column to the dataframe with the main mode for each person
+        self.df[s.MAIN_MODE_TO_MAIN_ACT_TIMEBASED_COL] = self.df[s.UNIQUE_P_ID_COL].map(main_modes_time)
+        self.df[s.MAIN_MODE_TO_MAIN_ACT_DISTBASED_COL] = self.df[s.UNIQUE_P_ID_COL].map(main_modes_dist)
+

@@ -151,7 +151,7 @@ class ActivityLocator:
 
         return self.capacity_cells_df
 
-    def locate_main_activity_cell(self):  # TODO: finish
+    def locate_main_activity_cell(self):  # TODO: finish (3+h!)
         """
         Locates the main activity cell for each person, based on the travel time matrices,
         the normalized capacities, the desired activity type, and the desired travel time.
@@ -161,11 +161,18 @@ class ActivityLocator:
         # Prepare a list to collect the target cells for each person
         person_target_cells = []
 
+        # Even if it's annoying, itertuples is much faster than iterrows
         for _, cell in self.cells_gdf.itertuples(index=False):
             capacity_updates = {}
 
             # Filter for only the columns we need
-            filtered_persons = self.persons_gdf[self.persons_gdf["cell_id"] == getattr(cell, 'cell_id')]
+            filtered_persons = self.persons_gdf[[s.LEG_MAIN_MODE_COL, s.HOUR_COL, s.LEG_DURATION_MINUTES_COL,]]
+
+            # For each person, we need to find candidates based on time and mode (for the right tt matrix)
+            # Find time deviations and potentials of the specific activity type for each candidate
+            # Calculate the likelihoods for each candidate and weighted choose
+            # Assign that cell to both main act and mirrored main. Distributor later also has to remember mirrored main.
+            # At some point (end of loop?), update the capacities of chosen cells.
 
             # Group by mode, hour, and duration
             persons_in_cell = filtered_persons.groupby([s.LEG_MAIN_MODE_COL, s.HOUR_COL, s.LEG_DURATION_MINUTES_COL])
@@ -176,7 +183,8 @@ class ActivityLocator:
 
                 candidates = self.get_n_closest_cells(cell_travel_times, target_time, n)
                 candidate_potentials = self.capacity_cells_df[self.capacity_cells_df['cell_id'].isin(candidates['to_cell'])]  # TODO: check
-                # check if any entry is below one
+                time_deviations = np.abs(candidates['travel_time'].values - target_time)  # TODO check
+
                 if candidate_potentials['normalized_capacities'].min() < 1:
                     pass
                 for person in group.itertuples(index=False):
@@ -194,13 +202,29 @@ class ActivityLocator:
             for (cell_id, activity_type), count in capacity_updates.items():
                 self.update_capacity(cell_id, activity_type, count)
 
-        # Create a DataFrame from the collected target cells
+        # Create a DataFrame from the collected target cells and write to main df
         target_cells_df = pd.DataFrame(person_target_cells, columns=['person_id', 'target_cell'])
-
-        # Merge the new DataFrame with the original persons_gdf
         self.persons_gdf = self.persons_gdf.merge(target_cells_df, on='person_id', how='left')
 
     # TODO: assignment function multiprocessed, using weighted by overall capacity, not remaining capacity
+    @staticmethod
+    def calculate_cell_likelihoods(potentials, time_diffs=None):
+        """
+        Calculates cell likelihoods, linear on potentials and time differentials using a sigmoid function.
+
+        :param potentials: List or array of potential values for each candidate.
+        :param time_diffs: List or array of time differential values for each candidate.
+        :return: Array of likelihoods for each candidate.
+        """
+        if time_diffs is not None:
+            sigmoid_values = h.sigmoid(time_diffs, s.SIGMOID_BETA, s.SIGMOID_DELTA_T)
+            combined_factors = np.multiply(potentials, sigmoid_values)
+        else:
+            combined_factors = potentials
+
+        # Normalize to ensure the sum of likelihoods is 1
+        likelihoods = combined_factors / np.sum(combined_factors)
+        return likelihoods
 
     def weighted_random_choice(self, candidates, activity_type):
         weights = [self.get_remaining_capacity(cell, activity_type) for cell in candidates]

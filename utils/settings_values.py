@@ -150,4 +150,7 @@ HOME_TO_MAIN_TIME_COL = "home_to_main_time"  # Same time type as leg times (here
 
 MAIN_MODE_TO_MAIN_ACT_TIMEBASED_COL = "main_mode_to_main_act_timebased"
 MAIN_MODE_TO_MAIN_ACT_DISTBASED_COL = "main_mode_to_main_act_distbased"
+HOME_TO_MAIN_TIME_ESTIMATED_COL = "home_to_main_time_is_estimated"
 
+SIGMOID_BETA = settings['sigmoid_beta']
+SIGMOID_DELTA_T = settings['sigmoid_delta_t']

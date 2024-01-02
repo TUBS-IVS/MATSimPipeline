@@ -72,7 +72,7 @@ class DataFrameProcessor:
         Parameters:
         - source_df: DataFrame, the source dataframe.
         - columns_to_add: list of str, the columns to fetch and add to df. If None, all columns are fetched.
-        - overwrite_existing: bool, whether to overwrite columns that already exist. Default is True.
+        - overwrite_existing: bool, whether to overwrite columns that already exist. Default is False.
         - drop_duplicates_from_source: bool, whether to drop duplicates based on id_column in source_df. Default is True.
             If False, additional rows will be added to the DataFrame if source_df contains duplicate IDs.
         """

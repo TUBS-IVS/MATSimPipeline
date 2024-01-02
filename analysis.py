@@ -132,19 +132,17 @@ def analyze_influence_on_slack(df):
 
     # One-hot encode the categorical variables
     encoder = OneHotEncoder(drop='first')  # Drop first column to avoid multicollinearity
-    categorical_columns = [s.H_REGION_TYPE_COL, 'start_activity', 'via_activity', 'end_activity']
+    categorical_columns = ["pergrup1"]  # [s.H_REGION_TYPE_COL, 'start_activity', 'via_activity', 'end_activity', "pergrup1"]
     encoded_vars = encoder.fit_transform(df[categorical_columns])
     encoded_vars_df = pd.DataFrame(encoded_vars.toarray(), columns=encoder.get_feature_names_out(categorical_columns))
 
-    # Combine with the original DataFrame
-    X = pd.concat([df[[s.PERSON_AGE_COL]].reset_index(drop=True), encoded_vars_df], axis=1)
-    X = sm.add_constant(X)  # Add a constant to the model
+    # X = pd.concat([df[[s.PERSON_AGE_COL]].reset_index(drop=True), encoded_vars_df], axis=1)
+    X = encoded_vars_df
+    X = sm.add_constant(X)
     y = df['slack_factor']
 
-    # Fit the linear regression model
     model = sm.OLS(y, X).fit()
 
-    # Return the summary of the regression
     return model.summary()
 
 
@@ -158,7 +156,9 @@ def analyze_influence_on_slack(df):
 # for col in s.L_COLUMNS.values():
 #     h.plot_column(df, col)
 
-slack_df = h.read_csv("output/20231215_001306/slack_factors.csv")
+slack_df = h.read_csv("data/slack_factors_raw.csv")
+persons_df = h.read_csv(s.MiD_PERSONS_FILE)
+slack_df = slack_df.merge(persons_df, on=s.PERSON_ID_COL, how='left')
 print(analyze_influence_on_slack(slack_df))
 
 
@@ -208,4 +208,3 @@ def plot_sigmoid():
     plt.legend()
     plt.show()
 
-plot_sigmoid()

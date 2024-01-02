@@ -2,7 +2,8 @@
 sample_size: 0.05 # 0.1 = 10% of the population
 n_closest_cells: 5 # Number of cell candidates to consider for main activity location
 default_slack_factor: 1.5
-
+sigmoid_beta: -0.15
+sigmoid_delta_t: 20  # Minutes
 
 input_files:
   expanded_households_files: # synthetic_households from PopSim
@@ -69,8 +70,8 @@ leg_columns:
   leg_main_mode: "hvm_imp"
   leg_start_time: "W_SZ"
   leg_end_time: "W_AZ"
-  leg_duration_minutes: "wegmin"
-  leg_distance: "wegkm"
+  leg_duration_minutes: "wegmin_imp2"  # Legs without rbW
+  leg_distance: "wegkm_imp"
   first_leg_starts_at_home: "W_SO1"
 
 enhancement_columns: # Columns created by the enhancement module

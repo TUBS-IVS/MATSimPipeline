@@ -158,15 +158,15 @@ def connected_legs(household_group):
             time_match = check_time(person_a_leg, person_b_leg)
             mode_match = check_mode(person_a_leg, person_b_leg)
             activity_match = check_activity(person_a_leg, person_b_leg)
-            logger.debug(f"Legs {person_a_leg['unique_leg_id']} and {person_b_leg['unique_leg_id']}: "
+            logger.debug(f"Legs {person_a_leg[s.UNIQUE_LEG_ID_COL]} and {person_b_leg[s.UNIQUE_LEG_ID_COL]}: "
                          f"distance {dist_match}, time {time_match}, mode {mode_match}, activity {activity_match}")
             if dist_match and time_match and mode_match and activity_match:
                 if not isinstance(connections.at[idx_a], list):  # Checking for NaN doesn't work here
                     connections.at[idx_a] = []
                 if not isinstance(connections.at[idx_b], list):
                     connections.at[idx_b] = []
-                connections.at[idx_a].append(person_b_leg['unique_leg_id'])
-                connections.at[idx_b].append(person_a_leg['unique_leg_id'])
+                connections.at[idx_a].append(person_b_leg[s.UNIQUE_LEG_ID_COL])
+                connections.at[idx_b].append(person_a_leg[s.UNIQUE_LEG_ID_COL])
 
     if connections.isna().all():
         logger.debug(f"No connections found for household {household_group[s.HOUSEHOLD_MID_ID_COL].iloc[0]}.")
@@ -270,7 +270,7 @@ def is_protagonist(household_group):
     """
     prot_series = pd.Series(0, index=household_group.index)
 
-    if household_group['connected_legs'].isna().all():
+    if household_group[s.CONNECTED_LEGS_COL].isna().all():
         logger.debug(f"No connections exist for household {household_group[s.HOUSEHOLD_MID_ID_COL].iloc[0]}.")
         return prot_series
 
@@ -287,27 +287,25 @@ def is_protagonist(household_group):
         s.ACTIVITY_EARLY_EDUCATION,
         s.ACTIVITY_DAYCARE,  # Likely to be dropped off/picked up
         s.ACTIVITY_BUSINESS,  # Likely to be accompanied
-        s.ACTIVITY_HOME]
+        s.ACTIVITY_HOME]  # Home must stay home
 
     # Keep track of checked legs, so we don't waste time checking them again
     checked_legs = []
-
     for idx, row in household_group.iterrows():
-        if not isinstance(row['connected_legs'], list):  # Checking for NaN doesn't work here
+        if not isinstance(row[s.CONNECTED_LEGS_COL], list):  # Checking for NaN doesn't work here
             continue
         if idx in checked_legs:
             continue
-
-        connected_legs = set(row['connected_legs']).union({row["unique_leg_id"]})  # Including the current leg
+        connected_legs = set(row[s.CONNECTED_LEGS_COL]).union({row[s.UNIQUE_LEG_ID_COL]})  # Including the current leg
         leg_data = []
         for leg_id in connected_legs:
             if not all(elem in connected_legs for elem in
-                       household_group.loc[household_group["unique_leg_id"] == leg_id, 'connected_legs'].iloc[0]):
+                       household_group.loc[household_group[s.UNIQUE_LEG_ID_COL] == leg_id, s.CONNECTED_LEGS_COL].iloc[0]):
                 logger.warning(f"Leg {leg_id} has inconsistent connections."
                                f"This might lead to unexpected results.")
 
-            checked_legs.append(household_group.loc[household_group["unique_leg_id"] == leg_id].index[0])
-            leg_activity = household_group.loc[household_group["unique_leg_id"] == leg_id, s.LEG_TO_ACTIVITY_COL].iloc[0]
+            checked_legs.append(household_group.loc[household_group[s.UNIQUE_LEG_ID_COL] == leg_id].index[0])
+            leg_activity = household_group.loc[household_group[s.UNIQUE_LEG_ID_COL] == leg_id, s.LEG_TO_ACTIVITY_COL].iloc[0]
             activity_rank = activities_ranked.index(leg_activity) if leg_activity in activities_ranked else -1
             leg_data.append({'leg_id': leg_id, 'activity': leg_activity, 'activity_rank': activity_rank})
 
@@ -316,7 +314,7 @@ def is_protagonist(household_group):
         if not connected_legs_df.empty:
             connected_legs_df.sort_values(by='activity_rank', ascending=False, inplace=True)
             protagonist_leg_id = connected_legs_df.iloc[0]['leg_id']
-            prot_series.loc[household_group["unique_leg_id"] == protagonist_leg_id] = 1
+            prot_series.loc[household_group[s.UNIQUE_LEG_ID_COL] == protagonist_leg_id] = 1
 
     return prot_series
 

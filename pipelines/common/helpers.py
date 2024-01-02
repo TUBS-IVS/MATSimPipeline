@@ -7,6 +7,7 @@ import shutil
 
 import matplotlib.pyplot as plt
 import pandas as pd
+import numpy as np
 import seaborn as sns
 from shapely import Point
 
@@ -572,3 +573,13 @@ class TTMatrices:
         return travel_time
 
 
+def sigmoid(x, beta, delta_T):
+    """
+    Sigmoid function for likelihood calculation.
+
+    :param x: The input value (time differential).
+    :param beta: Controls the steepness of the sigmoid's transition.
+    :param delta_T: The midpoint of the sigmoid's transition.
+    :return: Sigmoid function value.
+    """
+    return 1 / (1 + np.exp(-beta * (x - delta_T)))

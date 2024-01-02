@@ -821,10 +821,10 @@ class PopulationFrameProcessor(DataFrameProcessor):
         """
         logger.info("Adding from_activity column...")
         # Sort the DataFrame by person ID and leg number (the df should usually already be sorted this way)
-        self.df.sort_values(by=[s.UNIQUE_P_ID_COL, s.LEG_NON_UNIQUE_ID_COL], inplace=True)
+        self.df.sort_values(by=[s.PERSON_ID_COL, s.LEG_NON_UNIQUE_ID_COL], inplace=True)
 
         # Shift the 'to_activity' down to create 'from_activity' for each group
-        self.df[s.LEG_FROM_ACTIVITY_COL] = self.df.groupby(s.UNIQUE_P_ID_COL)[s.LEG_TO_ACTIVITY_COL].shift(1)
+        self.df[s.LEG_FROM_ACTIVITY_COL] = self.df.groupby(s.PERSON_ID_COL)[s.LEG_TO_ACTIVITY_COL].shift(1)
 
         # For the first leg of each person, set 'from_activity' based on 'starts_at_home'
         self.df.loc[(self.df[s.LEG_NON_UNIQUE_ID_COL] == 1) & (
@@ -841,8 +841,10 @@ class PopulationFrameProcessor(DataFrameProcessor):
     def calculate_slack_factors(self):
         slack_factors = []
 
-        for person_id, person_trips in self.df.groupby(s.UNIQUE_P_ID_COL):
-            logger.debug(f"Searching slack factors at person {person_id}...")
+        df = self.df[self.df[s.LEG_DISTANCE_COL] < 500]
+
+        for person_id, person_trips in df.groupby(s.PERSON_ID_COL):
+            logger.debug(f"Searching sf at person {person_id}...")
             # Sort by ordered_id to ensure sequence
             person_trips = person_trips.sort_values(by=s.LEG_NON_UNIQUE_ID_COL)
 
@@ -855,7 +857,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 if first_leg[s.LEG_TO_ACTIVITY_COL] == second_leg[s.LEG_FROM_ACTIVITY_COL]:
 
                     direct_trip = self.df[
-                        (self.df[s.UNIQUE_P_ID_COL] == person_id) &
+                        (self.df[s.PERSON_ID_COL] == person_id) &
                         # Exclude the two legs we're checking
                         (self.df[s.LEG_NON_UNIQUE_ID_COL] != first_leg[s.LEG_NON_UNIQUE_ID_COL]) &
                         (self.df[s.LEG_NON_UNIQUE_ID_COL] != second_leg[s.LEG_NON_UNIQUE_ID_COL]) &
@@ -867,28 +869,28 @@ class PopulationFrameProcessor(DataFrameProcessor):
                         ]
 
                     if not direct_trip.empty:
-                        direct_distance = direct_trip.iloc[0][s.LEG_DURATION_MINUTES_COL]
-                        indirect_distance = first_leg[s.LEG_DURATION_MINUTES_COL] + second_leg[s.LEG_DURATION_MINUTES_COL]
+                        direct_distance = direct_trip.iloc[0][s.LEG_DISTANCE_COL]
+                        indirect_distance = first_leg[s.LEG_DISTANCE_COL] + second_leg[s.LEG_DISTANCE_COL]
                         slack_factor = indirect_distance / direct_distance
-                        if slack_factor < 1 or slack_factor > 50:
-                            logger.debug(f"Found an unrealistic slack factor of {slack_factor} for person {person_id} "
-                                         f"Skipping...")
-                            continue
                         slack_factors.append((person_id,
                                               first_leg[s.H_REGION_TYPE_COL],
                                               first_leg[s.PERSON_AGE_COL],
                                               first_leg[s.LEG_FROM_ACTIVITY_COL],
                                               first_leg[s.LEG_TO_ACTIVITY_COL],
                                               second_leg[s.LEG_TO_ACTIVITY_COL],
+                                              first_leg[s.LEG_MAIN_MODE_COL],
+                                              second_leg[s.LEG_MAIN_MODE_COL],
                                               slack_factor))
                         logger.debug(f"Found a slack factor of {slack_factor} for person {person_id} ")
 
-        return pd.DataFrame(slack_factors, columns=[s.UNIQUE_P_ID_COL,
+        return pd.DataFrame(slack_factors, columns=[s.PERSON_ID_COL,
                                                     s.H_REGION_TYPE_COL,
                                                     s.PERSON_AGE_COL,
                                                     'start_activity',
                                                     'via_activity',
                                                     'end_activity',
+                                                    'start_mode',
+                                                    'end_mode',
                                                     'slack_factor'])
 
     def list_cars_in_household(self):  # MA DONE
@@ -961,7 +963,6 @@ class PopulationFrameProcessor(DataFrameProcessor):
         # Leg distance to the in-between activity and from it to the candidate activity must be the same
         same_leg_distance_condition = (self.df['next_leg_distance'] == self.df['next_next_leg_distance'])
 
-        # Combine conditions and assign to the new column
         self.df['mirrors_main_activity'] = (
             (person_id_condition & short_duration_condition & same_activity_condition & same_leg_distance_condition).shift(
                 2).fillna(False)).astype(int)
@@ -972,9 +973,9 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
         logger.info("Marked mirroring main mischief, my merry miscreant mate.")
 
-    def find_home_to_main_distance(self):  #TODO:test
+    def find_home_to_main_time(self):  # TODO:test
         """
-        Determines the distance between home and main activity for each person in the DataFrame.
+        Determines the time (and distance) between home and main activity for each person in the DataFrame.
         Main directly after home: Leg distance of main leg
         Main directly before home: Leg distance of home leg
         :return: Adds column with the distance to the DataFrame.
@@ -985,6 +986,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
         persons = self.df.groupby(s.UNIQUE_P_ID_COL)
         distances = {}
         times = {}
+        is_estimated = {}
 
         for pid, person in persons:
             # Extract the indices for main activity and home activities
@@ -1020,15 +1022,18 @@ class PopulationFrameProcessor(DataFrameProcessor):
                              f"time/distance cannot be determined and are arbitrarily set to 1.")
                 home_to_main_distance = 1
                 home_to_main_time = 1
+                time_is_estimated = 1
 
             elif closest_home_idx - main_activity_idx[0] == 1:  # Main to home
                 logger.debug(f"Person {pid} has a home activity directly after main. ")
                 home_to_main_distance = person.at[closest_home_row, s.LEG_DISTANCE_COL]
                 home_to_main_time = person.at[closest_home_row, s.LEG_DURATION_MINUTES_COL]
+                time_is_estimated = 0
             elif closest_home_idx - main_activity_idx[0] == -1:  # Home to main
                 logger.debug(f"Person {pid} has a home activity directly before main. ")
                 home_to_main_distance = person.at[main_activity_row, s.LEG_DISTANCE_COL]
                 home_to_main_time = person.at[main_activity_row, s.LEG_DURATION_MINUTES_COL]
+                time_is_estimated = 0
 
             else:
                 logger.debug(f"Person {pid} has a main activity and home activity more than one leg apart. "
@@ -1041,6 +1046,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
                     home_to_main_time = legs[f"level_{level}"].dropna().index[0]
                     home_to_main_distance = None  # We cannot correctly determine this without an own function (yes, really)
                     # and it's not needed nor worth the effort here. Also, this serves as a marker for estimated time.
+                    time_is_estimated = 1
 
                 else:  # Main to home
                     legs = person.loc[main_activity_row + 1:closest_home_row]
@@ -1048,12 +1054,15 @@ class PopulationFrameProcessor(DataFrameProcessor):
                     legs, level = self.sf.get_all_times_with_slack(legs)
                     home_to_main_time = legs[f"level_{level}"].dropna().index[0]
                     home_to_main_distance = None
+                    time_is_estimated = 1
 
             distances[pid] = home_to_main_distance
             times[pid] = home_to_main_time
+            is_estimated[pid] = time_is_estimated
 
         self.df[s.HOME_TO_MAIN_DIST_COL] = self.df[s.UNIQUE_P_ID_COL].map(distances)
         self.df[s.HOME_TO_MAIN_TIME_COL] = self.df[s.UNIQUE_P_ID_COL].map(times)
+        self.df[s.HOME_TO_MAIN_TIME_ESTIMATED_COL] = self.df[s.UNIQUE_P_ID_COL].map(is_estimated)
 
         # Set the distance to NaN for all rows except the first one for each person
         # mask = self.df.groupby(UNIQUE_P_ID_COL).cumcount() == 0
@@ -1061,7 +1070,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
         logger.info("Determining home to main activity distances/times completed.")
 
-    def find_main_mode_to_main_act(self):  #TODO: test
+    def find_main_mode_to_main_act(self):  # TODO: test
         """
         Determines the main mode used to reach the main activity from either the closest previous home activity
         or the start of the day if there is no home activity before.
@@ -1096,4 +1105,3 @@ class PopulationFrameProcessor(DataFrameProcessor):
         # Add a new column to the dataframe with the main mode for each person
         self.df[s.MAIN_MODE_TO_MAIN_ACT_TIMEBASED_COL] = self.df[s.UNIQUE_P_ID_COL].map(main_modes_time)
         self.df[s.MAIN_MODE_TO_MAIN_ACT_DISTBASED_COL] = self.df[s.UNIQUE_P_ID_COL].map(main_modes_dist)
-

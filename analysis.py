@@ -132,7 +132,7 @@ def analyze_influence_on_slack(df):
 
     # One-hot encode the categorical variables
     encoder = OneHotEncoder(drop='first')  # Drop first column to avoid multicollinearity
-    categorical_columns = ["pergrup1"]  # [s.H_REGION_TYPE_COL, 'start_activity', 'via_activity', 'end_activity', "pergrup1"]
+    categorical_columns = ['direct_mode'] # ,'RegioStaR7_x', 'start_activity', 'via_activity', 'end_activity', "pergrup1", "start_mode", "end_mode"]
     encoded_vars = encoder.fit_transform(df[categorical_columns])
     encoded_vars_df = pd.DataFrame(encoded_vars.toarray(), columns=encoder.get_feature_names_out(categorical_columns))
 

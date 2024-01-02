@@ -6,8 +6,8 @@ import re
 import shutil
 
 import matplotlib.pyplot as plt
-import pandas as pd
 import numpy as np
+import pandas as pd
 import seaborn as sns
 from shapely import Point
 
@@ -583,3 +583,99 @@ def sigmoid(x, beta, delta_T):
     :return: Sigmoid function value.
     """
     return 1 / (1 + np.exp(-beta * (x - delta_T)))
+
+
+def clean_string(s):
+    """
+    Remove quotation marks and \ from a string.
+    """
+    try:
+        return s.strip("'").strip('"').strip('\\')
+    except AttributeError:
+        return s
+
+
+
+def check_distance(leg_to_find, leg_to_compare):
+    distance_to_find = leg_to_find[s.LEG_DISTANCE_COL]
+    distance_to_compare = leg_to_compare[s.LEG_DISTANCE_COL]
+
+    if pd.isnull(distance_to_find) or pd.isnull(distance_to_compare):
+        return False
+
+    difference = abs(distance_to_find - distance_to_compare)
+    range_tolerance = distance_to_find * 0.05
+
+    return difference <= range_tolerance
+
+
+def check_time(leg_to_find, leg_to_compare):
+    # Using constant variables instead of strings
+    leg_begin_to_find = leg_to_find[s.LEG_START_TIME_COL]
+    leg_end_to_find = leg_to_find[s.LEG_END_TIME_COL]
+    leg_begin_to_compare = leg_to_compare[s.LEG_START_TIME_COL]
+    leg_end_to_compare = leg_to_compare[s.LEG_END_TIME_COL]
+
+    # Reduce the time range for short legs to avoid false positives (NaN evaluates to False)
+    time_range = pd.Timedelta(minutes=5) if leg_to_find[s.LEG_DURATION_MINUTES_COL] > 5 and leg_to_compare[
+        s.LEG_DURATION_MINUTES_COL] > 5 else pd.Timedelta(minutes=2)
+
+    if pd.isnull([leg_begin_to_find, leg_end_to_find, leg_begin_to_compare, leg_end_to_compare]).any():
+        return False
+
+    begin_difference = abs(leg_begin_to_find - leg_begin_to_compare)
+    end_difference = abs(leg_end_to_find - leg_end_to_compare)
+
+    return (begin_difference <= time_range) and (end_difference <= time_range)
+
+
+def check_mode(leg_to_find, leg_to_compare):
+    """
+    Check if the modes of two legs are compatible.
+    Note: Adjusting the mode "car" to "ride" based on age is now its own function.
+    :param leg_to_find:
+    :param leg_to_compare:
+    :return:
+    """
+    mode_to_find = leg_to_find[s.LEG_MAIN_MODE_COL]
+    mode_to_compare = leg_to_compare[s.LEG_MAIN_MODE_COL]
+
+    if mode_to_find == mode_to_compare and mode_to_find != s.MODE_UNDEFINED:  # Make sure we don't pair undefined modes
+        return True
+
+    mode_pairs = {(s.MODE_CAR, s.MODE_RIDE), (s.MODE_RIDE, s.MODE_CAR),
+                  (s.MODE_WALK, s.MODE_BIKE), (s.MODE_BIKE, s.MODE_WALK)}
+    if (mode_to_find, mode_to_compare) in mode_pairs:
+        return True
+
+    if s.MODE_UNDEFINED in [mode_to_find, mode_to_compare]:
+        # Assuming if one mode is undefined and the other is car, they pair as ride
+        # The mode is not updated here (in contrast to prev. work), because we don't know yet if the leg is connected.
+        return s.MODE_CAR in [mode_to_find, mode_to_compare]
+
+    return False
+
+
+def check_activity(leg_to_find, leg_to_compare):  # TODO: Possibly create a matrix of compatible activities
+    compatible_activities = {
+        s.ACTIVITY_SHOPPING: [s.ACTIVITY_ERRANDS],
+        s.ACTIVITY_ERRANDS: [s.ACTIVITY_SHOPPING, s.ACTIVITY_LEISURE],
+        s.ACTIVITY_LEISURE: [s.ACTIVITY_ERRANDS, s.ACTIVITY_SHOPPING, s.ACTIVITY_MEETUP],
+        s.ACTIVITY_MEETUP: [s.ACTIVITY_LEISURE]}
+
+    type_to_find = leg_to_find[s.LEG_TO_ACTIVITY_COL]
+    type_to_compare = leg_to_compare[s.LEG_TO_ACTIVITY_COL]
+
+    if (type_to_find == type_to_compare or
+            s.ACTIVITY_ACCOMPANY_ADULT in [type_to_find, type_to_compare] or
+            s.ACTIVITY_PICK_UP_DROP_OFF in [type_to_find, type_to_compare]):
+        return True
+    elif s.ACTIVITY_UNSPECIFIED in [type_to_find, type_to_compare] or pd.isnull([type_to_find, type_to_compare]).any():
+        logger.debug("Activity Type Undefined or Null (which usually means person has no legs).")
+        return False
+    # Assuming trip home (works, but not really plausible, thus commented out for now)
+    # elif (type_to_find == s.ACTIVITY_HOME and type_to_compare != s.ACTIVITY_WORK) or \
+    #         (type_to_compare == s.ACTIVITY_HOME and type_to_find != s.ACTIVITY_WORK):
+    #     return True
+
+    return type_to_compare in compatible_activities.get(type_to_find, [])

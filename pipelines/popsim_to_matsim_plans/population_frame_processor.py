@@ -27,7 +27,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
     def __init__(self, df: pd.DataFrame = None, id_column: str = None):
         super().__init__(df, id_column)
-        self.sf = h.SlackFactors(s.SLACK_FACTORS_FILE)
+        # self.sf = h.SlackFactors(s.SLACK_FACTORS_FILE)
 
     def distribute_by_weights(self, weights_df: pd.DataFrame, cell_id_col: str, cut_missing_ids: bool = False):
         self.df = h.distribute_by_weights(self.df, weights_df, cell_id_col, cut_missing_ids)
@@ -197,6 +197,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
         Calculate the time between the end of one leg and the start of the next leg seconds.
         :return:
         """
+        logger.info("Calculating activity duration...")
         self.df.sort_values(by=['unique_household_id', s.PERSON_ID_COL, s.LEG_NON_UNIQUE_ID_COL], inplace=True,
                             ignore_index=True)
 
@@ -211,6 +212,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
         # Set the activity time of the last leg to None
         is_last_leg = self.df["unique_person_id"] != self.df["unique_person_id"].shift(-1)
         self.df.loc[is_last_leg, s.ACT_DUR_SECONDS_COL] = None
+        logger.info(f"Calculated activity duration.")
 
     def assign_random_location(self):
         """
@@ -777,12 +779,12 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 # Update connected_legs for all legs in the group
                 updated_connected_legs = list(connected_legs)
                 for leg in connected_legs:
-                    existing_connected = set(self.df.loc[self.df[s.UNIQUE_LEG_ID_COL] == leg, s.CONNECTED_LEGS_COL].iloc[0])
-                    self.df.loc[self.df[s.UNIQUE_LEG_ID_COL] == leg, s.CONNECTED_LEGS_COL] = list(
-                        existing_connected.union(updated_connected_legs))  # TODO: fix
+                    # existing_connected = set(self.df.loc[self.df[s.UNIQUE_LEG_ID_COL] == leg, s.CONNECTED_LEGS_COL].iloc[0])
+                    self.df.loc[self.df[s.UNIQUE_LEG_ID_COL] == leg, s.CONNECTED_LEGS_COL] = updated_connected_legs
+                    # list(existing_connected.union(updated_connected_legs)))  # TODO: fix
                     checked_legs.add(leg)
 
-        logger.info("Closed connected leg groups.")
+                    logger.info("Closed connected leg groups.")
 
     def update_activity_for_prot_legs(self):
         """
@@ -880,6 +882,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
                                               second_leg[s.LEG_TO_ACTIVITY_COL],
                                               first_leg[s.LEG_MAIN_MODE_COL],
                                               second_leg[s.LEG_MAIN_MODE_COL],
+                                              direct_trip.iloc[0][s.LEG_MAIN_MODE_COL],
                                               slack_factor))
                         logger.debug(f"Found a slack factor of {slack_factor} for person {person_id} ")
 
@@ -891,6 +894,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
                                                     'end_activity',
                                                     'start_mode',
                                                     'end_mode',
+                                                    'direct_mode',
                                                     'slack_factor'])
 
     def list_cars_in_household(self):  # MA DONE
@@ -1105,3 +1109,87 @@ class PopulationFrameProcessor(DataFrameProcessor):
         # Add a new column to the dataframe with the main mode for each person
         self.df[s.MAIN_MODE_TO_MAIN_ACT_TIMEBASED_COL] = self.df[s.UNIQUE_P_ID_COL].map(main_modes_time)
         self.df[s.MAIN_MODE_TO_MAIN_ACT_DISTBASED_COL] = self.df[s.UNIQUE_P_ID_COL].map(main_modes_dist)
+
+    def filter_home_to_home_legs(self):  # TODO: test
+        """
+        Filters out 'home to home' legs from the DataFrame.
+        """
+        logger.info(f"Filtering out 'home to home' legs from {len(self.df)} rows...")
+        home_to_home_condition = (self.df[s.LEG_FROM_ACTIVITY_COL] == s.ACTIVITY_HOME) & \
+                                 (self.df[s.LEG_TO_ACTIVITY_COL] == s.ACTIVITY_HOME)
+        self.df = self.df[~home_to_home_condition].reset_index(drop=True)
+        logger.info(f"Filtered out 'home to home' legs. {len(self.df)} rows remaining.")
+
+    def update_number_of_legs(self, col_to_write_to=s.NUMBER_OF_LEGS_COL):  # TODO: test
+        """
+        Updates the NUMBER_OF_LEGS_COL with the correct number of legs for each person;
+        or writes a new col with the given name.
+        """
+        persons = self.df.groupby(s.UNIQUE_P_ID_COL)
+
+        # Number of legs for each person, this actually counts the number of rows for each person
+        number_of_legs = persons.size()
+
+        self.df[col_to_write_to] = self.df[s.UNIQUE_P_ID_COL].map(number_of_legs)
+
+    def find_connected_legs(self):
+        """
+        Find connections between trip legs in a household.
+        Uses unique_leg_id; lists all legs that are connected to each leg.
+        """
+        # Group by household
+        households = self.df.groupby(s.UNIQUE_HH_ID_COL)
+        num_households = len(households)
+
+        # Initialize connections series and checks_df
+        connections = pd.Series(index=self.df.index, dtype='object')
+        checks_data = []
+        for household_id, household_group in households:
+            num_households -= 1
+            if num_households % 1000 == 0:
+                logger.info(f"------ {num_households} households remaining. ------")
+            if household_group[s.PERSON_ID_COL].nunique() == 1:
+                logger.debug(f"Household {household_id} has only one person. No connections.")
+                continue
+
+            for idx_a, person_a_leg in household_group.iterrows():
+                for idx_b, person_b_leg in household_group.iterrows():
+                    if person_a_leg[s.PERSON_ID_COL] == person_b_leg[s.PERSON_ID_COL] or idx_b <= idx_a:
+                        continue  # So we don't compare a leg to itself or to a leg it's already been compared to
+
+                    dist_match = h.check_distance(person_a_leg, person_b_leg)
+                    time_match = h.check_time(person_a_leg, person_b_leg)
+                    mode_match = h.check_mode(person_a_leg, person_b_leg)
+                    activity_match = h.check_activity(person_a_leg, person_b_leg)
+                    logger.debug(f"Legs {person_a_leg[s.UNIQUE_LEG_ID_COL]} and {person_b_leg[s.UNIQUE_LEG_ID_COL]}: "
+                                 f"distance {dist_match}, time {time_match}, mode {mode_match}, activity {activity_match}")
+                    checks_data.append({  # List of dics
+                        'leg_id_a': person_a_leg[s.UNIQUE_LEG_ID_COL],
+                        'leg_id_b': person_b_leg[s.UNIQUE_LEG_ID_COL],
+                        'dist_match': dist_match,
+                        'time_match': time_match,
+                        'mode_match': mode_match,
+                        'activity_match': activity_match
+                    })
+
+                    if dist_match and time_match and mode_match and activity_match:
+                        if not isinstance(connections.at[idx_a], list):  # Checking for NaN doesn't work here
+                            connections.at[idx_a] = []
+                        if not isinstance(connections.at[idx_b], list):
+                            connections.at[idx_b] = []
+                        connections.at[idx_a].append(person_b_leg[s.UNIQUE_LEG_ID_COL])
+                        connections.at[idx_b].append(person_a_leg[s.UNIQUE_LEG_ID_COL])
+
+            if connections.isna().all():
+                logger.debug(f"No connections found for household {household_group[s.HOUSEHOLD_MID_ID_COL].iloc[0]}.")
+            else:
+                logger.debug(f"Connections found for household {household_group[s.HOUSEHOLD_MID_ID_COL].iloc[0]}")
+                logger.debug(f"{connections}")
+
+        # Save checks_df to a CSV file
+        checks_df = pd.DataFrame(checks_data)
+        file_loc = os.path.join(matsim_pipeline_setup.OUTPUT_DIR, 'leg_connections_logs.csv')
+        checks_df.to_csv(file_loc, index=False)
+
+        # Add connections as a new column to self.df
+        self.df[s.CONNECTED_LEGS_COL] = connections

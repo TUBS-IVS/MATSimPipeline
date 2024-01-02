@@ -136,129 +136,142 @@ def is_main_activity(group):
     return is_main_activity_series
 
 
-def connected_legs(household_group):
-    """
-    Find connections between trip legs in a household.
-    Uses unique_leg_id; lists all legs that are connected to each leg.
-    :param household_group:
-    :return: Series: Each item a list of all connected legs, NaN if no connections
-    """
+# def connected_legs(household_group):  # Obsolete
+#     """
+#     Find connections between trip legs in a household.
+#     Uses unique_leg_id; lists all legs that are connected to each leg.
+#     :param household_group:
+#     :return: Series: Each item a list of all connected legs, NaN if no connections
+#     """
+#
+#     connections = pd.Series(index=household_group.index, dtype='object')
+#     checks_df = pd.DataFrame(columns=['leg_id_a', 'leg_id_b', 'dist_match', 'time_match', 'mode_match', 'activity_match'])
+#
+#     if household_group[s.PERSON_ID_COL].nunique() == 1:
+#         logger.debug(f"Household {household_group[s.HOUSEHOLD_MID_ID_COL].iloc[0]} has only one person. No connections.")
+#         return connections
+#
+#     for idx_a, person_a_leg in household_group.iterrows():
+#         for idx_b, person_b_leg in household_group.iterrows():
+#             if person_a_leg[s.PERSON_ID_COL] == person_b_leg[s.PERSON_ID_COL] or idx_b <= idx_a:
+#                 continue  # So we don't compare a leg to itself or to a leg it's already been compared to
+#
+#             dist_match = check_distance(person_a_leg, person_b_leg)
+#             time_match = check_time(person_a_leg, person_b_leg)
+#             mode_match = check_mode(person_a_leg, person_b_leg)
+#             activity_match = check_activity(person_a_leg, person_b_leg)
+#
+#             checks_df = checks_df.append({
+#                 'leg_id_a': person_a_leg[s.UNIQUE_LEG_ID_COL],
+#                 'leg_id_b': person_b_leg[s.UNIQUE_LEG_ID_COL],
+#                 'dist_match': dist_match,
+#                 'time_match': time_match,
+#                 'mode_match': mode_match,
+#                 'activity_match': activity_match
+#             }, ignore_index=True)
+#
+#             if dist_match and time_match and mode_match and activity_match:
+#                 if not isinstance(connections.at[idx_a], list):  # Checking for NaN doesn't work here
+#                     connections.at[idx_a] = []
+#                 if not isinstance(connections.at[idx_b], list):
+#                     connections.at[idx_b] = []
+#                 connections.at[idx_a].append(person_b_leg[s.UNIQUE_LEG_ID_COL])
+#                 connections.at[idx_b].append(person_a_leg[s.UNIQUE_LEG_ID_COL])
+#
+#     # Save checks_df to a CSV file
+#     checks_df.to_csv('checks_df.csv', index=False)
+#
+#     if connections.isna().all():
+#         logger.debug(f"No connections found for household {household_group[s.HOUSEHOLD_MID_ID_COL].iloc[0]}.")
+#     else:
+#         logger.debug(f"Connections found for household {household_group[s.HOUSEHOLD_MID_ID_COL].iloc[0]}")
+#         logger.debug(f"{connections}")
+#     return connections
 
-    connections = pd.Series(index=household_group.index, dtype='object')
-    if household_group[s.PERSON_ID_COL].nunique() == 1:
-        logger.debug(f"Household {household_group[s.HOUSEHOLD_MID_ID_COL].iloc[0]} has only one person. No connections.")
-        return connections
-
-    for idx_a, person_a_leg in household_group.iterrows():
-        for idx_b, person_b_leg in household_group.iterrows():
-            if person_a_leg[s.PERSON_ID_COL] == person_b_leg[s.PERSON_ID_COL] or idx_b <= idx_a:
-                continue  # So we don't compare a leg to itself or to a leg it's already been compared to
-
-            dist_match = check_distance(person_a_leg, person_b_leg)
-            time_match = check_time(person_a_leg, person_b_leg)
-            mode_match = check_mode(person_a_leg, person_b_leg)
-            activity_match = check_activity(person_a_leg, person_b_leg)
-            logger.debug(f"Legs {person_a_leg[s.UNIQUE_LEG_ID_COL]} and {person_b_leg[s.UNIQUE_LEG_ID_COL]}: "
-                         f"distance {dist_match}, time {time_match}, mode {mode_match}, activity {activity_match}")
-            if dist_match and time_match and mode_match and activity_match:
-                if not isinstance(connections.at[idx_a], list):  # Checking for NaN doesn't work here
-                    connections.at[idx_a] = []
-                if not isinstance(connections.at[idx_b], list):
-                    connections.at[idx_b] = []
-                connections.at[idx_a].append(person_b_leg[s.UNIQUE_LEG_ID_COL])
-                connections.at[idx_b].append(person_a_leg[s.UNIQUE_LEG_ID_COL])
-
-    if connections.isna().all():
-        logger.debug(f"No connections found for household {household_group[s.HOUSEHOLD_MID_ID_COL].iloc[0]}.")
-    else:
-        logger.debug(f"Connections found for household {household_group[s.HOUSEHOLD_MID_ID_COL].iloc[0]}")
-        logger.debug(f"{connections}")
-    return connections
-
-
-def check_distance(leg_to_find, leg_to_compare):
-    distance_to_find = leg_to_find[s.LEG_DISTANCE_COL]
-    distance_to_compare = leg_to_compare[s.LEG_DISTANCE_COL]
-
-    if pd.isnull(distance_to_find) or pd.isnull(distance_to_compare):
-        return False
-
-    difference = abs(distance_to_find - distance_to_compare)
-    range_tolerance = distance_to_find * 0.05
-
-    return difference <= range_tolerance
-
-
-def check_time(leg_to_find, leg_to_compare):
-    # Using constant variables instead of strings
-    leg_begin_to_find = leg_to_find[s.LEG_START_TIME_COL]
-    leg_end_to_find = leg_to_find[s.LEG_END_TIME_COL]
-    leg_begin_to_compare = leg_to_compare[s.LEG_START_TIME_COL]
-    leg_end_to_compare = leg_to_compare[s.LEG_END_TIME_COL]
-
-    # Reduce the time range for short legs to avoid false positives (NaN evaluates to False)
-    time_range = pd.Timedelta(minutes=5) if leg_to_find[s.LEG_DURATION_MINUTES_COL] > 5 and leg_to_compare[
-        s.LEG_DURATION_MINUTES_COL] > 5 else pd.Timedelta(minutes=2)
-
-    if pd.isnull([leg_begin_to_find, leg_end_to_find, leg_begin_to_compare, leg_end_to_compare]).any():
-        return False
-
-    begin_difference = abs(leg_begin_to_find - leg_begin_to_compare)
-    end_difference = abs(leg_end_to_find - leg_end_to_compare)
-
-    return (begin_difference <= time_range) and (end_difference <= time_range)
-
-
-def check_mode(leg_to_find, leg_to_compare):
-    """
-    Check if the modes of two legs are compatible.
-    Note: Adjusting the mode "car" to "ride" based on age is now its own function.
-    :param leg_to_find:
-    :param leg_to_compare:
-    :return:
-    """
-    mode_to_find = leg_to_find[s.LEG_MAIN_MODE_COL]
-    mode_to_compare = leg_to_compare[s.LEG_MAIN_MODE_COL]
-
-    if mode_to_find == mode_to_compare and mode_to_find != s.MODE_UNDEFINED:  # Make sure we don't pair undefined modes
-        return True
-
-    mode_pairs = {(s.MODE_CAR, s.MODE_RIDE), (s.MODE_RIDE, s.MODE_CAR),
-                  (s.MODE_WALK, s.MODE_BIKE), (s.MODE_BIKE, s.MODE_WALK)}
-    if (mode_to_find, mode_to_compare) in mode_pairs:
-        return True
-
-    if s.MODE_UNDEFINED in [mode_to_find, mode_to_compare]:
-        # Assuming if one mode is undefined and the other is car, they pair as ride
-        # The mode is not updated here (in contrast to prev. work), because we don't know yet if the leg is connected.
-        return s.MODE_CAR in [mode_to_find, mode_to_compare]
-
-    return False
-
-
-def check_activity(leg_to_find, leg_to_compare):  # TODO: Possibly create a matrix of compatible activities
-    compatible_activities = {
-        s.ACTIVITY_SHOPPING: [s.ACTIVITY_ERRANDS],
-        s.ACTIVITY_ERRANDS: [s.ACTIVITY_SHOPPING, s.ACTIVITY_LEISURE],
-        s.ACTIVITY_LEISURE: [s.ACTIVITY_ERRANDS, s.ACTIVITY_SHOPPING, s.ACTIVITY_MEETUP],
-        s.ACTIVITY_MEETUP: [s.ACTIVITY_LEISURE]}
-
-    type_to_find = leg_to_find[s.LEG_TO_ACTIVITY_COL]
-    type_to_compare = leg_to_compare[s.LEG_TO_ACTIVITY_COL]
-
-    if (type_to_find == type_to_compare or
-            s.ACTIVITY_ACCOMPANY_ADULT in [type_to_find, type_to_compare] or
-            s.ACTIVITY_PICK_UP_DROP_OFF in [type_to_find, type_to_compare]):
-        return True
-    elif s.ACTIVITY_UNSPECIFIED in [type_to_find, type_to_compare] or pd.isnull([type_to_find, type_to_compare]).any():
-        logger.debug("Activity Type Undefined or Null (which usually means person has no legs).")
-        return False
-    # Assuming trip home (works, but not really plausible, thus commented out for now)
-    # elif (type_to_find == s.ACTIVITY_HOME and type_to_compare != s.ACTIVITY_WORK) or \
-    #         (type_to_compare == s.ACTIVITY_HOME and type_to_find != s.ACTIVITY_WORK):
-    #     return True
-
-    return type_to_compare in compatible_activities.get(type_to_find, [])
+#
+# def check_distance(leg_to_find, leg_to_compare):
+#     distance_to_find = leg_to_find[s.LEG_DISTANCE_COL]
+#     distance_to_compare = leg_to_compare[s.LEG_DISTANCE_COL]
+#
+#     if pd.isnull(distance_to_find) or pd.isnull(distance_to_compare):
+#         return False
+#
+#     difference = abs(distance_to_find - distance_to_compare)
+#     range_tolerance = distance_to_find * 0.05
+#
+#     return difference <= range_tolerance
+#
+#
+# def check_time(leg_to_find, leg_to_compare):
+#     # Using constant variables instead of strings
+#     leg_begin_to_find = leg_to_find[s.LEG_START_TIME_COL]
+#     leg_end_to_find = leg_to_find[s.LEG_END_TIME_COL]
+#     leg_begin_to_compare = leg_to_compare[s.LEG_START_TIME_COL]
+#     leg_end_to_compare = leg_to_compare[s.LEG_END_TIME_COL]
+#
+#     # Reduce the time range for short legs to avoid false positives (NaN evaluates to False)
+#     time_range = pd.Timedelta(minutes=5) if leg_to_find[s.LEG_DURATION_MINUTES_COL] > 5 and leg_to_compare[
+#         s.LEG_DURATION_MINUTES_COL] > 5 else pd.Timedelta(minutes=2)
+#
+#     if pd.isnull([leg_begin_to_find, leg_end_to_find, leg_begin_to_compare, leg_end_to_compare]).any():
+#         return False
+#
+#     begin_difference = abs(leg_begin_to_find - leg_begin_to_compare)
+#     end_difference = abs(leg_end_to_find - leg_end_to_compare)
+#
+#     return (begin_difference <= time_range) and (end_difference <= time_range)
+#
+#
+# def check_mode(leg_to_find, leg_to_compare):
+#     """
+#     Check if the modes of two legs are compatible.
+#     Note: Adjusting the mode "car" to "ride" based on age is now its own function.
+#     :param leg_to_find:
+#     :param leg_to_compare:
+#     :return:
+#     """
+#     mode_to_find = leg_to_find[s.LEG_MAIN_MODE_COL]
+#     mode_to_compare = leg_to_compare[s.LEG_MAIN_MODE_COL]
+#
+#     if mode_to_find == mode_to_compare and mode_to_find != s.MODE_UNDEFINED:  # Make sure we don't pair undefined modes
+#         return True
+#
+#     mode_pairs = {(s.MODE_CAR, s.MODE_RIDE), (s.MODE_RIDE, s.MODE_CAR),
+#                   (s.MODE_WALK, s.MODE_BIKE), (s.MODE_BIKE, s.MODE_WALK)}
+#     if (mode_to_find, mode_to_compare) in mode_pairs:
+#         return True
+#
+#     if s.MODE_UNDEFINED in [mode_to_find, mode_to_compare]:
+#         # Assuming if one mode is undefined and the other is car, they pair as ride
+#         # The mode is not updated here (in contrast to prev. work), because we don't know yet if the leg is connected.
+#         return s.MODE_CAR in [mode_to_find, mode_to_compare]
+#
+#     return False
+#
+#
+# def check_activity(leg_to_find, leg_to_compare):  # TODO: Possibly create a matrix of compatible activities
+#     compatible_activities = {
+#         s.ACTIVITY_SHOPPING: [s.ACTIVITY_ERRANDS],
+#         s.ACTIVITY_ERRANDS: [s.ACTIVITY_SHOPPING, s.ACTIVITY_LEISURE],
+#         s.ACTIVITY_LEISURE: [s.ACTIVITY_ERRANDS, s.ACTIVITY_SHOPPING, s.ACTIVITY_MEETUP],
+#         s.ACTIVITY_MEETUP: [s.ACTIVITY_LEISURE]}
+#
+#     type_to_find = leg_to_find[s.LEG_TO_ACTIVITY_COL]
+#     type_to_compare = leg_to_compare[s.LEG_TO_ACTIVITY_COL]
+#
+#     if (type_to_find == type_to_compare or
+#             s.ACTIVITY_ACCOMPANY_ADULT in [type_to_find, type_to_compare] or
+#             s.ACTIVITY_PICK_UP_DROP_OFF in [type_to_find, type_to_compare]):
+#         return True
+#     elif s.ACTIVITY_UNSPECIFIED in [type_to_find, type_to_compare] or pd.isnull([type_to_find, type_to_compare]).any():
+#         logger.debug("Activity Type Undefined or Null (which usually means person has no legs).")
+#         return False
+#     # Assuming trip home (works, but not really plausible, thus commented out for now)
+#     # elif (type_to_find == s.ACTIVITY_HOME and type_to_compare != s.ACTIVITY_WORK) or \
+#     #         (type_to_compare == s.ACTIVITY_HOME and type_to_find != s.ACTIVITY_WORK):
+#     #     return True
+#
+#     return type_to_compare in compatible_activities.get(type_to_find, [])
 
 
 def is_protagonist(household_group):

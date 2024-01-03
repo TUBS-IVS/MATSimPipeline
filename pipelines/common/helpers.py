@@ -402,13 +402,13 @@ class SlackFactors:
         Retrieve the slack factor for a given activity combination.
         """
         slack_factor_row = self.slack_factors_df.loc[
-            (self.slack_factors_df['activity_from'] == activity_from) &
-            (self.slack_factors_df['activity_via'] == activity_via) &
-            (self.slack_factors_df['activity_to'] == activity_to)
+            (self.slack_factors_df['start_activity'] == activity_from) &
+            (self.slack_factors_df['via_activity'] == activity_via) &
+            (self.slack_factors_df['end_activity'] == activity_to)
             ]
 
         if not slack_factor_row.empty:
-            slack_factor: float = slack_factor_row['slack_factor'].iloc[0]
+            slack_factor: float = slack_factor_row['median_slack_factor'].iloc[0]
         else:
             # Fallback to a default slack factor if not found
             logger.debug(f"No slack factor found for activities: {activity_from}, {activity_via}, {activity_to}. "
@@ -419,8 +419,16 @@ class SlackFactors:
 
     def calculate_expected_time_with_slack(self, time_from_start_to_via: float, time_from_via_to_end: float, activity_from: str,
                                            activity_via: str, activity_to: str) -> float:
-        expected_time: float = ((time_from_start_to_via + time_from_via_to_end) *
+        """
+        Calculates the expected time with slack for a given activity combination. Makes sure the returned time is plausible,
+
+        """
+        expected_time: float = ((time_from_start_to_via + time_from_via_to_end) /
                                 self.get_slack_factor(activity_from, activity_via, activity_to))
+        time_diff = np.abs(time_from_start_to_via - time_from_via_to_end)
+        if expected_time < time_diff:  # this makes the trip impossible. We find a reasonable alternative:
+            logger.debug(f"Expected time is too low. Returning time difference plus half of the smaller time.")
+            expected_time = time_diff + (min(time_from_start_to_via, time_from_via_to_end) / 2)
         return expected_time
 
     def calculate_expected_distance_with_slack(self, distance_from_start_to_via: float, distance_from_via_to_end: float,
@@ -428,8 +436,12 @@ class SlackFactors:
         """
         Identical to calculate_expected_time_with_slack, but different parameter names for clarity.
         """
-        expected_distance: float = ((distance_from_start_to_via + distance_from_via_to_end) *
+        expected_distance: float = ((distance_from_start_to_via + distance_from_via_to_end) /
                                     self.get_slack_factor(activity_from, activity_via, activity_to))
+        distance_diff = np.abs(distance_from_start_to_via - distance_from_via_to_end)
+        if expected_distance < distance_diff:
+            logger.debug(f"Expected distance is too low. Returning distance difference plus half of the smaller distance.")
+            expected_distance = distance_diff + (min(distance_from_start_to_via, distance_from_via_to_end) / 2)
         return expected_distance
 
     def get_all_times_with_slack(self, leg_chain, level=0):
@@ -448,7 +460,7 @@ class SlackFactors:
             times_col = f"level_{level}"
 
         # Base cases
-        len_times_col = len(leg_chain[times_col].notna())
+        len_times_col = leg_chain[times_col].notna().sum()
         if len_times_col == 0:
             logger.warning(f"Received empty DataFrame, returning unchanged.")
             return leg_chain, level
@@ -457,27 +469,30 @@ class SlackFactors:
             return leg_chain, level
         elif len_times_col == 2:
             logger.debug(f"Two legs remain to estimate, solving last level.")
-            return self.solve_level(leg_chain, level), level
+            return self.solve_level(leg_chain, level), level+1
         # Recursive case
         else:
-            level += 1
-            leg_chain = self.solve_level(leg_chain, level)
-            return self.get_all_times_with_slack(leg_chain, level)
+            logger.debug(f"More than two legs remain to estimate, solving level {level}.")
+            updated_leg_chain = self.solve_level(leg_chain, level)
+            return self.get_all_times_with_slack(updated_leg_chain, level+1)
 
     def solve_level(self, leg_chain, level):  # TODO: finish
         """
         Adds a column for given level of slack factor calculation, containing the time with slack of all legs up to and
         including the entry. For better performance, keep the number of columns to a minimum.
-        :param leg_chain:
-        :param level:
-        :return:
+        :param leg_chain: df
+        :param level: Next level to calculate
+        :return: copy of leg_chain with added column
         """
+        leg_chain = leg_chain.copy()
+        leg_chain[f"level_{level+1}"] = np.nan
+
         if level == 0:
             times_col = s.LEG_DURATION_MINUTES_COL
-            if len(leg_chain[times_col].notna()) != len(leg_chain):
+            if leg_chain[times_col].notna().sum() != len(leg_chain):
                 logger.warning(f"Found NaN values in {times_col}, may produce incorrect results.")
         else:
-            times_col = f"level_{level - 1}"  # Here we expect some NaN values
+            times_col = f"level_{level}"  # Here we expect some NaN values
 
         legs_to_process = leg_chain[leg_chain[times_col].notna()].copy()
         legs_to_process['original_index'] = legs_to_process.index
@@ -496,9 +511,7 @@ class SlackFactors:
                                                                group.iloc[0][s.LEG_TO_ACTIVITY_COL],
                                                                group.iloc[1][s.LEG_TO_ACTIVITY_COL])
 
-            leg_chain.loc[group['original_index'].iloc[-1], f"level_{level}"] = time
-        # Remove the temporary pair_id column
-        leg_chain.drop(columns='pair_id', inplace=True)
+            leg_chain.loc[group['original_index'].iloc[-1], f"level_{level+1}"] = time
 
         return leg_chain
 
@@ -585,15 +598,15 @@ def sigmoid(x, beta, delta_T):
     return 1 / (1 + np.exp(-beta * (x - delta_T)))
 
 
-def clean_string(s):
+def clean_connected_legs_string(s):
     """
-    Remove quotation marks and \ from a string.
+    Remove quotation marks from a string.
+    This is sadly necessary to save it usably. Meh.
     """
     try:
-        return s.strip("'").strip('"').strip('\\')
+        return str(s).replace("'", "")
     except AttributeError:
         return s
-
 
 
 def check_distance(leg_to_find, leg_to_compare):

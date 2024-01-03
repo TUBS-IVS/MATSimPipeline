@@ -286,6 +286,8 @@ def is_protagonist(household_group):
     if household_group[s.CONNECTED_LEGS_COL].isna().all():
         logger.debug(f"No connections exist for household {household_group[s.HOUSEHOLD_MID_ID_COL].iloc[0]}.")
         return prot_series
+    else:
+        logger.debug(f"Finding protagonist for household {household_group[s.HOUSEHOLD_MID_ID_COL].iloc[0]}")
 
     # Ranked activities (lowest to highest probability of being protagonist). Not an exact science.
     # Activities not in this list are ranked lowest.

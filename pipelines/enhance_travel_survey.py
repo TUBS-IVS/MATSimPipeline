@@ -114,24 +114,26 @@ def enhance_travel_survey():
     # population.convert_datetime_to_seconds([s.LEG_START_TIME_COL])
 
     # Add/edit trip-specific rule-based attributes
-    apply_me = [rules.unique_leg_id]
-    population.apply_row_wise_rules(apply_me)
+    population.apply_row_wise_rules([rules.unique_leg_id])
     logger.info(f"Population df after applying L row rules: \n{population.df.head()}")
+
+    population.add_from_activity()
+    population.filter_home_to_home_legs()  # should be early (but after adding from activity)
+    population.update_number_of_legs()
 
     population.calculate_activity_duration()
     population.activity_times_distribution_seconds()
     population.leg_duration_distribution_seconds()
-    #population.estimate_leg_times()
+    population.estimate_leg_times()
     # Recalculate after estimating leg times
     population.calculate_activity_duration()
 
-    #population.apply_group_wise_rules([rules.is_main_activity], groupby_column="unique_person_id")
+    population.apply_group_wise_rules([rules.is_main_activity], groupby_column="unique_person_id")
 
     population.adjust_mode_based_on_age()
     population.adjust_mode_based_on_license()
 
     population.find_connected_legs()
-    print(population.df.head())
     # # Savepoint for testing
     # output_dir = "output/111"
     # if not os.path.exists(output_dir):
@@ -143,44 +145,31 @@ def enhance_travel_survey():
     # population.df[s.CONNECTED_LEGS_COL] = population.df[s.CONNECTED_LEGS_COL].apply(lambda x: str(x) if x == x else x)
     # population.df[s.CONNECTED_LEGS_COL].apply(h.clean_string)
 
-    population.add_from_activity()
     population.close_connected_leg_groups()
 
     population.adjust_mode_based_on_connected_legs()
     #
 
-    population.set_column_type([s.LEG_START_TIME_COL, s.LEG_END_TIME_COL], "datetime64[ns]")  # testing
-    # population.add_return_home_leg()
-    #population.apply_group_wise_rules([rules.connected_legs], groupby_column="unique_household_id")
-    #population.close_connected_leg_groups()
+    # population.set_column_type([s.LEG_START_TIME_COL, s.LEG_END_TIME_COL], "datetime64[ns]")  # testing, not necessary
+
+    population.add_return_home_leg()
+    population.update_number_of_legs(s.NUMBER_OF_LEGS_INCL_IMPUTED_COL)  # Writes new column
+
     population.apply_group_wise_rules([rules.is_protagonist], groupby_column=s.UNIQUE_HH_ID_COL)
 
-    population.df[s.FIRST_LEG_STARTS_AT_HOME_COL] = s.FIRST_LEG_STARTS_AT_HOME  # TESTING
-    # population.change_last_leg_activity_to_home()
-
+    # population.change_last_leg_activity_to_home()  # MOVE To main pipeline
     population.list_cars_in_household()  # TESTING, should be in main pipeline
+
+    population.mark_mirroring_main_activities()
+
     population.find_main_mode_to_main_act()
     population.find_home_to_main_time()
 
     population.update_activity_for_prot_legs()
 
-    population.mark_mirroring_main_activities()
-
-    population.filter_home_to_home_legs()  #TESTING, not at correct place here, should be early (but after adding from activity)
-    population.update_number_of_legs()
-
-    population.update_number_of_legs(s.NUMBER_OF_LEGS_INCL_IMPUTED_COL)  # Writes new column
-
-    # slack_df = population.calculate_slack_factors()
-    # slack_df.to_csv(os.path.join(matsim_pipeline_setup.OUTPUT_DIR, "slack_factors.csv"), index=False)
-    # summarized_slack_df = h.summarize_slack_factors(slack_df)
-    # summarized_slack_df.to_csv(os.path.join(matsim_pipeline_setup.OUTPUT_DIR, "summarized_slack_factors.csv"), index=False)
-
     population.translate_modes()
     population.translate_activities()
 
-    # apply_me = [rules.add_return_home_leg]  # Adds rows, so safe_apply=False
-    # population.apply_group_wise_rules(apply_me, groupby_column="unique_person_id", safe_apply=False)
     logger.info(f"Population df after applying L group rules: \n{population.df.head()}")
 
     # Remove cols that were used by rules, to keep the df clean

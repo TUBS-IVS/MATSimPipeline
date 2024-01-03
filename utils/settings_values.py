@@ -154,3 +154,5 @@ HOME_TO_MAIN_TIME_ESTIMATED_COL = "home_to_main_time_is_estimated"
 
 SIGMOID_BETA = settings['sigmoid_beta']
 SIGMOID_DELTA_T = settings['sigmoid_delta_t']
+
+MIRRORS_MAIN_ACTIVITY_COL = "mirrors_main_activity"

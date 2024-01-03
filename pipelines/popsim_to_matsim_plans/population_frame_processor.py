@@ -27,7 +27,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
     def __init__(self, df: pd.DataFrame = None, id_column: str = None):
         super().__init__(df, id_column)
-        # self.sf = h.SlackFactors(s.SLACK_FACTORS_FILE)
+        self.sf = h.SlackFactors(s.SLACK_FACTORS_FILE)
 
     def distribute_by_weights(self, weights_df: pd.DataFrame, cell_id_col: str, cut_missing_ids: bool = False):
         self.df = h.distribute_by_weights(self.df, weights_df, cell_id_col, cut_missing_ids)
@@ -162,6 +162,10 @@ class PopulationFrameProcessor(DataFrameProcessor):
         number_of_rows_to_change = len(self.df[is_last_leg & (self.df[s.LEG_TO_ACTIVITY_COL] != s.ACTIVITY_HOME)])
 
         self.df.loc[is_last_leg, s.LEG_TO_ACTIVITY_COL] = s.ACTIVITY_HOME
+        # We also need to remove markers for main or mirroring main activities, because home is never main
+        self.df.loc[is_last_leg, s.IS_MAIN_ACTIVITY_COL] = 0
+        self.df.loc[is_last_leg, s.MIRRORS_MAIN_ACTIVITY_COL] = 0
+        # This means there might be some persons with no main activity. This is not a problem for the current model.
         logger.info(f"Changed last leg activity to home for {number_of_rows_to_change} of {len(self.df)} rows.")
 
     def adjust_mode_based_on_age(self):
@@ -232,9 +236,12 @@ class PopulationFrameProcessor(DataFrameProcessor):
         logger.info(f"Translating modes...")
         defined_modes = [s.MODE_CAR, s.MODE_PT, s.MODE_RIDE, s.MODE_BIKE, s.MODE_WALK, s.MODE_UNDEFINED]
         count_non_matching = (~self.df[s.LEG_MAIN_MODE_COL].isin(defined_modes)).sum()
+        count_nan = self.df[s.LEG_MAIN_MODE_COL].isna().sum()
+        count_non_leg = self.df[s.LEG_ID_COL].isna().sum()
         if count_non_matching > 0:
             logger.warning(f"{count_non_matching} rows have a mode that is not in the defined modes."
-                           f"They will not be translated. This might cause errors in MATSim.")
+                           f"{count_nan} rows have no mode."
+                           f"{count_non_leg} rows have no leg.")
         mode_translation = {
             s.MODE_CAR: "car",
             s.MODE_PT: "pt",
@@ -385,6 +392,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
             home_leg[s.LEG_TO_ACTIVITY_COL] = s.ACTIVITY_HOME
             home_leg[s.LEG_DURATION_MINUTES_COL] = home_leg_duration
             home_leg[s.LEG_DISTANCE_COL] = None  # Could also be estimated, but isn't necessary for the current use case
+            home_leg[s.IS_MAIN_ACTIVITY_COL] = 0
             home_leg[s.IMPUTED_LEG_COL] = 1
 
             new_rows.append(home_leg)
@@ -500,7 +508,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 for col in [s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]:
                     person.loc[first_bad_time_index:, col] = None
 
-            # Check for bad leg times (MiD-codes)
+            # Check for bad leg times (MiD-codes)  #TODO. rework this
             if (person[s.LEG_DURATION_MINUTES_COL] > 1000).any():
                 first_bad_time_index = person[person[s.LEG_DURATION_MINUTES_COL] > 1000].index[0]
                 logger.debug(f"Person {person_id} has bad leg times. Removing all times after the first bad time.")
@@ -582,6 +590,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
                                     seconds=similar_persons_same_activity.sample(1).iloc[0])
 
                             # Leg duration
+                            # Utilize imputed leg duration from MiD if available
                             similar_persons_same_activity = similar_persons_with_last_legs.loc[
                                 similar_persons_with_last_legs[s.LEG_TO_ACTIVITY_COL] == row[
                                     s.LEG_TO_ACTIVITY_COL], s.LEG_DURATION_MINUTES_COL]
@@ -779,12 +788,20 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 # Update connected_legs for all legs in the group
                 updated_connected_legs = list(connected_legs)
                 for leg in connected_legs:
-                    # existing_connected = set(self.df.loc[self.df[s.UNIQUE_LEG_ID_COL] == leg, s.CONNECTED_LEGS_COL].iloc[0])
-                    self.df.loc[self.df[s.UNIQUE_LEG_ID_COL] == leg, s.CONNECTED_LEGS_COL] = updated_connected_legs
-                    # list(existing_connected.union(updated_connected_legs)))  # TODO: fix
-                    checked_legs.add(leg)
+                    existing_connected = self.df.loc[self.df[s.UNIQUE_LEG_ID_COL] == leg, s.CONNECTED_LEGS_COL].iloc[0]
+                    leg_indexes = self.df.loc[self.df[s.UNIQUE_LEG_ID_COL] == leg].index
+                    if len(leg_indexes) > 1:
+                        print("Multiple indexes found:", leg_indexes)
+                        logger.warning(f"Multiple indexes found for leg {leg}. This shouldn't happen.")
+                    leg_index = leg_indexes[0]
 
-                    logger.info("Closed connected leg groups.")
+                    # self.df.loc[self.df[s.UNIQUE_LEG_ID_COL] == leg, s.CONNECTED_LEGS_COL][0] = updated_connected_legs
+                    self.df.at[leg_index, s.CONNECTED_LEGS_COL] = updated_connected_legs
+
+                    if existing_connected != updated_connected_legs:
+                        logger.debug(f"Updated connected legs for leg {leg} from {existing_connected} to {updated_connected_legs}.")
+
+                    checked_legs.add(leg)
 
     def update_activity_for_prot_legs(self):
         """
@@ -795,7 +812,9 @@ class PopulationFrameProcessor(DataFrameProcessor):
         # Make a copy of the activity column that will be updated
         self.df[s.TO_ACTIVITY_WITH_CONNECTED_COL] = self.df[s.LEG_TO_ACTIVITY_COL]
 
-        prot_legs = self.df[self.df[s.IS_PROTAGONIST_COL]]
+        if s.IS_PROTAGONIST_COL in self.df.columns:
+            logger.debug("Protagonist column already exists. Skipping...")
+        prot_legs = self.df[self.df[s.IS_PROTAGONIST_COL] == 1]
 
         for row in prot_legs.itertuples():
             protagonist_activity = getattr(row, s.LEG_TO_ACTIVITY_COL)
@@ -967,7 +986,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
         # Leg distance to the in-between activity and from it to the candidate activity must be the same
         same_leg_distance_condition = (self.df['next_leg_distance'] == self.df['next_next_leg_distance'])
 
-        self.df['mirrors_main_activity'] = (
+        self.df[s.MIRRORS_MAIN_ACTIVITY_COL] = (
             (person_id_condition & short_duration_condition & same_activity_condition & same_leg_distance_condition).shift(
                 2).fillna(False)).astype(int)
 
@@ -980,6 +999,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
     def find_home_to_main_time(self):  # TODO:test
         """
         Determines the time (and distance) between home and main activity for each person in the DataFrame.
+        It may not look it, but this was a pain to write.
         Main directly after home: Leg distance of main leg
         Main directly before home: Leg distance of home leg
         :return: Adds column with the distance to the DataFrame.
@@ -993,8 +1013,9 @@ class PopulationFrameProcessor(DataFrameProcessor):
         is_estimated = {}
 
         for pid, person in persons:
-            # Extract the indices for main activity and home activities
+            # Extract the indices for main activity, mirroring main and home activities
             main_activity_idx = np.where(person[s.IS_MAIN_ACTIVITY_COL])[0]  # where returns a tuple. Legs to main
+            mirroring_main_idx = np.where(person[s.MIRRORS_MAIN_ACTIVITY_COL])[0]  # Legs to mirrored main
             home_indices = np.where(person[s.LEG_TO_ACTIVITY_COL] == s.ACTIVITY_HOME)[0]  # legs to home
 
             if main_activity_idx.size == 0:
@@ -1003,20 +1024,32 @@ class PopulationFrameProcessor(DataFrameProcessor):
             if main_activity_idx.size > 1:  # should not happen but still works
                 logger.warning(f"Person {pid} has more than one main activity. Using the first one.")
 
-            idx_distances = np.abs(home_indices - main_activity_idx[0])
-
-            if (person.at[person.index[0], s.FIRST_LEG_STARTS_AT_HOME] == s.FIRST_LEG_STARTS_AT_HOME and
-                    main_activity_idx < np.min(
-                        idx_distances)):  # This means starting home is same or closer than any other home to main
-                closest_home_idx = -1
-                closest_home_row = person.index[0] - 1
-            elif home_indices.size == 0:
+            if home_indices.size == 0:
                 logger.debug(f"Person {pid} has no home activities. Using the first activity instead.")
                 closest_home_idx = -1
                 closest_home_row = person.index[0] - 1
             else:
-                closest_home_idx = home_indices[np.argmin(idx_distances)]
-                closest_home_row = person.index[closest_home_idx]
+
+                idx_distances_to_main = np.abs(home_indices - main_activity_idx[0])
+                closest_to_main = np.min(idx_distances_to_main)
+
+                # If there is a mirroring main activity, calculate the distance to that as well
+                if not mirroring_main_idx.size == 0:
+                    idx_distances_to_mirroring = np.abs(home_indices - mirroring_main_idx[0])
+                    closest_to_mirroring = np.min(idx_distances_to_mirroring)
+                    if closest_to_mirroring < closest_to_main:
+                        main_activity_idx = mirroring_main_idx
+                        idx_distances_to_main = idx_distances_to_mirroring
+
+                # Determine the closest home activity by number of legs
+                if (person.at[person.index[0], s.FIRST_LEG_STARTS_AT_HOME_COL] == s.FIRST_LEG_STARTS_AT_HOME and
+                        main_activity_idx[0] < np.min(
+                            idx_distances_to_main)):  # This means starting home is same or closer than any other home to main
+                    closest_home_idx = -1
+                    closest_home_row = person.index[0] - 1
+                else:
+                    closest_home_idx = home_indices[np.argmin(idx_distances_to_main)]
+                    closest_home_row = person.index[closest_home_idx]
 
             main_activity_row = person.index[main_activity_idx[0]]
 
@@ -1046,8 +1079,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 if closest_home_row < main_activity_row:  # Home to main
                     legs = person.loc[closest_home_row + 1:main_activity_row]
 
-                    legs, level = self.sf.get_all_times_with_slack(legs)
-                    home_to_main_time = legs[f"level_{level}"].dropna().index[0]
+                    updated_legs, level = self.sf.get_all_times_with_slack(legs)
+                    home_to_main_time = updated_legs[f"level_{level}"].dropna().index[0]
                     home_to_main_distance = None  # We cannot correctly determine this without an own function (yes, really)
                     # and it's not needed nor worth the effort here. Also, this serves as a marker for estimated time.
                     time_is_estimated = 1
@@ -1055,8 +1088,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 else:  # Main to home
                     legs = person.loc[main_activity_row + 1:closest_home_row]
 
-                    legs, level = self.sf.get_all_times_with_slack(legs)
-                    home_to_main_time = legs[f"level_{level}"].dropna().index[0]
+                    updated_legs, level = self.sf.get_all_times_with_slack(legs)
+                    home_to_main_time = updated_legs[f"level_{level}"].dropna().index[0]
                     home_to_main_distance = None
                     time_is_estimated = 1
 
@@ -1080,6 +1113,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
         or the start of the day if there is no home activity before.
         Main mode is the mode with the longest total use time.
         """
+        logger.info("Determining main mode to main activity...")
         # Group by unique person ID
         persons = self.df.groupby(s.UNIQUE_P_ID_COL)
 
@@ -1088,14 +1122,30 @@ class PopulationFrameProcessor(DataFrameProcessor):
         main_modes_dist = {}
 
         for pid, person in persons:
+            if len(person) == 1:
+                if person[s.LEG_NON_UNIQUE_ID_COL].isna().all():
+                    # If the person has no legs, there is no main activity
+                    logger.debug(f"Person {pid} has no legs. Skipping...")
+                    continue
+                if person[s.LEG_TO_ACTIVITY_COL].iloc[0] == s.ACTIVITY_HOME:
+                    # If the person has only one leg, and it's home, there is no main activity
+                    logger.debug(f"Person {pid} has only one leg and it's home. Skipping...")
+                    continue
+
             # Find the main activity
-            main_activity_idx = person[person[s.IS_MAIN_ACTIVITY_COL] == 1].index[0]
+            try:
+                main_activity_idx = person[person[s.IS_MAIN_ACTIVITY_COL] == 1].index[0]
+            except IndexError:
+                logger.warning(f"Person {pid} has no main activity for unknown reasons. Skipping this person.")
+                continue
 
-            # Find the closest previous home activity or the start of the day
-            home_indices = person[person[s.LEG_TO_ACTIVITY_COL] == s.ACTIVITY_HOME].index
+            # Find the closest previous home activity or the start of the day. FROM_activity so the trip to home is excluded.
+            home_indices = person[person[s.LEG_FROM_ACTIVITY_COL] == s.ACTIVITY_HOME].index
             start_idx = home_indices[home_indices < main_activity_idx].max() if not home_indices.empty else person.index[0]
+            if pd.isna(start_idx):
+                start_idx = person.index[0]
 
-            # Calculate the total use time for each mode
+            # Calculate the total use time for each mode. Slicing is inclusive of both start and end index.
             mode_times = person.loc[start_idx:main_activity_idx].groupby(s.LEG_MAIN_MODE_COL)[s.LEG_DURATION_MINUTES_COL].sum()
             mode_distances = person.loc[start_idx:main_activity_idx].groupby(s.LEG_MAIN_MODE_COL)[s.LEG_DISTANCE_COL].sum()
 
@@ -1109,6 +1159,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
         # Add a new column to the dataframe with the main mode for each person
         self.df[s.MAIN_MODE_TO_MAIN_ACT_TIMEBASED_COL] = self.df[s.UNIQUE_P_ID_COL].map(main_modes_time)
         self.df[s.MAIN_MODE_TO_MAIN_ACT_DISTBASED_COL] = self.df[s.UNIQUE_P_ID_COL].map(main_modes_dist)
+        logger.info("Determined main mode to main activity.")
 
     def filter_home_to_home_legs(self):  # TODO: test
         """

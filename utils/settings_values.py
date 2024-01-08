@@ -156,3 +156,9 @@ SIGMOID_BETA = settings['sigmoid_beta']
 SIGMOID_DELTA_T = settings['sigmoid_delta_t']
 
 MIRRORS_MAIN_ACTIVITY_COL = "mirrors_main_activity"
+
+HH_HAS_CONNECTIONS_COL = "hh_has_connections"
+P_HAS_CONNECTIONS_COL = "p_has_connections"
+NUM_CONNECTED_LEGS_COL = "num_connected_legs"
+
+

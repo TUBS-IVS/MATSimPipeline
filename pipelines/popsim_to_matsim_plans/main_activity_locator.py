@@ -570,7 +570,7 @@ class ActivityLocator:
         For explanation of the algorithm, see the thesis.
         :return: DataFrame with a new column with cells assigned to each leg.
         """
-        legs_with_estimated_direct_times, highest_level = self.sf.get_all_times_with_slack(legs_to_locate)
+        legs_with_estimated_direct_times, highest_level = self.sf.get_all_estimated_times_with_slack(legs_to_locate)
 
         # Normalize the estimated times given the known direct time between start and end
         # Get the direct time

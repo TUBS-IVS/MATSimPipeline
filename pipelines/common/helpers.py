@@ -1,17 +1,17 @@
 #  Helper functions
 import gzip
+import json
 import os
 import random
 import re
 import shutil
+from typing import List, Dict, Union
 
-import matplotlib.pyplot as plt
+import geopandas as gpd
 import numpy as np
 import pandas as pd
-import seaborn as sns
 from shapely import Point
 
-from utils import matsim_pipeline_setup as m
 from utils import settings_values as s
 from utils.logger import logging
 
@@ -73,7 +73,7 @@ def create_unique_leg_ids():
     logger.info(f"Created unique leg ids in {s.MiD_TRIPS_FILE}.")
 
 
-def read_csv(csv_path: str, test_col: str = None, use_cols: list = None):
+def read_csv(csv_path: str, test_col=None, use_cols=None):
     """
     Read a csv file with unknown separator and return a dataframe.
     :param csv_path: Path to csv file.
@@ -82,17 +82,18 @@ def read_csv(csv_path: str, test_col: str = None, use_cols: list = None):
     """
     try:
         df = pd.read_csv(csv_path, sep=',', usecols=use_cols)
-        if test_col:
+        if test_col is not None:
             test = df[test_col]
-    except (KeyError, ValueError):
+    except (KeyError, ValueError):  # Sometimes also throws without test_col, when the file is not comma-separated. This is good.
         logger.info(f"ID column '{test_col}' not found in {csv_path}, trying to read as ';' separated file...")
         df = pd.read_csv(csv_path, sep=';', usecols=use_cols)
         try:
-            test = df[test_col]
-            logger.info("Success.")
+            if test_col is not None:
+                test = df[test_col]
         except (KeyError, ValueError):
             logger.error(f"ID column '{test_col}' still not found in {csv_path}, verify column name and try again.")
             raise
+        logger.info("Success.")
     return df
 
 
@@ -232,68 +233,6 @@ def random_point_in_polygon(polygon):
         random_point = Point(random.uniform(min_x, max_x), random.uniform(min_y, max_y))
         if polygon.contains(random_point):
             return random_point
-
-
-def plot_column(df, column, title=None, xlabel=None, ylabel='Frequency', plot_type=None, figsize=(10, 6), save_name=None):
-    """
-    Plots a column from a pandas DataFrame.
-
-    Parameters:
-    df (pd.DataFrame): DataFrame containing the data.
-    column (str): Column name to plot.
-    title (str, optional): Title of the plot. Defaults to None, which will use the column name.
-    xlabel (str, optional): Label for the x-axis. Defaults to None, which will use the column name.
-    ylabel (str, optional): Label for the y-axis. Defaults to 'Frequency'.
-    plot_type (str, optional): Type of plot (hist, bar, box, violin, strip, swarm, point). If None, the plot type is inferred from the column type. Defaults to None.
-    figsize (tuple, optional): Size of the figure (width, height). Defaults to (10, 6).
-    save_name (str, optional): Name with file extension to save the figure. If None, the figure is not saved. Defaults to None.
-    """
-    # Infer plot type if not specified
-    if plot_type is None:
-        if pd.api.types.is_numeric_dtype(df[column]):
-            plot_type = 'hist'
-        elif pd.api.types.is_datetime64_any_dtype(df[column]):
-            plot_type = 'hist'
-        else:
-            plot_type = 'bar'
-
-    # Set plot title and labels
-    if title is None:
-        title = f'Distribution of {column}'
-    if xlabel is None:
-        xlabel = column
-
-    # Create the plot
-    plt.figure(figsize=figsize)
-    if plot_type == 'hist':
-        sns.histplot(df[column].dropna(), kde=True)  # KDE for numeric and datetime
-    elif plot_type == 'bar':
-        sns.countplot(x=column, data=df)
-    elif plot_type == 'box':
-        sns.boxplot(x=column, data=df)
-    elif plot_type == 'violin':
-        sns.violinplot(x=column, data=df)
-    elif plot_type == 'strip':
-        sns.stripplot(x=column, data=df)
-    elif plot_type == 'swarm':
-        sns.swarmplot(x=column, data=df)
-    elif plot_type == 'point':
-        sns.pointplot(x=column, data=df)
-    else:
-        raise ValueError("Unsupported plot type. Use 'hist' or 'bar'.")
-
-    # Set title and labels
-    plt.title(title)
-    plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
-
-    # Save the plot if a save path is provided
-    if save_name:
-        save_name = os.path.join(m.OUTPUT_DIR, save_name)
-        plt.savefig(save_name, bbox_inches='tight')
-
-    else:
-        plt.show()
 
 
 def calculate_condition_likelihoods(df, filter_col, target_col) -> dict:
@@ -444,7 +383,7 @@ class SlackFactors:
             expected_distance = distance_diff + (min(distance_from_start_to_via, distance_from_via_to_end) / 2)
         return expected_distance
 
-    def get_all_times_with_slack(self, leg_chain, level=0):
+    def get_all_estimated_times_with_slack(self, leg_chain, level=0):
         """
         Recursive function that adds columns for each level of slack factor calculation until all needed levels
         have been processed. The columns are named level_0, level_1, etc. and contain the slack-estimated direct
@@ -469,12 +408,51 @@ class SlackFactors:
             return leg_chain, level
         elif len_times_col == 2:
             logger.debug(f"Two legs remain to estimate, solving last level.")
-            return self.solve_level(leg_chain, level), level+1
+            return self.solve_level(leg_chain, level), level + 1
         # Recursive case
         else:
             logger.debug(f"More than two legs remain to estimate, solving level {level}.")
             updated_leg_chain = self.solve_level(leg_chain, level)
-            return self.get_all_times_with_slack(updated_leg_chain, level+1)
+            return self.get_all_estimated_times_with_slack(updated_leg_chain, level + 1)
+
+    def get_all_adjusted_times_with_slack(self, leg_chain, real_total_time):  # TODO: finish!!!
+        """
+        When the real total time is known, this function can be used to adjust the estimated times with slack.
+        This guarantees that a valid leg chain can be built.
+        This method ties it all together.
+        """
+        df, highest_level = self.get_all_estimated_times_with_slack(leg_chain)
+
+        # Highest level to including level 1
+        for level in range(highest_level, 0, -1):
+            # Adjust for every higher-level leg
+            for i, row in df.iterrows():
+                # Check if there are non-NaN values to the right of the current leg in the higher-level columns
+                # This means the leg already belongs to another higher-level leg ;(
+                if df.loc[i, f'level_{level + 1}':].notna().any():
+                    continue
+
+                # Find the first non-NaN values below the current row in the lower-level column
+                lower_level_legs = df.loc[i:, f'level_{level}'].dropna()
+
+                # If there are two legs below the current leg, apply the formula
+                if len(lower_level_legs) == 2:
+                    leg1 = lower_level_legs.iloc[0]
+                    leg2 = lower_level_legs.iloc[1]
+                    delta_L_high = real_total_time - df.loc[i, f'level_{level + 1}']
+
+                    L_bounds1 = df.loc[i, f'level_{level}_lower_bound']
+                    L_bounds2 = df.loc[i, f'level_{level}_lower_bound']
+
+                    L_high = df.loc[i, f'level_{level + 1}']
+
+                    delta_L1 = (L_bounds1 * delta_L_high * (leg1 + leg2) ** 2) / (L_high * (leg1 * L_bounds1 + leg2 * L_bounds2))
+                    delta_L2 = (L_bounds2 * delta_L_high * (leg1 + leg2) ** 2) / (L_high * (leg1 * L_bounds1 + leg2 * L_bounds2))
+
+                    df.loc[i, f'level_{level}'] += delta_L1
+                    df.loc[i + 1, f'level_{level}'] += delta_L2
+
+        return df
 
     def solve_level(self, leg_chain, level):  # TODO: finish
         """
@@ -485,7 +463,7 @@ class SlackFactors:
         :return: copy of leg_chain with added column
         """
         leg_chain = leg_chain.copy()
-        leg_chain[f"level_{level+1}"] = np.nan
+        leg_chain[f"level_{level + 1}"] = np.nan
 
         if level == 0:
             times_col = s.LEG_DURATION_MINUTES_COL
@@ -511,7 +489,7 @@ class SlackFactors:
                                                                group.iloc[0][s.LEG_TO_ACTIVITY_COL],
                                                                group.iloc[1][s.LEG_TO_ACTIVITY_COL])
 
-            leg_chain.loc[group['original_index'].iloc[-1], f"level_{level+1}"] = time
+            leg_chain.loc[group['original_index'].iloc[-1], f"level_{level + 1}"] = time
 
         return leg_chain
 
@@ -521,9 +499,10 @@ class TTMatrices:
     Manages travel time matrices for various modes of transportation.
     """
 
-    def __init__(self, car_tt_matrices_csv_paths: list, pt_tt_matrices_csv_paths: list, bike_tt_matrix_csv_path: str,
-                 walk_tt_matrix_csv_path: str):
-        self.tt_matrices = {'car': {}, 'pt': {}, 'bike': None, 'walk': None}
+    def __init__(self, car_tt_matrices_csv_paths: List[str], pt_tt_matrices_csv_paths: List[str],
+                 bike_tt_matrix_csv_path: str, walk_tt_matrix_csv_path: str):
+        self.tt_matrices: Dict[str, Union[Dict[str, pd.DataFrame], pd.DataFrame, None]] = {'car': {}, 'pt': {}, 'bike': None,
+                                                                                           'walk': None}
 
         # Read car and pt matrices for each hour
         for mode, csv_paths in zip(['car', 'pt'], [car_tt_matrices_csv_paths, pt_tt_matrices_csv_paths]):
@@ -542,6 +521,29 @@ class TTMatrices:
             logger.error(f"Error reading bike/walk matrices: {e}")
             raise e
 
+        # Validation
+        tt_rows_num: int = len(self.tt_matrices['car']['0'])
+
+        for mode, matrices in self.tt_matrices.items():
+            if mode in ['bike', 'walk']:
+                if len(matrices) != 1:
+                    logger.warning(f"Expected 1 {mode} matrix, found {len(matrices)}")
+                for df in matrices.values():
+                    if not {'FROM', 'TO', 'VALUE'}.issubset(df.columns):
+                        raise ValueError(f"Invalid {mode} matrix. Columns must include FROM, TO, VALUE.")
+                    if len(df) != tt_rows_num:
+                        raise ValueError(f"Invalid {mode} matrix. Number of rows must be {tt_rows_num}.")
+            else:
+                if len(matrices) != 24:
+                    logger.warning(f"Expected 24 {mode} matrices, found {len(matrices)}")
+                for df in matrices.values():
+                    if not {'FROM', 'TO', 'VALUE'}.issubset(df.columns):
+                        raise ValueError(f"Invalid {mode} matrix. Columns must include FROM, TO, VALUE.")
+                    if len(df) != tt_rows_num:
+                        raise ValueError(f"Invalid {mode} matrix. Number of rows must be {tt_rows_num}.")
+
+        logger.info(f"Loaded travel time matrices for {len(self.tt_matrices['car'])} hours.")
+
     def get_tt_matrix(self, mode: str, hour: int = None):
         """
         Retrieve the travel time matrix for a given mode and hour.
@@ -558,6 +560,39 @@ class TTMatrices:
             return self.tt_matrices[mode].get(str(hour))
 
         return self.tt_matrices[mode]
+
+    def get_weighted_tt_matrix_two_modes(self, mode1, weight1, mode2, weight2, hour=None):
+
+        tt_matrix1 = self.get_tt_matrix(mode1, hour)
+        tt_matrix2 = self.get_tt_matrix(mode2, hour)
+
+        if tt_matrix1 is None or tt_matrix2 is None:
+            raise ValueError("One or both of the travel time matrices could not be retrieved.")
+
+        weighted_tt_matrix = tt_matrix1.copy()
+        weighted_tt_matrix['VALUE'] = tt_matrix1['VALUE'].multiply(weight1).add(tt_matrix2['VALUE'].multiply(weight2))
+
+        return weighted_tt_matrix
+
+    def get_weighted_tt_matrix_n_modes(self, mode_weights: Dict[str, float], hour: int = None) -> pd.DataFrame:
+        """
+        Get a weighted travel time matrix for multiple modes.
+        :param mode_weights: Dictionary with mode names as keys and weights as values.
+        :param hour: Hour of the day for modes with time-dependent matrices (car, pt). 0-23.
+        """
+        weighted_tt_matrix = None
+        total_weight = sum(mode_weights.values())
+
+        for mode, weight in mode_weights.items():
+            tt_matrix = self.get_tt_matrix(mode, hour)
+            weighted_matrix = tt_matrix * (weight / total_weight)
+
+            if weighted_tt_matrix is None:
+                weighted_tt_matrix = weighted_matrix
+            else:
+                weighted_tt_matrix += weighted_matrix
+
+        return weighted_tt_matrix
 
     def get_travel_time(self, cell_from, cell_to, mode, hour=None):
         """
@@ -596,17 +631,6 @@ def sigmoid(x, beta, delta_T):
     :return: Sigmoid function value.
     """
     return 1 / (1 + np.exp(-beta * (x - delta_T)))
-
-
-def clean_connected_legs_string(s):
-    """
-    Remove quotation marks from a string.
-    This is sadly necessary to save it usably. Meh.
-    """
-    try:
-        return str(s).replace("'", "")
-    except AttributeError:
-        return s
 
 
 def check_distance(leg_to_find, leg_to_compare):
@@ -692,3 +716,144 @@ def check_activity(leg_to_find, leg_to_compare):  # TODO: Possibly create a matr
     #     return True
 
     return type_to_compare in compatible_activities.get(type_to_find, [])
+
+
+class Capacities:
+    """
+    Turns given capacities into point capacities that the locator can handle.
+    - Loads data as either shp or csv (either points or cells shp must be given)
+    - Translates between internal activity types and given capacities.
+    - If cell capacities and shp point capacities are given, weighted-distributes the cell capacities to the points.
+    - If cell capacities and shp points with possible activities are given, distributes the cell capacities to the points accordingly.
+    - If cell capacities and shp raw points are given, distributes the cell capacities to the points evenly.
+    - If cell capacities and csv point capacities are given, weighted-distributes; and creates random points.
+    - If shp point capacities are given, uses those directly.
+
+    The result are always located point capacities with the best possible information, that can be used by the activity placer.
+    """
+
+    def __init__(self, capa_cells_shp_path: str = None, capa_points_shp_path: str = None, capa_cells_csv_path: str = None,
+                 capa_points_csv_path: str = None):
+
+        logger.info("Initializing capacities...")
+        if capa_points_shp_path is not None:
+            if capa_cells_shp_path is not None:
+                self.capa_points_gdf = gpd.read_file(capa_points_shp_path)
+                self.capa_cells_gdf = gpd.read_file(capa_cells_shp_path)
+                self.capa_points_gdf = distribute_by_weights(self.capa_points_gdf, self.capa_cells_gdf, 'cell_id')
+            elif capa_cells_csv_path is not None:
+                self.capa_points_gdf = gpd.read_file(capa_points_shp_path)
+                self.capa_cells_df = read_csv(capa_cells_csv_path)
+                self.capa_points_gdf = distribute_by_weights(self.capa_points_gdf, self.capa_cells_df, 'cell_id')
+            else:
+                self.capa_points_gdf = gpd.read_file(capa_points_shp_path)
+
+        elif capa_cells_shp_path is not None:
+            if capa_points_csv_path is not None:
+                self.capa_cells_gdf = gpd.read_file(capa_cells_shp_path)
+                self.capa_points_df = read_csv(capa_points_csv_path)
+                self.capa_points_df['geometry'] = self.capa_points_df['geometry'].apply(shapely.wkt.loads)
+                self.capa_points_gdf = gpd.GeoDataFrame(self.capa_points_df, geometry='geometry')
+                self.capa_points_gdf.crs = self.capa_cells_gdf.crs
+                self.capa_points_gdf = distribute_by_weights(self.capa_points_gdf, self.capa_cells_gdf, 'cell_id')
+            else:
+                self.capa_cells_gdf = gpd.read_file(capa_cells_shp_path)
+                self.capa_points_gdf = self.capa_cells_gdf.copy()
+                self.capa_points_gdf['geometry'] = self.capa_points_gdf['geometry'].apply(random_point_in_polygon)
+
+        else:
+            raise ValueError("Either capa_points_shp_path or capa_cells_shp_path must be given.")
+        logger.info(f"Created capacity_gdf for {len(self.capa_points_gdf)} points.")
+
+        self.translate_and_split_potentials()
+        self.round_capacities()  # Round point capacities to integers
+
+        logger.info("Initialized capacities.")
+
+    def translate_and_split_potentials(self, translation_dict=None):
+        logger.info("Translating capacities...")
+        if translation_dict is None:
+            translation_dict = {
+                "Jobs Teilzeit": {"work": 1},
+                "Jobs Vollzeit hohe Widerstandsempfindlichkeit": {"work": 1},
+                "Jobs Vollzeit (AV+AF)": {"work": 1},
+                "Einwohner": {"home": 0.99, "meetup": 0.01},
+                "Zielpotenzial periodischer Bedarf, Einwohner": {"shopping": 0.8, "errands": 0.2},
+                "Kitaplätze+Schulplätze+Ärzte+Einwohner": {"early_education": 0.5, "education": 0.5},
+                "Berufsschulplätze": {"education": 1},
+                "Zielpotenzial aperiodischer zentrenrelevanter Bedarf": {"business": 0.1, "shopping": 0.9},
+                "Zielpotenzial aperiodischer Bedarf (EA+EB+EM)": {"shopping": 1},
+                "Zielpotenzial Baumarkt, Kfz-Handel etc.": {"shopping": 1},
+                "Zielpotenzial Möbelhäuser": {"shopping": 1},
+                "Zielpotenzial periodischer Bedarf": {"shopping": 0.8, "errands": 0.2},
+                "Zielpotenzial Natur": {"leisure": 1},
+                "Zielpotenzial Gastronomie": {"leisure": 0.7, "meetup": 0.3},
+                "Grundschulplätze": {"early_education": 1},
+                "Studienplätze": {"education": 1},
+                "Kitaplätze": {"daycare": 1},
+                "Zielpotenzial Theater/Kino/Stadion": {"leisure": 1},
+                "Ärzte, Krankenhäuser": {"errands": 1},
+                "Zielpotenzial Post/Bank/Behörde/VHS": {"errands": 0.8, "business": 0.1, "lessons": 0.1},
+                "Schulplätze SEK I": {"education": 1},
+                "Schulplätze SEK II": {"education": 1},
+                "Beschäftigte DL + Zielpotenzial Private Erledigungen": {"work": 0.5, "errands": 0.5},
+                "Zielpotenzial Sport": {"sports": 1},
+                "Schulplätze SEK I+II": {"education": 1},
+                "SG_WSC": {"unspecified": 1}
+            }
+
+        for original_col, translations in translation_dict.items():
+            for new_col, weight in translations.items():
+                if new_col not in self.capa_points_gdf.columns:
+                    self.capa_points_gdf[new_col] = np.nan
+                self.capa_points_gdf[new_col] += self.capa_points_gdf[original_col].fillna(0) * weight
+            self.capa_points_gdf.drop(columns=[original_col], inplace=True)
+
+        logger.info("Translated capacities.")
+
+    def round_capacities(self):
+        """
+        Round the capacities while preserving the sum.
+        """
+        logger.info("Rounding capacities to integers while preserving the sum...")
+        for col in self.capa_points_gdf.columns:
+            # Skip non-numeric columns
+            if not pd.api.types.is_numeric_dtype(self.capa_points_gdf[col]):
+                continue
+
+            # Calculate the sum before rounding
+            sum_before_rounding = self.capa_points_gdf[col].sum()
+
+            # Round down the values in the column and keep track of the decimal part
+            self.capa_points_gdf[col], decimal_part = divmod(self.capa_points_gdf[col], 1)
+
+            # Calculate the difference between the sum before rounding and the sum after rounding
+            diff = sum_before_rounding - self.capa_points_gdf[col].sum()
+
+            # Adjust the rounded values to preserve the sum
+            while diff > 0:
+                # Find the index of the maximum decimal part
+                idx_max_decimal = decimal_part.idxmax()
+                # Add 1 to the corresponding value in the DataFrame
+                self.capa_points_gdf.loc[idx_max_decimal, col] += 1
+                # Subtract 1 from the corresponding value in the decimal part Series
+                decimal_part.loc[idx_max_decimal] -= 1
+                # Subtract 1 from the difference
+                diff -= 1
+        logger.info("Rounded capacities.")
+
+
+def convert_to_list(s):
+    """
+    This is weirdly and annoyingly necessary because of the way the lists are stored.
+    This is needed to correctly convert the string representation of a list to an actual list.
+    """
+    if pd.isna(s):
+        return s
+    try:
+        # Replace unwanted characters
+        cleaned_string = s.replace("\'", "\"")
+        # Use json.loads to correctly interpret the string as a list of strings
+        return json.loads(cleaned_string)
+    except ValueError:
+        return s

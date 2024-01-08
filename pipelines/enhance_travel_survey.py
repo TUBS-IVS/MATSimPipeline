@@ -46,7 +46,7 @@ def enhance_travel_survey():
         if s.HOUSEHOLD_MID_ID_COL not in household_cols_to_load:
             household_cols_to_load.append(s.HOUSEHOLD_MID_ID_COL)
 
-    population.load_df_from_csv(s.MiD_HH_FILE, use_cols=household_cols_to_load)
+    population.load_df_from_csv(s.MiD_HH_FILE, test_col=s.HOUSEHOLD_MID_ID_COL, use_cols=household_cols_to_load)
 
     logger.info(f"Population df after adding HH attributes: \n{population.df.head()}")
     population.check_for_merge_suffixes()
@@ -98,11 +98,13 @@ def enhance_travel_survey():
     # population.df = population.df[population.df[s.LEG_ID_COL].notna()].reset_index()
 
     # Add trip attributes from MiD
-    if s.L_COLUMNS:
+    if add_all_columns:
+        list_L_COLUMNS = None
+    else:
         list_L_COLUMNS = list(s.L_COLUMNS.values())
         list_L_COLUMNS.append(s.LEG_NON_UNIQUE_ID_COL)
-        population.add_csv_data_on_id(s.MiD_TRIPS_FILE, list_L_COLUMNS, id_column=s.LEG_ID_COL,
-                                      drop_duplicates_from_source=True, delete_later=True)
+    population.add_csv_data_on_id(s.MiD_TRIPS_FILE, list_L_COLUMNS, id_column=s.LEG_ID_COL,
+                                      drop_duplicates_from_source=True)
     logger.info(f"Population df after adding L attributes: \n{population.df.head()}")
     population.check_for_merge_suffixes()
 

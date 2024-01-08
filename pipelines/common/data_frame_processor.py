@@ -43,7 +43,7 @@ class DataFrameProcessor:
 
         self._id_column = value
 
-    def load_df_from_csv(self, csv_path, if_df_exists: Literal['replace', 'concat'] = 'concat', use_cols=None) -> None:
+    def load_df_from_csv(self, csv_path, if_df_exists: Literal['replace', 'concat'] = 'concat', use_cols=None, test_col=None) -> None:
         """
         Initializes the DataFrame from a CSV file.
 
@@ -52,7 +52,7 @@ class DataFrameProcessor:
         - if_df_exists: str, whether to replace the existing DataFrame or concatenate to it.
         """
         try:
-            new_df = h.read_csv(csv_path, use_cols=use_cols)
+            new_df = h.read_csv(csv_path, test_col=test_col, use_cols=use_cols)
 
             if if_df_exists == 'replace':
                 self.df = new_df

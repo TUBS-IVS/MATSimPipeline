@@ -10,8 +10,8 @@ input_files:
     - "data/synthetic_households1.csv"
 
 
-  mid_hh_file: "data/MiD2017_Haushalte_gefiltert_RStar71.csv"
-  mid_persons_file: "data/MiD2017_Personen_gefiltert_RStar71.csv"
+  mid_hh_file: "data/MiD2017_Haushalte.csv"
+  mid_persons_file: "data/MiD2017_Personen.csv"
   mid_trips_file: "data/MiD2017_Wege_edited.csv"
   buildings_in_lowest_geography_with_weights_file: "data/houses_with_weights.csv"
 

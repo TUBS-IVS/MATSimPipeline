@@ -85,24 +85,26 @@ def collapse_person_trip(group):
     return summary_df
 
 
-def is_main_activity(group):
+def is_main_activity(person):
     """
     Check if the leg is travelling to the main activity of the day.
     Requires calculate_activity_time() to be run first.
-    :param group: Population frame grouped by person_id
+    :param person: Population frame grouped by person_id
     :return: Series indicating if each row is the main activity: 1 if main activity, 0 if not
     """
-    is_main_activity_series = pd.Series(0, index=group.index)  # Initialize all values to 0
+    is_main_activity_series = pd.Series(0, index=person.index)  # Initialize all values to 0
 
     # Filter out home activities (home must not be the main activity)
-    group = group[group[s.LEG_TO_ACTIVITY_COL] != s.ACTIVITY_HOME]
+    group = person[person[s.LEG_TO_ACTIVITY_COL] != s.ACTIVITY_HOME]
 
     if group.empty:
+        logger.debug(f"Person {group[s.PERSON_ID_COL].iloc[0]} has no legs. No main activity.")
         return is_main_activity_series
 
     if len(group) == 1:
         # If the person has no legs, there is no main activity
         if group[s.LEG_NON_UNIQUE_ID_COL].isna().all():
+            logger.debug(f"Person {group[s.PERSON_ID_COL].iloc[0]} has no legs. No main activity.")
             return is_main_activity_series
         # If the person has only one activity, it is the main activity
         is_main_activity_series.iloc[0] = 1
@@ -114,6 +116,7 @@ def is_main_activity(group):
     if not work_activity_rows.empty:
         is_main_activity_series[work_activity_rows.index[0]] = 1
         assert is_main_activity_series.sum() == 1
+        logger.debug(f"Person {group[s.PERSON_ID_COL].iloc[0]} has a work activity. Main activity is work.")
         return is_main_activity_series
 
     # If the person has no work activity, the main activity is the first education activity
@@ -122,17 +125,21 @@ def is_main_activity(group):
     if not education_activity_rows.empty:
         is_main_activity_series[education_activity_rows.index[0]] = 1
         assert is_main_activity_series.sum() == 1
+        logger.debug(f"Person {group[s.PERSON_ID_COL].iloc[0]} has an education activity. Main activity is education.")
         return is_main_activity_series
 
     # If the person has no work or education activity, the main activity is the longest activity
-    if group["activity_duration_seconds"].isna().all():
+    if group[s.ACT_DUR_SECONDS_COL].isna().all():
         # If all activities have no duration, pick the middle one
         is_main_activity_series.iloc[len(group) // 2] = 1  # Integer division
         assert is_main_activity_series.sum() == 1
+        logger.debug(f"Person {group[s.PERSON_ID_COL].iloc[0]} has no activities with duration. Main activity is middle.")
         return is_main_activity_series
-    max_duration_index = group["activity_duration_seconds"].idxmax()
+    max_duration_index = group[s.ACT_DUR_SECONDS_COL].idxmax()
     is_main_activity_series[max_duration_index] = 1
     assert is_main_activity_series.sum() == 1
+    logger.debug(f"Person {group[s.PERSON_ID_COL].iloc[0]} has no work or education activity. "
+                 f"Main activity is longest activity.")
     return is_main_activity_series
 
 

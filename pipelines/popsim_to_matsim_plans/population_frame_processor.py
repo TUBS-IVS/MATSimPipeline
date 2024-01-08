@@ -799,7 +799,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
                     self.df.at[leg_index, s.CONNECTED_LEGS_COL] = updated_connected_legs
 
                     if existing_connected != updated_connected_legs:
-                        logger.debug(f"Updated connected legs for leg {leg} from {existing_connected} to {updated_connected_legs}.")
+                        logger.debug(
+                            f"Updated connected legs for leg {leg} from {existing_connected} to {updated_connected_legs}.")
 
                     checked_legs.add(leg)
 
@@ -812,8 +813,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
         # Make a copy of the activity column that will be updated
         self.df[s.TO_ACTIVITY_WITH_CONNECTED_COL] = self.df[s.LEG_TO_ACTIVITY_COL]
 
-        if s.IS_PROTAGONIST_COL in self.df.columns:
-            logger.debug("Protagonist column already exists. Skipping...")
+        # if s.IS_PROTAGONIST_COL in self.df.columns:  # Just for debugging
+        #     logger.debug("Protagonist column already exists.")
         prot_legs = self.df[self.df[s.IS_PROTAGONIST_COL] == 1]
 
         for row in prot_legs.itertuples():
@@ -1079,7 +1080,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 if closest_home_row < main_activity_row:  # Home to main
                     legs = person.loc[closest_home_row + 1:main_activity_row]
 
-                    updated_legs, level = self.sf.get_all_times_with_slack(legs)
+                    updated_legs, level = self.sf.get_all_estimated_times_with_slack(legs)
                     home_to_main_time = updated_legs[f"level_{level}"].dropna().index[0]
                     home_to_main_distance = None  # We cannot correctly determine this without an own function (yes, really)
                     # and it's not needed nor worth the effort here. Also, this serves as a marker for estimated time.
@@ -1088,7 +1089,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 else:  # Main to home
                     legs = person.loc[main_activity_row + 1:closest_home_row]
 
-                    updated_legs, level = self.sf.get_all_times_with_slack(legs)
+                    updated_legs, level = self.sf.get_all_estimated_times_with_slack(legs)
                     home_to_main_time = updated_legs[f"level_{level}"].dropna().index[0]
                     home_to_main_distance = None
                     time_is_estimated = 1
@@ -1161,7 +1162,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
         self.df[s.MAIN_MODE_TO_MAIN_ACT_DISTBASED_COL] = self.df[s.UNIQUE_P_ID_COL].map(main_modes_dist)
         logger.info("Determined main mode to main activity.")
 
-    def filter_home_to_home_legs(self):  # TODO: test
+    def filter_home_to_home_legs(self):  # TODO: test PASSED
         """
         Filters out 'home to home' legs from the DataFrame.
         """
@@ -1171,7 +1172,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
         self.df = self.df[~home_to_home_condition].reset_index(drop=True)
         logger.info(f"Filtered out 'home to home' legs. {len(self.df)} rows remaining.")
 
-    def update_number_of_legs(self, col_to_write_to=s.NUMBER_OF_LEGS_COL):  # TODO: test
+    def update_number_of_legs(self, col_to_write_to=s.NUMBER_OF_LEGS_COL):  # TODO: test PASSED. Repeat run.
         """
         Updates the NUMBER_OF_LEGS_COL with the correct number of legs for each person;
         or writes a new col with the given name.
@@ -1182,6 +1183,9 @@ class PopulationFrameProcessor(DataFrameProcessor):
         number_of_legs = persons.size()
 
         self.df[col_to_write_to] = self.df[s.UNIQUE_P_ID_COL].map(number_of_legs)
+
+        # Set the number to 0 for rows with no legs
+        self.df.loc[self.df[s.LEG_ID_COL].isna(), col_to_write_to] = 0
 
     def find_connected_legs(self):
         """
@@ -1231,12 +1235,6 @@ class PopulationFrameProcessor(DataFrameProcessor):
                         connections.at[idx_a].append(person_b_leg[s.UNIQUE_LEG_ID_COL])
                         connections.at[idx_b].append(person_a_leg[s.UNIQUE_LEG_ID_COL])
 
-            if connections.isna().all():
-                logger.debug(f"No connections found for household {household_group[s.HOUSEHOLD_MID_ID_COL].iloc[0]}.")
-            else:
-                logger.debug(f"Connections found for household {household_group[s.HOUSEHOLD_MID_ID_COL].iloc[0]}")
-                logger.debug(f"{connections}")
-
         # Save checks_df to a CSV file
         checks_df = pd.DataFrame(checks_data)
         file_loc = os.path.join(matsim_pipeline_setup.OUTPUT_DIR, 'leg_connections_logs.csv')
@@ -1244,3 +1242,30 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
         # Add connections as a new column to self.df
         self.df[s.CONNECTED_LEGS_COL] = connections
+
+    def mark_connected_persons_and_hhs(self):
+        logger.info("Marking connected persons and households...")
+        self.df[s.HH_HAS_CONNECTIONS_COL] = 0
+        self.df[s.P_HAS_CONNECTIONS_COL] = 0
+
+        for person_id in self.df[s.PERSON_ID_COL].unique():
+            if any(self.df[self.df[s.PERSON_ID_COL] == person_id][s.CONNECTED_LEGS_COL].apply(lambda x: isinstance(x, list))):
+                self.df.loc[self.df[s.PERSON_ID_COL] == person_id, s.P_HAS_CONNECTIONS_COL] = 1
+                logger.debug(f"Person {person_id} has connections.")
+
+        for hh_id in self.df[s.UNIQUE_HH_ID_COL].unique():
+            if any(self.df[self.df[s.UNIQUE_HH_ID_COL] == hh_id][s.CONNECTED_LEGS_COL].apply(lambda x: isinstance(x, list))):
+                self.df.loc[self.df[s.UNIQUE_HH_ID_COL] == hh_id, s.HH_HAS_CONNECTIONS_COL] = 1
+                logger.debug(f"Household {hh_id} has connections.")
+
+    def count_connected_legs_per_person(self):
+        logger.info("Counting connected legs per person...")
+        self.df[s.NUM_CONNECTED_LEGS_COL] = 0
+
+        for person_id in self.df[s.PERSON_ID_COL].unique():
+            person_rows = self.df[self.df[s.PERSON_ID_COL] == person_id]
+            num_connections = person_rows[s.CONNECTED_LEGS_COL].apply(lambda x: len(x) if isinstance(x, list) else 0).sum()
+            self.df.loc[self.df[s.PERSON_ID_COL] == person_id, s.NUM_CONNECTED_LEGS_COL] = num_connections
+            logger.debug(f"Person {person_id} has {num_connections} connected legs.")
+
+

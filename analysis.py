@@ -4,10 +4,12 @@ import statsmodels.api as sm
 from matplotlib import pyplot as plt
 from sklearn.preprocessing import OneHotEncoder
 import numpy as np
-
+import os
 
 from pipelines.common import helpers as h
+from pipelines.popsim_to_matsim_plans.population_frame_processor import PopulationFrameProcessor
 from utils import settings_values as s
+from utils import matsim_pipeline_setup as m
 from utils.logger import logging
 
 logger = logging.getLogger(__name__)
@@ -67,9 +69,9 @@ class DataframeAnalysis:
             return 0
         return (sig_diff_count / total_non_nan) * 100
 
-    def plot_all_columns(self, bins=100):
+    def plot_all_columns(self):
         for column_name in self.df.columns:
-            self.plot_column(column_name, bins=bins)
+            self.plot_column(column_name)
 
     def plot_valid_vs_anomalous(self, col_names=None):
         """
@@ -101,17 +103,18 @@ class DataframeAnalysis:
             plt.show()
 
     def df_value_counts(self):
-        """
-        Counts the unique values in each column of a DataFrame and returns a new DataFrame with the counts side-by-side.
-        :param df: DataFrame
-        :return: DataFrame
-        """
         transformed_dfs = []
 
         for col in self.df.columns:
             # Counting unique values in the column and creating a new DataFrame
-            counts = self.df[col].value_counts().reset_index()
+            counts = self.df[col].value_counts(dropna=False).reset_index()
             counts.columns = [f'{col}_value', f'{col}_count']
+
+            # Calculate the total count of values in the column
+            total_count = counts[f'{col}_count'].sum()
+
+            # Calculate the percentage of each unique value
+            counts[f'{col}_percentage'] = (counts[f'{col}_count'] / total_count) * 100
 
             # Creating a new index for each DataFrame to ensure proper alignment
             counts.index = range(len(counts))
@@ -122,7 +125,66 @@ class DataframeAnalysis:
 
         return combined_df
 
+    def plot_column(self, column, title=None, xlabel=None, ylabel='Frequency', plot_type=None, figsize=(10, 6), save_name=None):
+        """
+        Plots a column from a pandas DataFrame.
 
+        Parameters:
+        df (pd.DataFrame): DataFrame containing the data.
+        column (str): Column name to plot.
+        title (str, optional): Title of the plot. Defaults to None, which will use the column name.
+        xlabel (str, optional): Label for the x-axis. Defaults to None, which will use the column name.
+        ylabel (str, optional): Label for the y-axis. Defaults to 'Frequency'.
+        plot_type (str, optional): Type of plot (hist, bar, box, violin, strip, swarm, point). If None, the plot type is inferred from the column type. Defaults to None.
+        figsize (tuple, optional): Size of the figure (width, height). Defaults to (10, 6).
+        save_name (str, optional): Name with file extension to save the figure. If None, the figure is not saved. Defaults to None.
+        """
+        # Infer plot type if not specified
+        if plot_type is None:
+            if pd.api.types.is_numeric_dtype(self.df[column]):
+                plot_type = 'hist'
+            elif pd.api.types.is_datetime64_any_dtype(self.df[column]):
+                plot_type = 'hist'
+            else:
+                plot_type = 'bar'
+
+        # Set plot title and labels
+        if title is None:
+            title = f'Distribution of {column}'
+        if xlabel is None:
+            xlabel = column
+
+        # Create the plot
+        plt.figure(figsize=figsize)
+        if plot_type == 'hist':
+            sns.histplot(self.df[column].dropna(), kde=True)  # KDE for numeric and datetime
+        elif plot_type == 'bar':
+            sns.countplot(x=column, data=self.df)
+        elif plot_type == 'box':
+            sns.boxplot(x=column, data=self.df)
+        elif plot_type == 'violin':
+            sns.violinplot(x=column, data=self.df)
+        elif plot_type == 'strip':
+            sns.stripplot(x=column, data=self.df)
+        elif plot_type == 'swarm':
+            sns.swarmplot(x=column, data=self.df)
+        elif plot_type == 'point':
+            sns.pointplot(x=column, data=self.df)
+        else:
+            raise ValueError("Unsupported plot type. Use 'hist' or 'bar'.")
+
+        # Set title and labels
+        plt.title(title)
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+
+        # Save the plot if a save path is provided
+        if save_name:
+            save_name = os.path.join(m.OUTPUT_DIR, save_name)
+            plt.savefig(save_name, bbox_inches='tight')
+
+        else:
+            plt.show()
 
 
 def analyze_influence_on_slack(df):
@@ -156,36 +218,33 @@ def analyze_influence_on_slack(df):
 # for col in s.L_COLUMNS.values():
 #     h.plot_column(df, col)
 
-slack_df = h.read_csv("data/slack_factors_raw.csv")
-persons_df = h.read_csv(s.MiD_PERSONS_FILE)
-slack_df = slack_df.merge(persons_df, on=s.PERSON_ID_COL, how='left')
-print(analyze_influence_on_slack(slack_df))
+# slack_df = h.read_csv("data/slack_factors_raw.csv")
+# persons_df = h.read_csv(s.MiD_PERSONS_FILE)
+# slack_df = slack_df.merge(persons_df, on=s.PERSON_ID_COL, how='left')
+# print(analyze_influence_on_slack(slack_df))
 
+# ttdf1 = h.read_csv("data/TTmatrices/hour_Min_0_Max 1car_travel_times.csv" )
+# ttdf2 = h.read_csv("data/TTmatrices/hour_Min_4_Max 5car_distances.csv", "FROM")
+# ttdf3= h.read_csv("data/TTmatrices/hour_Min_4_Max 5car_travel_times.csv", "FROM")
+# connections_df = h.read_csv("output/20240103_020348/leg_connections_logs.csv")  # TODO:repeat and check.
+enhanced_mid_df = h.read_csv("output/20240103_232445/full_population_frame.csv")
+#  mid_df = h.read_csv(s.MiD_TRIPS_FILE)  # TODO: check num of rows (enh: 999803)
+logger.info("Loaded DataFrame")
+# Filter out where time and distance are False
+# connections_df = connections_df[(connections_df['mode_match'] != False) & (connections_df["activity_match"] != False)]
+# Add a col that is true when all four comparisons are true
+# connections_df['all_match'] = connections_df[['mode_match', 'activity_match', 'time_match', 'dist_match']].all(axis=1)
 
-def value_counts(df):
-    """
-    Counts the unique values in each column of a DataFrame and returns a new DataFrame with the counts side-by-side.
-    :param df: DataFrame
-    :return: DataFrame
-    """
-    transformed_dfs = []
+pop = PopulationFrameProcessor(enhanced_mid_df)
+pop.check_for_merge_suffixes()
 
-    for col in df.columns:
-        # Counting unique values in the column and creating a new DataFrame
-        counts = df[col].value_counts().reset_index()
-        counts.columns = [f'{col}_value', f'{col}_count']
-
-        # Creating a new index for each DataFrame to ensure proper alignment
-        counts.index = range(len(counts))
-        transformed_dfs.append(counts)
-
-    # Combining all transformed DataFrames side-by-side
-    combined_df = pd.concat(transformed_dfs, axis=1)
-
-    return combined_df
+ana = DataframeAnalysis(enhanced_mid_df)
+logger.info(f"Rows: {len(enhanced_mid_df)} Columns: {len(enhanced_mid_df.columns)}")
+vc_df = ana.df_value_counts()
+vc_df.to_csv("testdata/analyze/enhanced_mid_analysis.csv", index=False)
+logger.info("Done")
 
 def plot_sigmoid():
-    # Adjusting Delta T to 30 minutes and recalculating the sigmoid function values
     delta_T = 20
     time_diff_range = np.arange(0, 60, 0.1)
     beta_values = [-0.25, -0.2, -0.15, -0.1]

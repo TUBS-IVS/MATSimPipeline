@@ -1,14 +1,13 @@
 import os
 import time
+import multiprocessing as mp
 
 import pandas as pd
 import winsound
-import geopandas as gpd
 
 from pipelines.common import helpers as h
-from pipelines.common import rules
-from pipelines.popsim_to_matsim_plans.population_frame_processor import PopulationFrameProcessor
 from pipelines.popsim_to_matsim_plans.main_activity_locator import ActivityLocator
+from pipelines.popsim_to_matsim_plans.population_frame_processor import PopulationFrameProcessor
 from utils import matsim_pipeline_setup
 from utils import settings_values as s
 from utils.logger import logging
@@ -154,8 +153,10 @@ def popsim_to_matsim_plans_main():
     # </test>
 
     # With this information, plans can now be located
-    locator = ActivityLocator(persons_with_cells)
-    located_pop = locator.locate_activities()
+    # locator = ActivityLocator(persons_with_cells)
+    # located_pop = locator.locate_activities()
+
+    located_pop = parallel_locate_activities(persons_with_cells, num_processes=2)
 
     population = PopulationFrameProcessor(located_pop)
     # population.impute_cars_in_household()
@@ -189,6 +190,40 @@ def popsim_to_matsim_plans_main():
 
     logger.info(f"Finished popsim_to_matsim_plans pipeline")
     return
+
+
+def process_chunk(chunk_df):
+    locator = ActivityLocator(chunk_df)
+    return locator.locate_activities()
+
+
+def create_balanced_chunks(df, num_chunks):
+    # Group the DataFrame by hh_id
+    grouped = df.groupby(s.UNIQUE_HH_ID_COL)
+
+    # Sort groups by size to help balance the chunks
+    sorted_groups = sorted(grouped, key=lambda x: len(x[1]), reverse=True)
+
+    # Initialize chunks
+    chunks = [[] for _ in range(num_chunks)]
+
+    # Distribute groups to chunks
+    for i, group in enumerate(sorted_groups):
+        chunks[i % num_chunks].append(group[1])
+
+    # Combine group DataFrames in each chunk into a single DataFrame
+    return [pd.concat(chunk, ignore_index=True) for chunk in chunks]
+
+
+def parallel_locate_activities(df, num_processes=None):
+    chunks = create_balanced_chunks(df, num_processes)
+
+    # Create a multiprocessing pool and process chunks in parallel
+    with mp.Pool(processes=num_processes) as pool:
+        results = pool.map(process_chunk, chunks)
+
+    # Combine results into a single DataFrame
+    return pd.concat(results, ignore_index=True)
 
 
 if __name__ == '__main__':

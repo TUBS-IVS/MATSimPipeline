@@ -1,32 +1,80 @@
 
-sample_size: 0.05 # 0.1 = 10% of the population
-n_closest_cells: 5 # Number of cell candidates to consider for main activity location
+sample_size: 0.02 # 0.1 = 10% of the population
+n_closest_cells: 10 # Number of cell candidates to consider for main activity location
 default_slack_factor: 1.5
 sigmoid_beta: -0.15
-sigmoid_delta_t: 20  # Minutes
+sigmoid_delta_t: 1200  # Seconds
 
 input_files:
   expanded_households_files: # synthetic_households from PopSim
     - "data/synthetic_households1.csv"
 
+  enhanced_mid_file: "data/enhanced_frame_final.csv"
 
   mid_hh_file: "data/MiD2017_Haushalte.csv"
   mid_persons_file: "data/MiD2017_Personen.csv"
   mid_trips_file: "data/MiD2017_Wege_edited.csv"
   buildings_in_lowest_geography_with_weights_file: "data/houses_with_weights.csv"
 
+  capa_cells_csv_path: "data/region_hanover_potentials.csv"
+  capa_cells_shp_path: "data/shapes/RH_useful__zone.SHP"
+
   shape_boundary_file: "data/shapes/Region Hannover.shp"
   tt_matrix_cells_file: "data/shapes/tt_matrix_cells.shp"
   tt_matrix_car_files:
-  - WELT
-  - STAAT
-  - STADTTLNR
-  - BAUBLOCKNR
-  - "data/tt_matrices/2017_01_01_00_00_00_car.csv"
-  tt_matrix_pt_files:
+    - "data/TTmatrices/hour_Min_0_Max 1car_travel_times.csv.gz"
+    - "data/TTmatrices/hour_Min_1_Max 2car_travel_times.csv.gz"
+    - "data/TTmatrices/hour_Min_2_Max 3car_travel_times.csv.gz"
+    - "data/TTmatrices/hour_Min_3_Max 4car_travel_times.csv.gz"
+    - "data/TTmatrices/hour_Min_4_Max 5car_travel_times.csv.gz"
+    - "data/TTmatrices/hour_Min_5_Max 6car_travel_times.csv.gz"
+    - "data/TTmatrices/hour_Min_6_Max 7car_travel_times.csv.gz"
+    - "data/TTmatrices/hour_Min_7_Max 8car_travel_times.csv.gz"
+    - "data/TTmatrices/hour_Min_8_Max 9car_travel_times.csv.gz"
+    - "data/TTmatrices/hour_Min_9_Max 10car_travel_times.csv.gz"
+    - "data/TTmatrices/hour_Min_10_Max 11car_travel_times.csv.gz"
+    - "data/TTmatrices/hour_Min_11_Max 12car_travel_times.csv.gz"
+    - "data/TTmatrices/hour_Min_12_Max 13car_travel_times.csv.gz"
+    - "data/TTmatrices/hour_Min_13_Max 14car_travel_times.csv.gz"
+    - "data/TTmatrices/hour_Min_14_Max 15car_travel_times.csv.gz"
+    - "data/TTmatrices/hour_Min_15_Max 16car_travel_times.csv.gz"
+    - "data/TTmatrices/hour_Min_16_Max 17car_travel_times.csv.gz"
+    - "data/TTmatrices/hour_Min_17_Max 18car_travel_times.csv.gz"
+    - "data/TTmatrices/hour_Min_18_Max 19car_travel_times.csv.gz"
+    - "data/TTmatrices/hour_Min_19_Max 20car_travel_times.csv.gz"
+    - "data/TTmatrices/hour_Min_20_Max 21car_travel_times.csv.gz"
+    - "data/TTmatrices/hour_Min_21_Max 22car_travel_times.csv.gz"
+    - "data/TTmatrices/hour_Min_22_Max 23car_travel_times.csv.gz"
+    - "data/TTmatrices/hour_Min_23_Max 24car_travel_times.csv.gz"
 
-  tt_matrix_walk_file:
-  tt_matrix_bike_file:
+  tt_matrix_pt_files:
+    - "data/TTmatrices/pt_hour_Min_0_Max pt_travel_times.csv.gz"
+    - "data/TTmatrices/pt_hour_Min_1_Max pt_travel_times.csv.gz"
+    - "data/TTmatrices/pt_hour_Min_2_Max pt_travel_times.csv.gz"
+    - "data/TTmatrices/pt_hour_Min_3_Max pt_travel_times.csv.gz"
+    - "data/TTmatrices/pt_hour_Min_4_Max pt_travel_times.csv.gz"
+    - "data/TTmatrices/pt_hour_Min_5_Max pt_travel_times.csv.gz"
+    - "data/TTmatrices/pt_hour_Min_6_Max pt_travel_times.csv.gz"
+    - "data/TTmatrices/pt_hour_Min_7_Max pt_travel_times.csv.gz"
+    - "data/TTmatrices/pt_hour_Min_8_Max pt_travel_times.csv.gz"
+    - "data/TTmatrices/pt_hour_Min_9_Max pt_travel_times.csv.gz"
+    - "data/TTmatrices/pt_hour_Min_10_Max pt_travel_times.csv.gz"
+    - "data/TTmatrices/pt_hour_Min_11_Max pt_travel_times.csv.gz"
+    - "data/TTmatrices/pt_hour_Min_12_Max pt_travel_times.csv.gz"
+    - "data/TTmatrices/pt_hour_Min_13_Max pt_travel_times.csv.gz"
+    - "data/TTmatrices/pt_hour_Min_14_Max pt_travel_times.csv.gz"
+    - "data/TTmatrices/pt_hour_Min_15_Max pt_travel_times.csv.gz"
+    - "data/TTmatrices/pt_hour_Min_16_Max pt_travel_times.csv.gz"
+    - "data/TTmatrices/pt_hour_Min_17_Max pt_travel_times.csv.gz"
+    - "data/TTmatrices/pt_hour_Min_18_Max pt_travel_times.csv.gz"
+    - "data/TTmatrices/pt_hour_Min_19_Max pt_travel_times.csv.gz"
+    - "data/TTmatrices/pt_hour_Min_20_Max pt_travel_times.csv.gz"
+    - "data/TTmatrices/pt_hour_Min_21_Max pt_travel_times.csv.gz"
+    - "data/TTmatrices/pt_hour_Min_22_Max pt_travel_times.csv.gz"
+    - "data/TTmatrices/pt_hour_Min_23_Max pt_travel_times.csv.gz"
+
+  tt_matrix_walk_file: "data/TTmatrices/walk_travel_times.csv"
+  tt_matrix_bike_file: "data/TTmatrices/bike_travel_times.csv"
 
   slack_factors_file: "data/slack_factors.csv"
 
@@ -131,4 +179,4 @@ value_maps: # Values may usually be left empty if they don't exist in the data
     first_leg_starts_at_home: 1
 
 misc:
-  dun_dun_duuun: 1 # Play sound on error
+  dun_dun_duuun: 0 # Play sound on error

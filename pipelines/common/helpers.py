@@ -73,20 +73,51 @@ def create_unique_leg_ids():
     logger.info(f"Created unique leg ids in {s.MiD_TRIPS_FILE}.")
 
 
+# def read_csv(csv_path: str, test_col=None, use_cols=None):
+#     """
+#     Read a csv file with unknown separator and return a dataframe.
+#     :param csv_path: Path to csv file.
+#     :param test_col: Column name that should be present in the file.
+#     :param use_cols: List of columns to use from the file. Defaults to all columns.
+#     """
+#     try:
+#         df = pd.read_csv(csv_path, sep=',', usecols=use_cols)
+#         if test_col is not None:
+#             test = df[test_col]
+#     except (KeyError, ValueError):  # Sometimes also throws without test_col, when the file is not comma-separated. This is good.
+#         logger.info(f"ID column '{test_col}' not found in {csv_path}, trying to read as ';' separated file...")
+#         df = pd.read_csv(csv_path, sep=';', usecols=use_cols)
+#         try:
+#             if test_col is not None:
+#                 test = df[test_col]
+#         except (KeyError, ValueError):
+#             logger.error(f"ID column '{test_col}' still not found in {csv_path}, verify column name and try again.")
+#             raise
+#         logger.info("Success.")
+#     return df
+
+
 def read_csv(csv_path: str, test_col=None, use_cols=None):
     """
     Read a csv file with unknown separator and return a dataframe.
+    Also works for gzipped files.
     :param csv_path: Path to csv file.
     :param test_col: Column name that should be present in the file.
     :param use_cols: List of columns to use from the file. Defaults to all columns.
     """
     try:
-        df = pd.read_csv(csv_path, sep=',', usecols=use_cols)
+        if csv_path.endswith('.gz'):
+            df = pd.read_csv(gzip.open(csv_path), sep=',', usecols=use_cols)
+        else:
+            df = pd.read_csv(csv_path, sep=',', usecols=use_cols)
         if test_col is not None:
             test = df[test_col]
     except (KeyError, ValueError):  # Sometimes also throws without test_col, when the file is not comma-separated. This is good.
         logger.info(f"ID column '{test_col}' not found in {csv_path}, trying to read as ';' separated file...")
-        df = pd.read_csv(csv_path, sep=';', usecols=use_cols)
+        if csv_path.endswith('.gz'):
+            df = pd.read_csv(gzip.open(csv_path), sep=';', usecols=use_cols)
+        else:
+            df = pd.read_csv(csv_path, sep=';', usecols=use_cols)
         try:
             if test_col is not None:
                 test = df[test_col]
@@ -297,35 +328,53 @@ def summarize_slack_factors(slack_df):
     return summary_df
 
 
-def calculate_travel_time_matrix(cells_gdf, speed):
+def calculate_travel_time_matrix(cells_gdf, speed, detour_factor=1.3):
     """
     Constructs a travel time matrix for teleported modes (e.g. walk, bike).
 
     :param cells_gdf: GeoDataFrame with cells.
-    :param speed: Movement speed in units per second.
+    :param speed: Movement speed in meters per second.
+    :param detour_factor: Factor by which the distance is multiplied.
     :return: DataFrame with columns FROM, TO, VALUE (travel time in seconds).
     """
     # Calculate the center of each cell
+    ensure_crs(cells_gdf)
     centers = cells_gdf.geometry.centroid
+    effective_speed = speed / detour_factor
 
-    # Prepare data for the DataFrame
     from_list = []
     to_list = []
     value_list = []
 
     # Calculate distances and travel times
     for i, from_point in enumerate(centers):
+        logger.debug(f"Calculating travel times for cell {i} of {len(centers)}...")
         for j, to_point in enumerate(centers):
             distance = from_point.distance(to_point)  # Distance between centers
-            travel_time = distance / speed  # Convert distance to time
-            from_list.append(cells_gdf.iloc[i].name)  # TODO: Check identifier
-            to_list.append(cells_gdf.iloc[j].name)
+            travel_time = distance / effective_speed
+            from_list.append(cells_gdf.iloc[i]["NAME"])
+            to_list.append(cells_gdf.iloc[j]["NAME"])
             value_list.append(travel_time)
 
     # Create the DataFrame
     travel_time_df = pd.DataFrame({'FROM': from_list, 'TO': to_list, 'VALUE': value_list})
 
     return travel_time_df
+
+
+def ensure_crs(gdf: gpd.GeoDataFrame, crs: str = 'EPSG:25832') -> gpd.GeoDataFrame:
+    """
+    Ensure the coordinate system of a GeoDataFrame is of a certain type.
+
+    :param gdf: Input GeoDataFrame.
+    :param crs: Coordinate reference system to transform to. Default is 'EPSG:32632' (UTM32N).
+    :return: GeoDataFrame with transformed coordinate system.
+    """
+    if gdf.crs != crs:
+        logger.info(f"Converting GeoDataFrame from {gdf.crs} to {crs}...")
+        return gdf.to_crs(crs)
+    logger.info(f"GeoDataFrame already in {crs}, skipping conversion.")
+    return gdf
 
 
 class SlackFactors:
@@ -423,38 +472,58 @@ class SlackFactors:
         """
         df, highest_level = self.get_all_estimated_times_with_slack(leg_chain)
 
-        # Highest level to including level 1
-        for level in range(highest_level, 0, -1):
-            # Adjust for every higher-level leg
-            for i, row in df.iterrows():
-                # Check if there are non-NaN values to the right of the current leg in the higher-level columns
-                # This means the leg already belongs to another higher-level leg ;(
-                if df.loc[i, f'level_{level + 1}':].notna().any():
-                    continue
+        # Find the index of the row you want to modify
+        highest_lvl_leg_index = df[df[f'level_{highest_level}'].notna()].index
 
-                # Find the first non-NaN values below the current row in the lower-level column
-                lower_level_legs = df.loc[i:, f'level_{level}'].dropna()
+        # Check if the number of rows is exactly 1
+        if len(highest_lvl_leg_index) != 1:
+            logger.error(f"Expected 1 leg in highest level, found {len(highest_lvl_leg_index)}.")
+        else:
+            df.at[highest_lvl_leg_index[0], f'level_{highest_level}'] = real_total_time
 
-                # If there are two legs below the current leg, apply the formula
-                if len(lower_level_legs) == 2:
-                    leg1 = lower_level_legs.iloc[0]
-                    leg2 = lower_level_legs.iloc[1]
-                    delta_L_high = real_total_time - df.loc[i, f'level_{level + 1}']
+        lower_bound = df.at[highest_lvl_leg_index[0], f'level_{highest_level}_lower_bound']
+        upper_bound = df.at[highest_lvl_leg_index[0], f'level_{highest_level}_upper_bound']
 
-                    L_bounds1 = df.loc[i, f'level_{level}_lower_bound']
-                    L_bounds2 = df.loc[i, f'level_{level}_lower_bound']
+        if lower_bound < real_total_time < upper_bound:
+            logger.debug(f"Real total time is within bounds of highest level.")
+            return df, highest_level
+        else:
+            logger.debug(f"Real total time is outside bounds of highest level, adjusting...")
+            return df, highest_level  # For now...
+            # Highest level to including level 1
+            # for level in range(highest_level, 0, -1):
+            #     # Adjust for every higher-level leg
+            #     for i, row in df.iterrows():
+            #         if df.loc[i, f'level_{level}'].isna():
+            #             continue
+            #         # # Check if there are non-NaN values to the right of the current leg in the higher-level columns
+            #         # # This means the leg already belongs to another higher-level leg ;(
+            #         # if df.loc[i, f'level_{level + 1}':].notna().any():
+            #         #     continue
+            #
+            #         # Find the first non-NaN values below the current row in the lower-level column
+            #         lower_level_legs = df.loc[i:, f'level_{level}'].dropna()
+            #
+            #         # If there are two legs below the current leg, apply the formula
+            #         if len(lower_level_legs) == 2:
+            #             leg1 = lower_level_legs.iloc[0]
+            #             leg2 = lower_level_legs.iloc[1]
+            #             delta_L_high = real_total_time - df.loc[i, f'level_{level + 1}']
+            #
+            #             L_bounds1 = df.loc[i, f'level_{level}_lower_bound']
+            #             L_bounds2 = df.loc[i, f'level_{level}_lower_bound']
+            #
+            #             L_high = df.loc[i, f'level_{level + 1}']
+            #
+            #             delta_L1 = (L_bounds1 * delta_L_high * (leg1 + leg2) ** 2) / (L_high * (leg1 * L_bounds1 + leg2 * L_bounds2))
+            #             delta_L2 = (L_bounds2 * delta_L_high * (leg1 + leg2) ** 2) / (L_high * (leg1 * L_bounds1 + leg2 * L_bounds2))
+            #
+            #             df.loc[i, f'level_{level}'] += delta_L1
+            #             df.loc[i + 1, f'level_{level}'] += delta_L2
+            #
+            # return df
 
-                    L_high = df.loc[i, f'level_{level + 1}']
-
-                    delta_L1 = (L_bounds1 * delta_L_high * (leg1 + leg2) ** 2) / (L_high * (leg1 * L_bounds1 + leg2 * L_bounds2))
-                    delta_L2 = (L_bounds2 * delta_L_high * (leg1 + leg2) ** 2) / (L_high * (leg1 * L_bounds1 + leg2 * L_bounds2))
-
-                    df.loc[i, f'level_{level}'] += delta_L1
-                    df.loc[i + 1, f'level_{level}'] += delta_L2
-
-        return df
-
-    def solve_level(self, leg_chain, level):  # TODO: finish
+    def solve_level(self, leg_chain, level):
         """
         Adds a column for given level of slack factor calculation, containing the time with slack of all legs up to and
         including the entry. For better performance, keep the number of columns to a minimum.
@@ -482,6 +551,8 @@ class SlackFactors:
         for pair_id, group in legs_to_process.groupby('pair_id'):
             if len(group) == 1:
                 time = group.iloc[0][times_col]
+                upper_bound = time
+                lower_bound = time
             else:
                 time = self.calculate_expected_time_with_slack(group.iloc[0][times_col],
                                                                group.iloc[1][times_col],
@@ -489,7 +560,12 @@ class SlackFactors:
                                                                group.iloc[0][s.LEG_TO_ACTIVITY_COL],
                                                                group.iloc[1][s.LEG_TO_ACTIVITY_COL])
 
+                upper_bound = (group.iloc[0][times_col] + group.iloc[1][times_col])
+                lower_bound = (abs(group.iloc[0][times_col] - group.iloc[1][times_col]))
+
             leg_chain.loc[group['original_index'].iloc[-1], f"level_{level + 1}"] = time
+            leg_chain.loc[group['original_index'].iloc[-1], f"level_{level + 1}_upper_bound"] = upper_bound
+            leg_chain.loc[group['original_index'].iloc[-1], f"level_{level + 1}_lower_bound"] = lower_bound
 
         return leg_chain
 
@@ -528,19 +604,19 @@ class TTMatrices:
             if mode in ['bike', 'walk']:
                 if len(matrices) != 1:
                     logger.warning(f"Expected 1 {mode} matrix, found {len(matrices)}")
-                for df in matrices.values():
-                    if not {'FROM', 'TO', 'VALUE'}.issubset(df.columns):
-                        raise ValueError(f"Invalid {mode} matrix. Columns must include FROM, TO, VALUE.")
-                    if len(df) != tt_rows_num:
-                        raise ValueError(f"Invalid {mode} matrix. Number of rows must be {tt_rows_num}.")
+                # for df in matrices.values():
+                #     if not {'FROM', 'TO', 'VALUE'}.issubset(df.columns):
+                #         raise ValueError(f"Invalid {mode} matrix. Columns must include FROM, TO, VALUE.")
+                #     if len(df) != tt_rows_num:
+                #         raise ValueError(f"Invalid {mode} matrix. Number of rows must be {tt_rows_num}.")
             else:
                 if len(matrices) != 24:
                     logger.warning(f"Expected 24 {mode} matrices, found {len(matrices)}")
-                for df in matrices.values():
-                    if not {'FROM', 'TO', 'VALUE'}.issubset(df.columns):
-                        raise ValueError(f"Invalid {mode} matrix. Columns must include FROM, TO, VALUE.")
-                    if len(df) != tt_rows_num:
-                        raise ValueError(f"Invalid {mode} matrix. Number of rows must be {tt_rows_num}.")
+                # for df in matrices.values():
+                #     if not {'FROM', 'TO', 'VALUE'}.issubset(df.columns):
+                #         raise ValueError(f"Invalid {mode} matrix. Columns must include FROM, TO, VALUE.")
+                #     if len(df) != tt_rows_num:
+                #         raise ValueError(f"Invalid {mode} matrix. Number of rows must be {tt_rows_num}.")
 
         logger.info(f"Loaded travel time matrices for {len(self.tt_matrices['car'])} hours.")
 
@@ -551,17 +627,25 @@ class TTMatrices:
         :param hour: 0 - 23
         :return:
         """
+        if mode == "ride":
+            mode = "car"
         if mode not in ['car', 'pt', 'bike', 'walk']:
-            raise ValueError("Invalid mode. Choose from 'car', 'pt', 'bike', 'walk'.")
+            logger.error(f"Invalid mode: {mode}. Choices are 'car', 'pt', 'bike', 'walk'.")
+            return self.tt_matrices['walk']
 
         if mode in ['car', 'pt']:
             if hour is None:
-                raise ValueError(f"Hour must be specified for mode {mode}.")
+                logger.error(f"Hour must be specified for mode {mode}. Returning walk matrix.")
+                return self.tt_matrices["walk"]
             return self.tt_matrices[mode].get(str(hour))
 
         return self.tt_matrices[mode]
 
     def get_weighted_tt_matrix_two_modes(self, mode1, weight1, mode2, weight2, hour=None):
+
+        total_weight = weight1 + weight2
+        weight1 = weight1 / total_weight
+        weight2 = weight2 / total_weight
 
         tt_matrix1 = self.get_tt_matrix(mode1, hour)
         tt_matrix2 = self.get_tt_matrix(mode2, hour)
@@ -585,12 +669,13 @@ class TTMatrices:
 
         for mode, weight in mode_weights.items():
             tt_matrix = self.get_tt_matrix(mode, hour)
-            weighted_matrix = tt_matrix * (weight / total_weight)
+            weighted_matrix = tt_matrix['VALUE'] * (weight / total_weight)
 
             if weighted_tt_matrix is None:
-                weighted_tt_matrix = weighted_matrix
+                weighted_tt_matrix = tt_matrix
+                weighted_tt_matrix['VALUE'] = weighted_matrix
             else:
-                weighted_tt_matrix += weighted_matrix
+                weighted_tt_matrix['VALUE'] += weighted_matrix
 
         return weighted_tt_matrix
 
@@ -604,8 +689,11 @@ class TTMatrices:
         :param hour: Hour of the day for modes with time-dependent matrices (car, pt). 0-23.
         :return: Travel time between the two cells.
         """
+        if mode == "ride":
+            mode = "car"
         if mode not in ['car', 'pt', 'bike', 'walk']:
-            raise ValueError("Invalid mode. Choose from 'car', 'pt', 'bike', 'walk'.")
+            logger.error(f"Invalid mode: {mode}. Choices are 'car', 'pt', 'bike', 'walk'.")
+            return 20
 
         tt_matrix = self.get_tt_matrix(mode, hour)
 
@@ -620,17 +708,36 @@ class TTMatrices:
 
         return travel_time
 
+    def get_mode_weighted_travel_time(self, cell_from, cell_to, mode_weights: Dict[str, float], hour: int = None):
+        travel_time = None
+        total_weight = sum(mode_weights.values())
+
+        for mode, weight in mode_weights.items():
+            time = self.get_travel_time(cell_from, cell_to, mode, hour)
+            weighted_time = time * (weight / total_weight)
+
+            if travel_time is None:
+                travel_time = weighted_time
+            else:
+                travel_time += weighted_time
+
+        return travel_time
+
 
 def sigmoid(x, beta, delta_T):
     """
     Sigmoid function for likelihood calculation.
 
-    :param x: The input value (time differential).
+    :param x: The input value (time differential) - can be a number, list, or numpy array.
     :param beta: Controls the steepness of the sigmoid's transition.
     :param delta_T: The midpoint of the sigmoid's transition.
     :return: Sigmoid function value.
     """
-    return 1 / (1 + np.exp(-beta * (x - delta_T)))
+    x = np.array(x)  # Ensure x is a numpy array
+    z = -beta * (x - delta_T)
+    # Use np.clip to limit the values in z to avoid overflow
+    z = np.clip(z, -500, 500)
+    return 1 / (1 + np.exp(z))
 
 
 def check_distance(leg_to_find, leg_to_compare):
@@ -733,40 +840,54 @@ class Capacities:
     """
 
     def __init__(self, capa_cells_shp_path: str = None, capa_points_shp_path: str = None, capa_cells_csv_path: str = None,
-                 capa_points_csv_path: str = None):
+                 capa_points_csv_path: str = None):  # TODO: add this flexibility, else remove from thesis
 
         logger.info("Initializing capacities...")
-        if capa_points_shp_path is not None:
-            if capa_cells_shp_path is not None:
-                self.capa_points_gdf = gpd.read_file(capa_points_shp_path)
-                self.capa_cells_gdf = gpd.read_file(capa_cells_shp_path)
-                self.capa_points_gdf = distribute_by_weights(self.capa_points_gdf, self.capa_cells_gdf, 'cell_id')
-            elif capa_cells_csv_path is not None:
-                self.capa_points_gdf = gpd.read_file(capa_points_shp_path)
-                self.capa_cells_df = read_csv(capa_cells_csv_path)
-                self.capa_points_gdf = distribute_by_weights(self.capa_points_gdf, self.capa_cells_df, 'cell_id')
-            else:
-                self.capa_points_gdf = gpd.read_file(capa_points_shp_path)
+        # if capa_points_shp_path is not None:
+        #     if capa_cells_shp_path is not None:
+        #         self.capa_points_gdf = gpd.read_file(capa_points_shp_path)
+        #         self.capa_cells_gdf = gpd.read_file(capa_cells_shp_path)
+        #         self.capa_points_gdf = distribute_by_weights(self.capa_points_gdf, self.capa_cells_gdf, 'cell_id')
+        #     elif capa_cells_csv_path is not None:
+        #         self.capa_points_gdf = gpd.read_file(capa_points_shp_path)
+        #         self.capa_cells_df = read_csv(capa_cells_csv_path)
+        #         self.capa_points_gdf = distribute_by_weights(self.capa_points_gdf, self.capa_cells_df, 'cell_id')
+        #     else:
+        #         self.capa_points_gdf = gpd.read_file(capa_points_shp_path)
+        #
+        # elif capa_cells_shp_path is not None:
+        #     if capa_points_csv_path is not None:
+        #         self.capa_cells_gdf = gpd.read_file(capa_cells_shp_path)
+        #         self.capa_points_df = read_csv(capa_points_csv_path)
+        #         self.capa_points_df['geometry'] = self.capa_points_df['geometry'].apply(shapely.wkt.loads)
+        #         self.capa_points_gdf = gpd.GeoDataFrame(self.capa_points_df, geometry='geometry')
+        #         self.capa_points_gdf.crs = self.capa_cells_gdf.crs
+        #         self.capa_points_gdf = distribute_by_weights(self.capa_points_gdf, self.capa_cells_gdf, 'cell_id')
+        #     else:
+        #         self.capa_cells_gdf = gpd.read_file(capa_cells_shp_path)
+        #         self.capa_points_gdf = self.capa_cells_gdf.copy()
+        #         self.capa_points_gdf['geometry'] = self.capa_points_gdf['geometry'].apply(random_point_in_polygon)
+        #
+        # else:
+        #     raise ValueError("Either capa_points_shp_path or capa_cells_shp_path must be given.")
+        # logger.info(f"Created capacity_gdf for {len(self.capa_points_gdf)} points.")
 
-        elif capa_cells_shp_path is not None:
-            if capa_points_csv_path is not None:
-                self.capa_cells_gdf = gpd.read_file(capa_cells_shp_path)
-                self.capa_points_df = read_csv(capa_points_csv_path)
-                self.capa_points_df['geometry'] = self.capa_points_df['geometry'].apply(shapely.wkt.loads)
-                self.capa_points_gdf = gpd.GeoDataFrame(self.capa_points_df, geometry='geometry')
-                self.capa_points_gdf.crs = self.capa_cells_gdf.crs
-                self.capa_points_gdf = distribute_by_weights(self.capa_points_gdf, self.capa_cells_gdf, 'cell_id')
-            else:
-                self.capa_cells_gdf = gpd.read_file(capa_cells_shp_path)
-                self.capa_points_gdf = self.capa_cells_gdf.copy()
-                self.capa_points_gdf['geometry'] = self.capa_points_gdf['geometry'].apply(random_point_in_polygon)
+        # Load cells
+        # if capa_cells_shp_path is None:
+        #     capa_cells_shp_path = s.CAPA_CELLS_SHP_PATH
+        if capa_cells_csv_path is None:
+            capa_cells_csv_path = s.CAPA_CELLS_CSV_PATH
+        # self.capa_cells_gdf = gpd.read_file(capa_cells_shp_path, usecols=["NAME"])
+        self.capa_csv_df = read_csv(capa_cells_csv_path)
 
-        else:
-            raise ValueError("Either capa_points_shp_path or capa_cells_shp_path must be given.")
-        logger.info(f"Created capacity_gdf for {len(self.capa_points_gdf)} points.")
+        # ensure_crs(self.capa_cells_gdf)
+        #
+        # # Add the cols from the csv to the gdf
+        # for col in self.capa_csv_df.columns:
+        #     if col not in self.capa_cells_gdf.columns:
+        #         self.capa_cells_gdf[col] = self.capa_csv_df[col]
 
         self.translate_and_split_potentials()
-        self.round_capacities()  # Round point capacities to integers
 
         logger.info("Initialized capacities.")
 
@@ -774,40 +895,40 @@ class Capacities:
         logger.info("Translating capacities...")
         if translation_dict is None:
             translation_dict = {
-                "Jobs Teilzeit": {"work": 1},
-                "Jobs Vollzeit hohe Widerstandsempfindlichkeit": {"work": 1},
-                "Jobs Vollzeit (AV+AF)": {"work": 1},
-                "Einwohner": {"home": 0.99, "meetup": 0.01},
-                "Zielpotenzial periodischer Bedarf, Einwohner": {"shopping": 0.8, "errands": 0.2},
-                "Kitaplätze+Schulplätze+Ärzte+Einwohner": {"early_education": 0.5, "education": 0.5},
-                "Berufsschulplätze": {"education": 1},
-                "Zielpotenzial aperiodischer zentrenrelevanter Bedarf": {"business": 0.1, "shopping": 0.9},
-                "Zielpotenzial aperiodischer Bedarf (EA+EB+EM)": {"shopping": 1},
-                "Zielpotenzial Baumarkt, Kfz-Handel etc.": {"shopping": 1},
-                "Zielpotenzial Möbelhäuser": {"shopping": 1},
-                "Zielpotenzial periodischer Bedarf": {"shopping": 0.8, "errands": 0.2},
-                "Zielpotenzial Natur": {"leisure": 1},
-                "Zielpotenzial Gastronomie": {"leisure": 0.7, "meetup": 0.3},
-                "Grundschulplätze": {"early_education": 1},
-                "Studienplätze": {"education": 1},
-                "Kitaplätze": {"daycare": 1},
-                "Zielpotenzial Theater/Kino/Stadion": {"leisure": 1},
-                "Ärzte, Krankenhäuser": {"errands": 1},
-                "Zielpotenzial Post/Bank/Behörde/VHS": {"errands": 0.8, "business": 0.1, "lessons": 0.1},
-                "Schulplätze SEK I": {"education": 1},
-                "Schulplätze SEK II": {"education": 1},
-                "Beschäftigte DL + Zielpotenzial Private Erledigungen": {"work": 0.5, "errands": 0.5},
-                "Zielpotenzial Sport": {"sports": 1},
-                "Schulplätze SEK I+II": {"education": 1},
-                "SG_WSC": {"unspecified": 1}
+                "ID2020_~20": {"1": 1},
+                "ID2020_~21": {"1": 1},
+                "ID2020_~22": {"1": 1},
+                "ID2020_~23": {"15": 0.01},
+                "ID2020_~24": {"4": 0.8, "5": 0.2},
+                "ID2020_~25": {"11": 0.5, "3": 0.5},
+                "ID2020_~26": {"3": 1},
+                "ID2020_~27": {"2": 0.1, "4": 0.9},
+                "ID2020_~28": {"4": 1},
+                "ID2020_~29": {"4": 1},
+                "ID2020_~30": {"4": 1},
+                "ID2020_~31": {"4": 0.8, "5": 0.2},
+                "ID2020_~32": {"7": 1},
+                "ID2020_~33": {"7": 0.7, "15": 0.3},
+                "ID2020_~34": {"11": 1},
+                "ID2020_~35": {"3": 1},
+                "ID2020_~36": {"12": 1},
+                "ID2020_~37": {"7": 1},
+                "ID2020_~38": {"5": 1},
+                "ID2020_~39": {"5": 0.8, "2": 0.1, "16": 0.1},
+                "ID2020_~40": {"3": 1},
+                "ID2020_~41": {"3": 1},
+                "ID2020_~42": {"1": 0.5, "5": 0.5},
+                "ID2020_~43": {"14": 1},
+                "ID2020_~44": {"3": 1},
             }
 
         for original_col, translations in translation_dict.items():
             for new_col, weight in translations.items():
-                if new_col not in self.capa_points_gdf.columns:
-                    self.capa_points_gdf[new_col] = np.nan
-                self.capa_points_gdf[new_col] += self.capa_points_gdf[original_col].fillna(0) * weight
-            self.capa_points_gdf.drop(columns=[original_col], inplace=True)
+                if new_col not in self.capa_csv_df.columns:
+                    self.capa_csv_df[new_col] = 0
+                print(self.capa_csv_df[original_col])
+                self.capa_csv_df[new_col] += self.capa_csv_df[original_col].fillna(0) * weight
+            self.capa_csv_df.drop(columns=[original_col], inplace=True)
 
         logger.info("Translated capacities.")
 
@@ -816,31 +937,98 @@ class Capacities:
         Round the capacities while preserving the sum.
         """
         logger.info("Rounding capacities to integers while preserving the sum...")
-        for col in self.capa_points_gdf.columns:
+        for col in self.capa_csv_df.columns:
             # Skip non-numeric columns
-            if not pd.api.types.is_numeric_dtype(self.capa_points_gdf[col]):
+            if not pd.api.types.is_numeric_dtype(self.capa_csv_df[col]):
                 continue
 
             # Calculate the sum before rounding
-            sum_before_rounding = self.capa_points_gdf[col].sum()
+            sum_before_rounding = self.capa_csv_df[col].sum()
 
             # Round down the values in the column and keep track of the decimal part
-            self.capa_points_gdf[col], decimal_part = divmod(self.capa_points_gdf[col], 1)
+            self.capa_csv_df[col], decimal_part = divmod(self.capa_csv_df[col], 1)
 
             # Calculate the difference between the sum before rounding and the sum after rounding
-            diff = sum_before_rounding - self.capa_points_gdf[col].sum()
+            diff = sum_before_rounding - self.capa_csv_df[col].sum()
 
             # Adjust the rounded values to preserve the sum
             while diff > 0:
                 # Find the index of the maximum decimal part
                 idx_max_decimal = decimal_part.idxmax()
                 # Add 1 to the corresponding value in the DataFrame
-                self.capa_points_gdf.loc[idx_max_decimal, col] += 1
+                self.capa_csv_df.loc[idx_max_decimal, col] += 1
                 # Subtract 1 from the corresponding value in the decimal part Series
                 decimal_part.loc[idx_max_decimal] -= 1
                 # Subtract 1 from the difference
                 diff -= 1
         logger.info("Rounded capacities.")
+
+    def get_capacity(self, activity_type, cell_name):
+        """
+        Get a capacity value from the GeoDataFrame based on the activity type and cell name.
+
+        :param activity_type: The type of activity.
+        :param cell_name: The name of the cell.
+        :return: The capacity value.
+        """
+        # Turn activity type into a string
+        try:
+            activity_type = str(int(activity_type))
+        except Exception:  # go on
+            logger.debug(f"Activity type {activity_type} was not converted.")
+
+        filtered_df = self.capa_csv_df[self.capa_csv_df['NAME'] == cell_name]
+
+        if filtered_df.empty:
+            return 0
+        try:
+            return filtered_df[activity_type].values[0]
+        except KeyError:
+            logger.debug(f"Invalid activity type for capacity: {activity_type}")
+            return 0
+
+    def decrement_capacity(self, activity_type, cell_name):
+        """
+        Decrements the capacity for a given activity type and cell.
+
+        :param activity_type: The type of activity.
+        :param cell_name: The name of the cell.
+        """
+        try:
+            activity_type = str(int(activity_type))
+        except Exception:  # go on
+            logger.debug(f"Activity type {activity_type} was not converted.")
+
+        if activity_type not in self.capa_csv_df.columns:
+            logger.debug(f"Invalid activity type for capacity: {activity_type}. Not decrementing.")
+            return
+
+        filtered_df = self.capa_csv_df[self.capa_csv_df['NAME'] == cell_name]
+
+        if not filtered_df.empty:
+            self.capa_csv_df.loc[self.capa_csv_df['NAME'] == cell_name, activity_type] -= 1
+        else:
+            logger.error(f"No capacity found for cell: {cell_name}. Not decrementing.")
+
+    def normalize_capacities(self, total_values):
+        """
+        Normalize the capacities for each activity type so that the sum for each activity type equals the corresponding total value.
+
+        :param total_values: A dictionary where the keys are the activity types and the values are the total capacities for each activity type.
+        """
+        logger.info("Normalizing capacities...")
+        # Convert all keys to int, then strings (from float)
+        total_values = {str(int(k)): v for k, v in total_values.items()}
+
+        # Normalize the individual capacities
+        for activity_type, total_value in total_values.items():
+            if activity_type in self.capa_csv_df.columns:
+                total_capacity = self.capa_csv_df[activity_type].sum()
+
+                # Normalize the capacities for the activity type
+                self.capa_csv_df[activity_type] = (self.capa_csv_df[activity_type] / total_capacity) * total_value
+        logger.info("Normalized capacities.")
+        self.round_capacities()  # Smart-round the capacities to ints while preserving the sum
 
 
 def convert_to_list(s):
@@ -857,3 +1045,93 @@ def convert_to_list(s):
         return json.loads(cleaned_string)
     except ValueError:
         return s
+
+
+def add_from_coord(df):
+    """
+    Add a 'from_activity' column to the DataFrame, which is the to_activity of the previous leg.
+    For the first leg of each person, set 'from_activity' based on 'starts_at_home' (-> home or unspecified).
+    :return:
+    """
+    logger.info("Adding/updating from_coord column...")
+    # Sort the DataFrame by person ID and leg number (the df should usually already be sorted this way)
+    df.sort_values(by=[s.UNIQUE_P_ID_COL, s.LEG_NON_UNIQUE_ID_COL], inplace=True)
+
+    # Shift the 'to_activity' down to create 'from_activity' for each group
+    df[s.COORD_FROM_COL] = df.groupby(s.PERSON_ID_COL)[s.COORD_TO_COL].shift(1)
+
+    # For the first leg of each person, set 'from_coord' to home coord
+    df.loc[(df[s.LEG_NON_UNIQUE_ID_COL] == 1), s.COORD_FROM_COL] = df.loc[(df[s.LEG_NON_UNIQUE_ID_COL] == 1), 'home_loc']
+
+    logger.info("Done.")
+    return df
+
+
+def add_from_cell(df):
+    """
+    Add a 'from_activity' column to the DataFrame, which is the to_activity of the previous leg.
+    For the first leg of each person, set 'from_activity' based on 'starts_at_home' (-> home or unspecified).
+    :return:
+    """
+    logger.info("Adding/updating from_coord column...")
+    # Sort the DataFrame by person ID and leg number (the df should usually already be sorted this way)
+    df.sort_values(by=[s.UNIQUE_P_ID_COL, s.LEG_NON_UNIQUE_ID_COL], inplace=True)
+
+    df[s.CELL_FROM_COL] = df.groupby(s.PERSON_ID_COL)[s.CELL_TO_COL].shift(1)
+
+    # For the first leg of each person, set 'from_cell' to home cell
+    df.loc[(df[s.LEG_NON_UNIQUE_ID_COL] == 1), s.CELL_FROM_COL] = df.loc[(df[s.LEG_NON_UNIQUE_ID_COL] == 1), s.HOME_CELL_COL]
+
+    logger.info("Done.")
+    return df
+
+
+def add_from_cell_fast(person):
+    """
+    Add/update 'from_activity', which is the to_activity of the previous leg.
+    For the first leg of each person, set 'from_activity' based on 'starts_at_home' (-> home or unspecified).
+    Only for a single person.
+    :return:
+    """
+    logger.debug("Adding/updating from_coord column for single person...")
+    # Sort the DataFrame by person ID and leg number (the df should usually already be sorted this way)
+    person.sort_values(by=[s.LEG_NON_UNIQUE_ID_COL], inplace=True)
+
+    person[s.CELL_FROM_COL] = person[s.CELL_TO_COL].shift(1)
+
+    # For the first leg of the person, set 'from_cell' to home cell
+    person.loc[(person[s.LEG_NON_UNIQUE_ID_COL] == 1), s.CELL_FROM_COL] = person.loc[
+        (person[s.LEG_NON_UNIQUE_ID_COL] == 1), s.HOME_CELL_COL]
+
+    return person
+
+
+def find_nan_chains(df, column_name):
+    """
+    Finds chains of consecutive NaN values in the specified column of a DataFrame.
+    Each chain includes the row directly after the NaN values.
+
+    :param df: The DataFrame to search for NaN chains.
+    :param column_name: The name of the column to check for NaN values.
+    :return: A list of DataFrames, each containing a NaN chain and the row after.
+    """
+    is_nan = df[column_name].isna()
+    starts_nan_chain = is_nan & (~is_nan.shift(fill_value=False))
+
+    start_indices = df[starts_nan_chain].index
+    chain_dfs = []
+
+    for start_idx in start_indices:
+        # Find the end of the NaN chain
+        end_idx = start_idx
+        while end_idx in df.index and pd.isna(df.loc[end_idx, column_name]):
+            end_idx += 1
+
+        if end_idx in df.index:
+            chain_df = df.loc[start_idx:end_idx]
+        else:  # If the NaN chain is at the end of the DataFrame
+            chain_df = df.loc[start_idx:end_idx - 1]
+
+        chain_dfs.append(chain_df)
+
+    return chain_dfs

@@ -17,11 +17,15 @@ MiD_HH_FILE = INPUT_FILES['mid_hh_file']
 MiD_PERSONS_FILE = INPUT_FILES['mid_persons_file']
 MiD_TRIPS_FILE = INPUT_FILES['mid_trips_file']
 BUILDINGS_IN_LOWEST_GEOGRAPHY_WITH_WEIGHTS_FILE = INPUT_FILES['buildings_in_lowest_geography_with_weights_file']
+ENHANCED_MID_FILE = INPUT_FILES['enhanced_mid_file']
 
 TT_MATRIX_CAR_FILES: list = INPUT_FILES['tt_matrix_car_files']
 TT_MATRIX_PT_FILES: list = INPUT_FILES['tt_matrix_pt_files']
 TT_MATRIX_WALK_FILE = INPUT_FILES['tt_matrix_walk_file']
 TT_MATRIX_BIKE_FILE = INPUT_FILES['tt_matrix_bike_file']
+
+CAPA_CELLS_CSV_PATH = INPUT_FILES['capa_cells_csv_path']
+CAPA_CELLS_SHP_PATH = INPUT_FILES['capa_cells_shp_path']
 
 SLACK_FACTORS_FILE = INPUT_FILES['slack_factors_file']
 
@@ -114,7 +118,6 @@ SAMPLE_SIZE = settings['sample_size']
 N_CLOSEST_CELLS = settings['n_closest_cells']
 DEFAULT_SLACK_FACTOR = settings['default_slack_factor']
 
-
 # Columns that are created by the enhancement pipeline
 ENHANCEMENT_COLUMNS = settings['enhancement_columns']
 RANDOM_LOCATION_COL = ENHANCEMENT_COLUMNS['random_location']
@@ -161,4 +164,13 @@ HH_HAS_CONNECTIONS_COL = "hh_has_connections"
 P_HAS_CONNECTIONS_COL = "p_has_connections"
 NUM_CONNECTED_LEGS_COL = "num_connected_legs"
 
+CELL_FROM_COL = "cell_from"
+CELL_TO_COL = "cell_to"
+
+COORD_FROM_COL = "coord_from"
+COORD_TO_COL = "coord_to"
+
+HOME_CELL_COL = "home_cell"
+
+MODE_TRANSLATED_COL = "mode_translated_string"
 

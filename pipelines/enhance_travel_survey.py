@@ -148,6 +148,8 @@ def enhance_travel_survey():
     # population.df[s.CONNECTED_LEGS_COL].apply(h.clean_string)
 
     population.close_connected_leg_groups()
+    population.mark_connected_persons_and_hhs()
+    population.count_connected_legs_per_person()
 
     population.adjust_mode_based_on_connected_legs()
     #
@@ -158,9 +160,6 @@ def enhance_travel_survey():
     population.update_number_of_legs(s.NUMBER_OF_LEGS_INCL_IMPUTED_COL)  # Writes new column
 
     population.apply_group_wise_rules([rules.is_protagonist], groupby_column=s.UNIQUE_HH_ID_COL)
-
-    # population.change_last_leg_activity_to_home()  # MOVE To main pipeline
-    population.list_cars_in_household()  # TESTING, should be in main pipeline
 
     population.mark_mirroring_main_activities()
 

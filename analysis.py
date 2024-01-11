@@ -227,7 +227,7 @@ def analyze_influence_on_slack(df):
 # ttdf2 = h.read_csv("data/TTmatrices/hour_Min_4_Max 5car_distances.csv", "FROM")
 # ttdf3= h.read_csv("data/TTmatrices/hour_Min_4_Max 5car_travel_times.csv", "FROM")
 # connections_df = h.read_csv("output/20240103_020348/leg_connections_logs.csv")  # TODO:repeat and check.
-enhanced_mid_df = h.read_csv("output/20240103_232445/full_population_frame.csv")
+enhanced_mid_df = h.read_csv("output/enhanced_frame_final.csv")
 #  mid_df = h.read_csv(s.MiD_TRIPS_FILE)  # TODO: check num of rows (enh: 999803)
 logger.info("Loaded DataFrame")
 # Filter out where time and distance are False
@@ -241,8 +241,13 @@ pop.check_for_merge_suffixes()
 ana = DataframeAnalysis(enhanced_mid_df)
 logger.info(f"Rows: {len(enhanced_mid_df)} Columns: {len(enhanced_mid_df.columns)}")
 vc_df = ana.df_value_counts()
-vc_df.to_csv("testdata/analyze/enhanced_mid_analysis.csv", index=False)
+vc_df.to_csv("testdata/analyze/enhanced_final_mid_analysis.csv", index=False)
 logger.info("Done")
+
+
+
+
+
 
 def plot_sigmoid():
     delta_T = 20

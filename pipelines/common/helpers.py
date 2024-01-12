@@ -384,6 +384,7 @@ class SlackFactors:
 
     def __init__(self, slack_factors_csv_path: str):
         self.slack_factors_df = read_csv(slack_factors_csv_path)
+        logger.info(f"Loaded slack factors from {slack_factors_csv_path}.")
 
     def get_slack_factor(self, activity_from: str, activity_via: str, activity_to: str) -> float:
         """
@@ -408,14 +409,15 @@ class SlackFactors:
     def calculate_expected_time_with_slack(self, time_from_start_to_via: float, time_from_via_to_end: float, activity_from: str,
                                            activity_via: str, activity_to: str) -> float:
         """
-        Calculates the expected time with slack for a given activity combination. Makes sure the returned time is plausible,
+        Calculates the expected time with slack for a given activity combination. Makes sure the returned time is plausible.
 
         """
         expected_time: float = ((time_from_start_to_via + time_from_via_to_end) /
                                 self.get_slack_factor(activity_from, activity_via, activity_to))
         time_diff = np.abs(time_from_start_to_via - time_from_via_to_end)
-        if expected_time < time_diff:  # this makes the trip impossible. We find a reasonable alternative:
-            logger.debug(f"Expected time is too low. Returning time difference plus half of the smaller time.")
+        time_sum = time_from_start_to_via + time_from_via_to_end
+        if expected_time < time_diff or expected_time > time_sum:  # this makes the trip impossible. We find a reasonable alternative:
+            logger.debug(f"Expected time is infeasible. Returning time difference plus half of the smaller time.")
             expected_time = time_diff + (min(time_from_start_to_via, time_from_via_to_end) / 2)
         return expected_time
 
@@ -451,10 +453,10 @@ class SlackFactors:
         len_times_col = leg_chain[times_col].notna().sum()
         if len_times_col == 0:
             logger.warning(f"Received empty DataFrame, returning unchanged.")
-            return leg_chain, level
+            return leg_chain, level + 1
         elif len_times_col == 1:
-            logger.debug(f"Received single leg, returning unchanged.")
-            return leg_chain, level
+            logger.warning(f"Received single leg, returning unchanged.")
+            return leg_chain, level + 1
         elif len_times_col == 2:
             logger.debug(f"Two legs remain to estimate, solving last level.")
             return self.solve_level(leg_chain, level), level + 1
@@ -473,13 +475,22 @@ class SlackFactors:
         df, highest_level = self.get_all_estimated_times_with_slack(leg_chain)
 
         # Find the index of the row you want to modify
-        highest_lvl_leg_index = df[df[f'level_{highest_level}'].notna()].index
+        if f'level_{highest_level}' in df.columns:
+            highest_lvl_leg_index = df[df[f'level_{highest_level}'].notna()].index
+        elif f'level_{highest_level - 1}' in df.columns:
+            highest_level = highest_level - 1
+            highest_lvl_leg_index = df[df[f'level_{highest_level}'].notna()].index
+        elif s.LEG_DURATION_MINUTES_COL in df.columns:
+            highest_level = 0
+            return df, highest_level
+        else:
+            raise ValueError(f"Could not find any column to adjust.")
 
         # Check if the number of rows is exactly 1
         if len(highest_lvl_leg_index) != 1:
             logger.error(f"Expected 1 leg in highest level, found {len(highest_lvl_leg_index)}.")
-        else:
-            df.at[highest_lvl_leg_index[0], f'level_{highest_level}'] = real_total_time
+
+        # df.at[highest_lvl_leg_index[0], f'level_{highest_level}'] = real_total_time # TODO: implement
 
         lower_bound = df.at[highest_lvl_leg_index[0], f'level_{highest_level}_lower_bound']
         upper_bound = df.at[highest_lvl_leg_index[0], f'level_{highest_level}_upper_bound']
@@ -1135,3 +1146,39 @@ def find_nan_chains(df, column_name):
         chain_dfs.append(chain_df)
 
     return chain_dfs
+
+
+def assign_points(df, shapefile_path, cell_name_column):
+    """
+    Assigns a random point within the cell of a shapefile to rows in the DataFrame.
+
+    Parameters:
+    df (DataFrame): The main DataFrame with a column containing cell names.
+    shapefile_path (str): Path to the shapefile.
+    cell_name_column (str): Column in both DataFrame and GeoDataFrame that contains cell names.
+
+    Returns:
+    DataFrame: The DataFrame with an additional column for random points.
+    """
+    # Read the shapefile
+    gdf = gpd.read_file(shapefile_path)
+
+    # Ensure that the cell name column exists in both DataFrame and GeoDataFrame
+    if cell_name_column not in df.columns or cell_name_column not in gdf.columns:
+        raise ValueError(f"Column '{cell_name_column}' must exist in both DataFrame and GeoDataFrame")
+
+    # Function to generate a random point within a cell
+    def random_point_in_cell(cell):
+        minx, miny, maxx, maxy = cell.bounds
+        while True:
+            pnt = Point(random.uniform(minx, maxx), random.uniform(miny, maxy))
+            if cell.contains(pnt):
+                return pnt
+
+    # Create a dictionary to map cell names to their geometries
+    cell_geometry_map = gdf.set_index(cell_name_column)['geometry'].to_dict()
+
+    # Assign random points to DataFrame rows
+    df['to_location_point'] = df[cell_name_column].apply(lambda x: random_point_in_cell(cell_geometry_map[x]) if x in cell_geometry_map else None)
+
+    return df

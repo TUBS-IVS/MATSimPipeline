@@ -3,7 +3,9 @@ import time
 import multiprocessing as mp
 
 import pandas as pd
+import geopandas as gpd
 import winsound
+from pipelines.common import rules
 
 from pipelines.common import helpers as h
 from pipelines.popsim_to_matsim_plans.main_activity_locator import ActivityLocator
@@ -30,120 +32,119 @@ def popsim_to_matsim_plans_main():
 
     logger.info(f"Starting popsim_to_matsim_plans pipeline")
 
-    # # Load data from PopSim, concat different PopSim results if necessary
-    # # Lowest level of geography must be named the same in all input files, if there are multiple
-    # population = PopulationFrameProcessor()
-    # for file in s.EXPANDED_HOUSEHOLDS_FILES:
-    #     population.load_df_from_csv(file, test_col=s.HOUSEHOLD_POPSIM_ID_COL, if_df_exists="concat")
-    #
-    # # SINGLE
-    # # Assign household points to households (random if there are no points in the household cell)
-    # # Expand enhanced mid file
-    #
-    # # Give households cells based on RH shapefile
-    #
-    # # Split file into chunks
-    # # MULTI
-    # # Do plan location assignment in parallel
-    #
-    # population.downsample_population(s.SAMPLE_SIZE)
-    #
-    # # Add household attributes from MiD
-    # # if s.HH_COLUMNS:
-    # #     population.add_csv_data_on_id(s.FILE, s.HH_COLUMNS, id_column=s.HOUSEHOLD_MID_ID_COL,
-    # #                                   drop_duplicates_from_source=True, delete_later=True)
-    # # logger.info(f"Population df after adding HH attributes: \n{population.df.head()}")
-    #
-    # # Distribute buildings to households (if PopSim assigned hhs to a larger geography)
-    # weights_df = h.read_csv(s.BUILDINGS_IN_LOWEST_GEOGRAPHY_WITH_WEIGHTS_FILE, s.LOWEST_LEVEL_GEOGRAPHY)
-    # population.distribute_by_weights(weights_df, s.LOWEST_LEVEL_GEOGRAPHY, True)  # "home_loc" is a col in this file
-    #
-    # # If "home_loc" is NaN after this, assign a random location within its cell (lowest level of geography)
-    # population.assign_random_location()  # TODO: Assign within their cell!
-    #
-    # # Where the "hom_loc" is NaN in the df, take the value from "random_loc"
-    # population.df["home_loc"] = population.df["home_loc"].fillna(population.df["random_point"])
-    #
-    # # Add/edit household-specific rule-based attributes
-    # population.apply_row_wise_rules([rules.home_loc, rules.unique_household_id])
-    #
-    # # Add all data of each household (increases the number of rows)
-    # population.add_csv_data_on_id(s.ENHANCED_MID_FILE, id_column=s.HOUSEHOLD_MID_ID_COL,
-    #                               drop_duplicates_from_source=False)
-    # logger.info(f"Population df after adding detailed data: \n{population.df.head()}")
-    #
-    # # Add/edit rule-based attributes
-    # apply_me = [rules.unique_person_id, rules.unique_leg_id]
-    # population.apply_row_wise_rules(apply_me)
-    #
-    # population.df[s.CONNECTED_LEGS_COL] = population.df[s.CONNECTED_LEGS_COL].apply(h.convert_to_list)
-    # population.df[s.LIST_OF_CARS_COL] = population.df[s.LIST_OF_CARS_COL].apply(h.convert_to_list)
-    #
-    # # Temp for testing
-    # logger.debug(f"Number of rows after adding detailed data: {len(population.df)}")
-    # logger.debug(f"Number of nan leg ids after adding detailed data: {population.df[s.LEG_ID_COL].isna().sum()}")
-    # logger.debug(
-    #     f"Number of legs called nan after adding detailed data: {len(population.df[population.df[s.LEG_ID_COL] == 'nan'])}")
-    # logger.debug(f"Number of empty leg ids after adding detailed data: {len(population.df[population.df[s.LEG_ID_COL] == ''])}")
-    # logger.debug(f"Number of unique leg ids after adding detailed data: {len(population.df[s.LEG_ID_COL].unique())}")
-    #
-    # # There might be people with 0 legs, meaning they didn't travel on the survey day - remove them.
-    # # All people where there are 0 legs for other reasons, e.g. because of missing data, must be removed in the inputs.
-    # # For MiD, all people with 0 legs can be assumed to not have travelled.
-    #
-    # population.df = population.df[population.df[s.LEG_ID_COL].notna()].reset_index()
-    #
-    # # Remove legs that are "regelmäßiger beruflicher Weg", commercial traffic (duration is marked as 70701.
-    # # Shouldn't be there anyway, but to make sure)
-    # population.filter_out_rows(s.LEG_DURATION_MINUTES_COL, [70701])
-    # # Remove imputed home legs, we don't use them here
-    # population.filter_out_rows(s.IMPUTED_LEG_COL, [1])
-    #
-    # # Convert time columns to datetime
-    # # population.convert_time_to_datetime([s.LEG_START_TIME_COL, s.LEG_END_TIME_COL])  # is already in that format from enhanced
-    # # population.convert_datetime_to_seconds([s.LEG_START_TIME_COL])
-    #
-    # population.df[s.LEG_START_TIME_COL] = pd.to_datetime(population.df[s.LEG_START_TIME_COL], format='ISO8601')
-    # population.df[s.LEG_END_TIME_COL] = pd.to_datetime(population.df[s.LEG_END_TIME_COL], format='ISO8601')
-    #
-    # population.change_last_leg_activity_to_home()
-    # population.list_cars_in_household()  # optional
-    #
-    # population.assign_random_location()
-    #
-    # # Set coord_to to home_loc for all legs where activity is home
-    # population.df.loc[population.df[s.LEG_TO_ACTIVITY_COL] == s.ACTIVITY_HOME, s.COORD_TO_COL] = (
-    #     population.df.loc)[population.df[s.LEG_TO_ACTIVITY_COL] == s.ACTIVITY_HOME, "home_loc"]
-    #
-    # # Set coord_from
-    # population.df = h.add_from_coord(population.df)
-    #
-    # # Assign each now known home coord a cell id using spatial join (make home cell col)
-    # population_gdf = gpd.GeoDataFrame(population.df, geometry="home_loc", crs="EPSG:25832")
-    #
-    # # Perform spatial join to find the cell each person is in
-    # cells_gdf = gpd.read_file(s.CAPA_CELLS_SHP_PATH)
-    # persons_with_cells = gpd.sjoin(population_gdf, cells_gdf, how="left", op="within").dropna(
-    #     subset=["NAME"])
-    # # Rename the cell id column s.HOME_CELL_COL (from "NAME")
-    # persons_with_cells.rename(columns={'NAME': s.HOME_CELL_COL}, inplace=True)
-    #
-    # # Check if there are persons without a cell
-    # missing_cells_count = len(population_gdf) - len(persons_with_cells)
-    # if missing_cells_count > 0:
-    #     logger.warning(f"{missing_cells_count} persons without a cell. They will be ignored.")
-    #
-    # # To_cell
-    # persons_with_cells.loc[persons_with_cells[s.LEG_TO_ACTIVITY_COL] == s.ACTIVITY_HOME, s.CELL_TO_COL] = (
-    #     persons_with_cells.loc)[persons_with_cells[s.LEG_TO_ACTIVITY_COL] == s.ACTIVITY_HOME, s.HOME_CELL_COL]
-    # # From_cell
-    # persons_with_cells = h.add_from_cell(persons_with_cells)
-    # persons_with_cells = pd.DataFrame(persons_with_cells)
-    # # keep only needed cols
-    # # persons_with_cells = persons_with_cells[]
-    #
-    # # <test>
-    # persons_with_cells.to_csv("testdata/persons_with_cells.csv", index=False)
+    # Load data from PopSim, concat different PopSim results if necessary
+    # Lowest level of geography must be named the same in all input files, if there are multiple
+    population = PopulationFrameProcessor()
+    for file in s.EXPANDED_HOUSEHOLDS_FILES:
+        population.load_df_from_csv(file, test_col=s.HOUSEHOLD_POPSIM_ID_COL, if_df_exists="concat")
+
+    # SINGLE
+    # Assign household points to households (random if there are no points in the household cell)
+    # Expand enhanced mid file
+
+    # Give households cells based on RH shapefile
+
+    # Split file into chunks
+    # MULTI
+    # Do plan location assignment in parallel
+
+    population.downsample_population(s.SAMPLE_SIZE)
+
+    # Add household attributes from MiD
+    # if s.HH_COLUMNS:
+    #     population.add_csv_data_on_id(s.FILE, s.HH_COLUMNS, id_column=s.HOUSEHOLD_MID_ID_COL,
+    #                                   drop_duplicates_from_source=True, delete_later=True)
+    # logger.info(f"Population df after adding HH attributes: \n{population.df.head()}")
+
+    # Distribute buildings to households (if PopSim assigned hhs to a larger geography)
+    weights_df = h.read_csv(s.BUILDINGS_IN_LOWEST_GEOGRAPHY_WITH_WEIGHTS_FILE, s.LOWEST_LEVEL_GEOGRAPHY)
+    population.distribute_by_weights(weights_df, s.LOWEST_LEVEL_GEOGRAPHY, True)  # "home_loc" is a col in this file
+
+    # If "home_loc" is NaN after this, assign a random location within its cell (lowest level of geography)
+    population.assign_random_location()  # TODO: Assign within their cell!
+
+    # Where the "hom_loc" is NaN in the df, take the value from "random_loc"
+    population.df["home_loc"] = population.df["home_loc"].fillna(population.df["random_point"])
+
+    # Add/edit household-specific rule-based attributes
+    population.apply_row_wise_rules([rules.home_loc, rules.unique_household_id])
+
+    # Add all data of each household (increases the number of rows)
+    population.add_csv_data_on_id(s.ENHANCED_MID_FILE, id_column=s.HOUSEHOLD_MID_ID_COL,
+                                  drop_duplicates_from_source=False)
+    logger.info(f"Population df after adding detailed data: \n{population.df.head()}")
+
+    # Add/edit rule-based attributes
+    apply_me = [rules.unique_person_id, rules.unique_leg_id]
+    population.apply_row_wise_rules(apply_me)
+
+    population.df[s.CONNECTED_LEGS_COL] = population.df[s.CONNECTED_LEGS_COL].apply(h.convert_to_list)
+    population.df[s.LIST_OF_CARS_COL] = population.df[s.LIST_OF_CARS_COL].apply(h.convert_to_list)
+
+    # Temp for testing
+    logger.debug(f"Number of rows after adding detailed data: {len(population.df)}")
+    logger.debug(f"Number of nan leg ids after adding detailed data: {population.df[s.LEG_ID_COL].isna().sum()}")
+    logger.debug(
+        f"Number of legs called nan after adding detailed data: {len(population.df[population.df[s.LEG_ID_COL] == 'nan'])}")
+    logger.debug(f"Number of empty leg ids after adding detailed data: {len(population.df[population.df[s.LEG_ID_COL] == ''])}")
+    logger.debug(f"Number of unique leg ids after adding detailed data: {len(population.df[s.LEG_ID_COL].unique())}")
+
+    # There might be people with 0 legs, meaning they didn't travel on the survey day - remove them.
+    # All people where there are 0 legs for other reasons, e.g. because of missing data, must be removed in the inputs.
+    # For MiD, all people with 0 legs can be assumed to not have travelled.
+
+    population.df = population.df[population.df[s.LEG_ID_COL].notna()].reset_index()
+
+    # Remove legs that are "regelmäßiger beruflicher Weg", commercial traffic (duration is marked as 70701.
+    # Shouldn't be there anyway, but to make sure)
+    population.filter_out_rows(s.LEG_DURATION_MINUTES_COL, [70701])
+    # Remove imputed home legs, we don't use them here
+    population.filter_out_rows(s.IMPUTED_LEG_COL, [1])
+
+    # Convert time columns to datetime
+    # population.convert_time_to_datetime([s.LEG_START_TIME_COL, s.LEG_END_TIME_COL])  # is already in that format from enhanced
+    # population.convert_datetime_to_seconds([s.LEG_START_TIME_COL])
+
+    population.df[s.LEG_START_TIME_COL] = pd.to_datetime(population.df[s.LEG_START_TIME_COL], format='ISO8601')
+    population.df[s.LEG_END_TIME_COL] = pd.to_datetime(population.df[s.LEG_END_TIME_COL], format='ISO8601')
+
+    population.change_last_leg_activity_to_home()
+
+    population.assign_random_location()
+
+    # Set coord_to to home_loc for all legs where activity is home
+    population.df.loc[population.df[s.LEG_TO_ACTIVITY_COL] == s.ACTIVITY_HOME, s.COORD_TO_COL] = (
+        population.df.loc)[population.df[s.LEG_TO_ACTIVITY_COL] == s.ACTIVITY_HOME, "home_loc"]
+
+    # Set coord_from
+    population.df = h.add_from_coord(population.df)
+
+    # Assign each now known home coord a cell id using spatial join (make home cell col)
+    population_gdf = gpd.GeoDataFrame(population.df, geometry="home_loc", crs="EPSG:25832")
+
+    # Perform spatial join to find the cell each person is in
+    cells_gdf = gpd.read_file(s.CAPA_CELLS_SHP_PATH)
+    persons_with_cells = gpd.sjoin(population_gdf, cells_gdf, how="left", op="within").dropna(
+        subset=["NAME"])
+    # Rename the cell id column s.HOME_CELL_COL (from "NAME")
+    persons_with_cells.rename(columns={'NAME': s.HOME_CELL_COL}, inplace=True)
+
+    # Check if there are persons without a cell
+    missing_cells_count = len(population_gdf) - len(persons_with_cells)
+    if missing_cells_count > 0:
+        logger.warning(f"{missing_cells_count} persons without a cell. They will be ignored.")
+
+    # To_cell
+    persons_with_cells.loc[persons_with_cells[s.LEG_TO_ACTIVITY_COL] == s.ACTIVITY_HOME, s.CELL_TO_COL] = (
+        persons_with_cells.loc)[persons_with_cells[s.LEG_TO_ACTIVITY_COL] == s.ACTIVITY_HOME, s.HOME_CELL_COL]
+    # From_cell
+    persons_with_cells = h.add_from_cell(persons_with_cells)
+    persons_with_cells = pd.DataFrame(persons_with_cells)
+    # keep only needed cols
+    # persons_with_cells = persons_with_cells[]
+
+    # <test>
+    persons_with_cells.to_csv("testdata/persons_with_cells.csv", index=False)
 
     persons_with_cells = pd.read_csv("testdata/persons_with_cells.csv")
     persons_with_cells[s.CONNECTED_LEGS_COL] = persons_with_cells[s.CONNECTED_LEGS_COL].apply(h.convert_to_list)
@@ -158,21 +159,21 @@ def popsim_to_matsim_plans_main():
 
     located_pop = parallel_locate_activities(persons_with_cells, num_processes=2)
 
-    population = PopulationFrameProcessor(located_pop)
+    # All legs are located to cells. Find appropriate points (to_coord) within the cells for each leg.
+    located_pop_with_points = h.assign_points(located_pop, s.CAPA_CELLS_SHP_PATH, "NAME")  # TODO: make better?
+
+    population = PopulationFrameProcessor(located_pop_with_points)
+
     # population.impute_cars_in_household()
     population.list_cars_in_household()
 
-    population.translate_modes()
-    population.translate_activities()
+
 
     # apply_me = [rules.add_return_home_leg]  # Adds rows, so safe_apply=False
     # population.apply_group_wise_rules(apply_me, groupby_column="unique_person_id", safe_apply=False)
-    logger.info(f"Population df after applying L group rules: \n{population.df.head()}")
+    logger.info(f"Population df after locating: \n{population.df.head()}")
 
-    # Remove cols that were used by rules, to keep the df clean
-    # population.remove_columns_marked_for_later_deletion()
-
-    # population.vary_times_by_person("unique_person_id", [s.LEG_START_TIME_COL, s.LEG_END_TIME_COL])
+    population.vary_times_by_household(s.UNIQUE_HH_ID_COL, [s.LEG_START_TIME_COL, s.LEG_END_TIME_COL])
 
     # Write plans to MATSim XML format
     pop_output_file = population.write_plans_to_matsim_xml()

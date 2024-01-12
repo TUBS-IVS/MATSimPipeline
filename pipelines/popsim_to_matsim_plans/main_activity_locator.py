@@ -281,11 +281,12 @@ class ActivityLocator:
         connected_persons = self.persons_df[self.persons_df[s.P_HAS_CONNECTIONS_COL] == 1]  # TODO: implement
         unconnected_persons = self.persons_df[self.persons_df[s.P_HAS_CONNECTIONS_COL] == 0]
 
-        unconnected_persons = self.locate_unconnected_legs(unconnected_persons)
+        unconnected_persons = self.locate_unconnected_legs(self.persons_df)
         # connected_persons = self.locate_connected_legs(connected_persons)
 
         # Concatenate results
-        self.persons_df = pd.concat([connected_persons, unconnected_persons], ignore_index=True)
+        # self.persons_df = pd.concat([connected_persons, unconnected_persons], ignore_index=True)
+        self.persons_df = unconnected_persons  # TODO: temp
         self.persons_df.sort_values(by=s.UNIQUE_P_ID_COL, inplace=True)
 
         return self.persons_df
@@ -367,6 +368,10 @@ class ActivityLocator:
 
         # Choose the cell with the highest capacity for the activity type
         candidate_capas = self.capa.capa_csv_df[self.capa.capa_csv_df['NAME'].isin(potential_cells)]
+        if candidate_capas.empty:
+            logger.error(f"Cells {potential_cells} not found in capacities. Returning random cell to keep the pipeline running.")
+            return random.choice(self.capa.capa_csv_df['NAME'].unique())
+
         try:
             activity_type_str = str(int(activity_type))
             best_cell = candidate_capas.nlargest(1, activity_type_str)
@@ -393,7 +398,12 @@ class ActivityLocator:
         sec_chains = h.find_nan_chains(person, s.CELL_TO_COL)
         for chain in sec_chains:
             # Solve each chain
-            person = self.locate_sec_chain_solver(chain)
+            located_chain = self.locate_sec_chain_solver(chain)
+
+            # Update the original person df with the located chain
+            columns_to_update = [s.CELL_TO_COL, s.CELL_FROM_COL]
+            located_chain_subset = located_chain[columns_to_update]
+            person.update(located_chain_subset)
         return person
 
     def locate_sec_chain_solver(self, legs_to_locate):
@@ -405,6 +415,8 @@ class ActivityLocator:
         :return: DataFrame with a new column with cells assigned to each leg.
         """
         legs_to_locate = legs_to_locate.copy()
+        if len(legs_to_locate) > 2:
+            print("debug")
         try:
             hour = legs_to_locate.iloc[0][s.LEG_START_TIME_COL].hour
         except Exception:
@@ -425,41 +437,114 @@ class ActivityLocator:
                                                                 hour)
 
         # Expects and returns minutes as in MiD. Thus, they must later be converted to seconds.
-        legs_with_estimated_direct_times, highest_level = self.sf.get_all_adjusted_times_with_slack(legs_to_locate, direct_time/60)
+        legs_to_locate, highest_level = self.sf.get_all_adjusted_times_with_slack(legs_to_locate, direct_time/60)
 
+        def split_sec_legs_dataframe(df):
+            segments = []
+            start_idx = None
+
+            for i, row in df.iterrows():
+                if start_idx is None and pd.notna(row[s.CELL_FROM_COL]):
+                    start_idx = i
+                elif start_idx is not None and pd.notna(row[s.CELL_TO_COL]):
+                    segments.append(df.loc[start_idx:i])
+                    if pd.notna(row[s.CELL_FROM_COL]):
+                        start_idx = i
+                    else:
+                        start_idx = None
+
+            # Handle last segment if it ends with the DataFrame
+            if start_idx is not None:
+                segments.append(df.loc[start_idx:])
+
+            return segments
         # Locate activities top-down, starting with the second-highest level
+        # for level in range(highest_level - 1, -1, -1):  # to include 0
+        #     if level == 0:
+        #         times_col = s.LEG_DURATION_MINUTES_COL
+        #         if len(legs_with_estimated_direct_times[times_col].notna()) != len(legs_with_estimated_direct_times):
+        #             logger.warning(f"Found NaN values in {times_col}, may produce incorrect results.")
+        #     else:
+        #         times_col = f"level_{level}"  # Here we expect some NaN values
+        #
+        #     legs_to_process = legs_with_estimated_direct_times[legs_with_estimated_direct_times[times_col].notna()].copy()
+        #     legs_to_process['original_index'] = legs_to_process.index
+        #
+        #     # Reset index for reliable pairing
+        #     legs_to_process.reset_index(drop=True, inplace=True)
+        #     legs_to_process['pair_id'] = legs_to_process.index // 2  # Same pairing as in solve_level
+        #
+        #     for pair_id, group in legs_to_process.groupby('pair_id'):
+        #         if len(group) == 1:
+        #             # If there is only one leg in the group, the cell is already known
+        #             continue
+        #         elif len(group) == 2:
+        #             cell = self.locate_single_activity(group[s.CELL_FROM_COL].iloc[0],
+        #                                                group[s.CELL_TO_COL].iloc[1],
+        #                                                group[s.TO_ACTIVITY_WITH_CONNECTED_COL].iloc[0],
+        #                                                group[times_col].iloc[0] * 60,  # expects s, TTmatrices are in s
+        #                                                group[times_col].iloc[1] * 60,
+        #                                                group[s.MODE_TRANSLATED_COL].iloc[0],
+        #                                                group[s.MODE_TRANSLATED_COL].iloc[1],
+        #                                                hour)
+        #
+        #             legs_to_locate.loc[group['original_index'].iloc[-1], s.CELL_TO_COL] = cell
+        #
+        # return legs_to_locate
+
         for level in range(highest_level - 1, -1, -1):  # to include 0
-            if level == 0:
-                times_col = s.LEG_DURATION_MINUTES_COL
-                if len(legs_with_estimated_direct_times[times_col].notna()) != len(legs_with_estimated_direct_times):
-                    logger.warning(f"Found NaN values in {times_col}, may produce incorrect results.")
-            else:
-                times_col = f"level_{level}"  # Here we expect some NaN values
+            times_col = f"level_{level}" if level != 0 else s.LEG_DURATION_MINUTES_COL
 
-            legs_to_process = legs_with_estimated_direct_times[legs_with_estimated_direct_times[times_col].notna()].copy()
-            legs_to_process['original_index'] = legs_to_process.index
+            if level == 0 and len(legs_to_locate[times_col].notna()) != len(legs_to_locate):
+                logger.warning(f"Found NaN values in {times_col}, may produce incorrect results.")
 
-            # Reset index for reliable pairing
-            legs_to_process.reset_index(drop=True, inplace=True)
-            legs_to_process['pair_id'] = legs_to_process.index // 2  # Same pairing as in solve_level
+            segments = split_sec_legs_dataframe(legs_to_locate)
 
-            for pair_id, group in legs_to_process.groupby('pair_id'):
-                if len(group) == 1:
-                    # If there is only one leg in the group, the cell is already known
+            for segment in segments:
+                if len(segment) == 1:
+                    continue  # If there is only one leg in the group, the cell is already known
+                times = segment.loc[segment[times_col].notna(), times_col]
+                if len(times) != 2:
+                    logger.error(f"Found {len(times)} times in segment {segment}. Expected 2.")
                     continue
-                elif len(group) == 2:
-                    cell = self.locate_single_activity(group[s.CELL_FROM_COL].iloc[0],
-                                                       group[s.CELL_TO_COL].iloc[1],
-                                                       group[s.TO_ACTIVITY_WITH_CONNECTED_COL].iloc[0],
-                                                       group[times_col].iloc[0] * 60,  # expects s, TTmatrices are in s
-                                                       group[times_col].iloc[1] * 60,
-                                                       group[s.MODE_TRANSLATED_COL].iloc[0],
-                                                       group[s.MODE_TRANSLATED_COL].iloc[1],
-                                                       hour)
+                cell = self.locate_single_activity(segment[s.CELL_FROM_COL].iloc[0],
+                                                   segment[s.CELL_TO_COL].iloc[-1],
+                                                   segment[s.TO_ACTIVITY_WITH_CONNECTED_COL].iloc[0],
+                                                   times.iloc[0] * 60,  # expects s, TTmatrices are in s
+                                                   times.iloc[1] * 60,
+                                                   segment[s.MODE_TRANSLATED_COL].iloc[0],
+                                                   segment[s.MODE_TRANSLATED_COL].iloc[1],
+                                                   hour)
 
-                    legs_to_locate.loc[group['original_index'].iloc[-1], s.CELL_TO_COL] = cell
+                located_leg_index = segment[times_col].first_valid_index()  # The time is placed at the to-locate leg
 
-            return legs_to_locate
+                legs_to_locate.loc[located_leg_index, s.CELL_TO_COL] = cell
+                legs_to_locate.loc[located_leg_index + 1, s.CELL_FROM_COL] = cell
+
+            # # Update the legs to process at each level based on the most current data
+            # legs_to_process = legs_to_locate[legs_to_locate[times_col].notna()].copy()
+            # legs_to_process['original_index'] = legs_to_process.index
+            # legs_to_process.reset_index(drop=True, inplace=True)
+            # legs_to_process['pair_id'] = legs_to_process.index // 2
+            #
+            # for pair_id, group in legs_to_process.groupby('pair_id'):
+            #     if len(group) != 2:
+            #         continue                      # If there is only one leg in the group, the cell is already known
+            #
+            #     cell = self.locate_single_activity(group[s.CELL_FROM_COL].iloc[0],
+            #                                        group[s.CELL_TO_COL].iloc[1],
+            #                                        group[s.TO_ACTIVITY_WITH_CONNECTED_COL].iloc[0],
+            #                                        group[times_col].iloc[0] * 60,  # expects s, TTmatrices are in s
+            #                                        group[times_col].iloc[1] * 60,
+            #                                        group[s.MODE_TRANSLATED_COL].iloc[0],
+            #                                        group[s.MODE_TRANSLATED_COL].iloc[1],
+            #                                        hour)
+            #
+            #     # Update the original legs_to_locate DataFrame
+            #     legs_to_locate.loc[group['original_index'].iloc[-1], s.CELL_TO_COL] = cell
+            #     legs_to_locate.loc[group['original_index'].iloc[1], s.CELL_FROM_COL] = cell
+
+        return legs_to_locate
 
 # class ActivityLocator:
 #     """

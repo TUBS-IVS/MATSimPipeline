@@ -628,11 +628,11 @@ class PopulationFrameProcessor(DataFrameProcessor):
             self.df.update(updated_df)
         logger.info("Time estimation completed.")
 
-    def vary_times_by_household(self, person_id_col, time_cols, max_shift_minutes=3):
+    def vary_times_by_household(self, hh_id_col, time_cols, max_shift_minutes=15):
         """
         Varies times in the DataFrame by the same random amount (±max_shift_minutes) for each household.
 
-        :param person_id_col: String, the column name for the unique person identifier.
+        :param hh_id_col: String, the column name for the unique hh identifier.
         :param time_cols: List of strings, the names of the columns containing time data.
         :param max_shift_minutes: Integer, the maximum number of minutes for the time shift.
         :return: pandas DataFrame with varied times.
@@ -650,7 +650,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
             return group
 
         # Group by person and apply the function
-        self.df = self.df.groupby(person_id_col).apply(apply_time_shift)
+        self.df = self.df.groupby(hh_id_col).apply(apply_time_shift)
         logger.info("Times varied by person.")
 
     def downsample_population(self, sample_percentage):
@@ -927,7 +927,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
         hhs = self.df.groupby(s.UNIQUE_HH_ID_COL)
         total_cars = 0
         for household_id, hh in hhs:
-            number_of_cars: int = hh[s.H_NUMBER_OF_CARS_COL].iloc[0]
+            number_of_cars: int = int(hh[s.H_NUMBER_OF_CARS_COL].iloc[0])
             if number_of_cars == 0:
                 continue
             if number_of_cars > 30:

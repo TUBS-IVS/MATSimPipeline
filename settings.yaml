@@ -8,7 +8,7 @@ sigmoid_delta_t: 1200  # Seconds
 input_files:
   expanded_households_files: # synthetic_households from PopSim
     - "data/synthetic_households_city.csv"
-    - "data/synthetic_households_region_test.csv"
+    - "data/synthetic_households_region.csv"
 
   enhanced_mid_file: "data/enhanced_frame_final.csv"
 
@@ -22,7 +22,7 @@ input_files:
 
   region_without_city_gpkg_file: "data/shapes/RegionOhneStadtGitter100m.gpkg"
 
-  shape_boundary_file: "data/shapes/Region Hannover.shp"
+  shape_boundary_file: "data/shapes/region_hanover.shp"
   tt_matrix_cells_file: "data/shapes/tt_matrix_cells.shp"
   tt_matrix_car_files:
     - "data/TTmatrices/hour_Min_0_Max 1car_travel_times.csv.gz"

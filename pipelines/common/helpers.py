@@ -458,10 +458,10 @@ class SlackFactors:
         len_times_col = leg_chain[times_col].notna().sum()
         if len_times_col == 0:
             logger.warning(f"Received empty DataFrame, returning unchanged.")
-            return leg_chain, level + 1
+            return leg_chain, level
         elif len_times_col == 1:
             logger.warning(f"Received single leg, returning unchanged.")
-            return leg_chain, level + 1
+            return leg_chain, level
         elif len_times_col == 2:
             logger.debug(f"Two legs remain to estimate, solving last level.")
             return self.solve_level(leg_chain, level), level + 1
@@ -1111,7 +1111,7 @@ def add_from_cell_fast(person):
     """
     logger.debug("Adding/updating from_coord column for single person...")
     # Sort the DataFrame by person ID and leg number (the df should usually already be sorted this way)
-    person.sort_values(by=[s.LEG_NON_UNIQUE_ID_COL], inplace=True)
+    person.sort_values(by=[s.LEG_NON_UNIQUE_ID_COL], inplace=True, ignore_index=True)
 
     person[s.CELL_FROM_COL] = person[s.CELL_TO_COL].shift(1)
 
@@ -1200,21 +1200,21 @@ def assign_points(df, shapefile_path, df_cell_name_column, gdf_cell_name_column,
                 logger.debug(f"Assigning point for cell: {cell_name}")
                 point = random_point_in_cell(cell_geometry_map[cell_name])
                 df.at[index, point_column_name] = point
-            else:
-                point_strings = [
-                    "POINT (557406.047302496 5804532.882341754)",
-                    "POINT (557461.4542418872 5805505.880049294)",
-                    "POINT (557406.047302496 5804532.882341754)",
-                    "POINT (558086.8481817514 5805003.171151079)",
-                    "POINT (550068.9344878009 5802820.698924298)",
-                    "POINT (551177.4849569078 5800578.928120851)",
-                    "POINT (549764.1748679808 5806810.51995238)",
-                    "POINT (547883.4262508928 5806678.701907538)",
-                    "POINT (545157.5826553579 5803478.569045149)"
-                ]
-                point = random.choice(point_strings)   # This should never happen. but catch it to be sure
-                logger.warning(f"Cell {cell_name} not found in shapefile. Assigning random point: {point}")
-                df.at[index, point_column_name] = point
+            # else:
+            #     point_strings = [
+            #         "POINT (557406.047302496 5804532.882341754)",
+            #         "POINT (557461.4542418872 5805505.880049294)",
+            #         "POINT (557406.047302496 5804532.882341754)",
+            #         "POINT (558086.8481817514 5805003.171151079)",
+            #         "POINT (550068.9344878009 5802820.698924298)",
+            #         "POINT (551177.4849569078 5800578.928120851)",
+            #         "POINT (549764.1748679808 5806810.51995238)",
+            #         "POINT (547883.4262508928 5806678.701907538)",
+            #         "POINT (545157.5826553579 5803478.569045149)"
+            #     ]
+            #     point = random.choice(point_strings)   # This should never happen. but catch it to be sure
+            #     logger.warning(f"Cell {cell_name} not found in shapefile. Assigning random point: {point}")
+            #     df.at[index, point_column_name] = point
         else:
             logger.debug(f"Skipping assignment for cell: {cell_name}")
 

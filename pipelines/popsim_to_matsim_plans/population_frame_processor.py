@@ -280,7 +280,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
             s.ACTIVITY_LESSONS: "leisure",
             s.ACTIVITY_UNSPECIFIED: "other",
         }
-        self.df['activity_translated_string'] = self.df[s.LEG_TO_ACTIVITY_COL].map(activity_translation)
+        self.df['activity_translated_string'] = self.df[s.TO_ACTIVITY_WITH_CONNECTED_COL].map(activity_translation)
         logger.info(f"Translated activities.")
 
     def write_stats(self, stat_by_columns: list = None):

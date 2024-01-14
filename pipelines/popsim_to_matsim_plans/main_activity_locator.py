@@ -24,11 +24,11 @@ class ActivityLocator:
     :param capacities_geometry_col: Name of the geometry column in the capacities data (if given as a DataFrame)
     """
 
-    def __init__(self, persons, target_crs="EPSG:25832",
+    def __init__(self, persons: pd.DataFrame, target_crs="EPSG:25832",
                  persons_crs=None, capacities_crs=None,
                  persons_geometry_col=None, capacities_geometry_col=None):
 
-        self.persons_df = persons
+        self.persons_df = persons.sort_values(by=s.UNIQUE_LEG_ID_COL, ignore_index=True)
         # self.capacity_points_gdf = self.load_data_into_gdf(capacities, capacities_geometry_col, capacities_crs)
 
         self.cells_gdf: gpd.GeoDataFrame = gpd.read_file(s.CAPA_CELLS_SHP_PATH)
@@ -287,7 +287,7 @@ class ActivityLocator:
         # Concatenate results
         # self.persons_df = pd.concat([connected_persons, unconnected_persons], ignore_index=True)
         self.persons_df = unconnected_persons  # TODO: temp
-        self.persons_df.sort_values(by=s.UNIQUE_P_ID_COL, inplace=True)
+        self.persons_df.sort_values(by=s.UNIQUE_LEG_ID_COL, inplace=True, ignore_index=True)
 
         return self.persons_df
 
@@ -398,6 +398,9 @@ class ActivityLocator:
         sec_chains = h.find_nan_chains(person, s.CELL_TO_COL)
         for chain in sec_chains:
             # Solve each chain
+            if chain.empty:
+                logger.warning(f"Found empty chain. Skipping.")
+                continue
             located_chain = self.locate_sec_chain_solver(chain)
 
             # Update the original person df with the located chain
@@ -437,7 +440,7 @@ class ActivityLocator:
                                                                 hour)
 
         # Expects and returns minutes as in MiD. Thus, they must later be converted to seconds.
-        legs_to_locate, highest_level = self.sf.get_all_adjusted_times_with_slack(legs_to_locate, direct_time/60)
+        legs_to_locate, highest_level = self.sf.get_all_adjusted_times_with_slack(legs_to_locate, direct_time / 60)
 
         def split_sec_legs_dataframe(df):
             segments = []
@@ -458,6 +461,7 @@ class ActivityLocator:
                 segments.append(df.loc[start_idx:])
 
             return segments
+
         # Locate activities top-down, starting with the second-highest level
         # for level in range(highest_level - 1, -1, -1):  # to include 0
         #     if level == 0:
@@ -505,7 +509,13 @@ class ActivityLocator:
                     continue  # If there is only one leg in the group, the cell is already known
                 times = segment.loc[segment[times_col].notna(), times_col]
                 if len(times) != 2:
-                    logger.error(f"Found {len(times)} times in segment {segment}. Expected 2.")
+                    if len(segment) == 2:  # If the segment is two long, use the known times
+                        times_col = s.LEG_DURATION_MINUTES_COL
+                        times = segment.loc[segment[times_col].notna(), times_col]
+                        if len(times) != 2:
+                            logger.error(f"Found {len(times)} times in segment {segment}. Expected 2.")
+                    else:
+                        logger.error(f"Found {len(times)} times in segment {segment}. Expected 2.")
                     continue
                 cell = self.locate_single_activity(segment[s.CELL_FROM_COL].iloc[0],
                                                    segment[s.CELL_TO_COL].iloc[-1],

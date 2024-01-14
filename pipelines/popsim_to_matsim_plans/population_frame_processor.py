@@ -1084,7 +1084,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
                     legs = person.loc[closest_home_row + 1:main_activity_row]
 
                     updated_legs, level = self.sf.get_all_estimated_times_with_slack(legs)
-                    home_to_main_time = updated_legs[f"level_{level}"].dropna().index[0]
+                    home_to_main_time = updated_legs[f"level_{level}"].dropna().iloc[0]
                     home_to_main_distance = None  # We cannot correctly determine this without an own function (yes, really)
                     # and it's not needed nor worth the effort here. Also, this serves as a marker for estimated time.
                     time_is_estimated = 1
@@ -1093,7 +1093,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
                     legs = person.loc[main_activity_row + 1:closest_home_row]
 
                     updated_legs, level = self.sf.get_all_estimated_times_with_slack(legs)
-                    home_to_main_time = updated_legs[f"level_{level}"].dropna().index[0]
+                    home_to_main_time = updated_legs[f"level_{level}"].dropna().iloc[0]
                     home_to_main_distance = None
                     time_is_estimated = 1
 
@@ -1111,7 +1111,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
         logger.info("Determining home to main activity distances/times completed.")
 
-    def find_main_mode_to_main_act(self):  # TODO: test
+    def find_main_mode_to_main_act(self):
         """
         Determines the main mode used to reach the main activity from either the closest previous home activity
         or the start of the day if there is no home activity before.

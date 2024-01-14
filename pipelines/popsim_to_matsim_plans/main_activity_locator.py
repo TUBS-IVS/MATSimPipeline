@@ -415,8 +415,8 @@ class ActivityLocator:
         :return: DataFrame with a new column with cells assigned to each leg.
         """
         legs_to_locate = legs_to_locate.copy()
-        if len(legs_to_locate) > 2:
-            print("debug")
+        # if len(legs_to_locate) > 2:
+        #     print("debug")
         try:
             hour = legs_to_locate.iloc[0][s.LEG_START_TIME_COL].hour
         except Exception:

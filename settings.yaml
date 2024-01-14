@@ -7,7 +7,8 @@ sigmoid_delta_t: 1200  # Seconds
 
 input_files:
   expanded_households_files: # synthetic_households from PopSim
-    - "data/synthetic_households1.csv"
+    - "data/synthetic_households_city.csv"
+    - "data/synthetic_households_region_test.csv"
 
   enhanced_mid_file: "data/enhanced_frame_final.csv"
 
@@ -18,6 +19,8 @@ input_files:
 
   capa_cells_csv_path: "data/region_hanover_potentials.csv"
   capa_cells_shp_path: "data/shapes/RH_useful__zone.SHP"
+
+  region_without_city_gpkg_file: "data/shapes/RegionOhneStadtGitter100m.gpkg"
 
   shape_boundary_file: "data/shapes/Region Hannover.shp"
   tt_matrix_cells_file: "data/shapes/tt_matrix_cells.shp"

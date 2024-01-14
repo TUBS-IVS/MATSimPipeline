@@ -130,7 +130,7 @@ def enhance_travel_survey():
     # Recalculate after estimating leg times
     population.calculate_activity_duration()
 
-    population.apply_group_wise_rules([rules.is_main_activity], groupby_column="unique_person_id")
+    population.apply_group_wise_rules([rules.is_main_activity], groupby_column=s.UNIQUE_P_ID_COL)
 
     population.adjust_mode_based_on_age()
     population.adjust_mode_based_on_license()
@@ -181,10 +181,10 @@ def enhance_travel_survey():
     # Write stats
     population.write_stats()
 
-    population.write_households_to_matsim_xml()  # TESTING (PASS())
-    population.write_vehicles_to_matsim_xml()  # TESTING (PASS())
+    # population.write_households_to_matsim_xml()  # TESTING (PASS())
+    # population.write_vehicles_to_matsim_xml()  # TESTING (PASS())
 
-    population.df.to_csv(os.path.join(matsim_pipeline_setup.OUTPUT_DIR, s.POPULATION_ANALYSIS_OUTPUT_FILE), index=False)
+    population.df.to_csv(os.path.join(matsim_pipeline_setup.OUTPUT_DIR, "enhanced_frame_final.csv"), index=False)
     logger.info(f"Wrote population output file to {s.POPULATION_ANALYSIS_OUTPUT_FILE}")
 
     logger.info(f"Finished enhance_travel_survey pipeline")

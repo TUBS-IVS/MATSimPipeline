@@ -12,6 +12,7 @@ settings = utils.matsim_pipeline_setup.load_yaml_config('settings.yaml')
 # Files
 INPUT_FILES = settings['input_files']
 SHAPE_BOUNDARY_FILE = INPUT_FILES['shape_boundary_file']
+REGION_WITHOUT_CITY_GPKG_FILE = INPUT_FILES['region_without_city_gpkg_file']
 EXPANDED_HOUSEHOLDS_FILES: list = INPUT_FILES['expanded_households_files']
 MiD_HH_FILE = INPUT_FILES['mid_hh_file']
 MiD_PERSONS_FILE = INPUT_FILES['mid_persons_file']

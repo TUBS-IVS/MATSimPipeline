@@ -30,7 +30,9 @@ class PopulationFrameProcessor(DataFrameProcessor):
         self.sf = h.SlackFactors(s.SLACK_FACTORS_FILE)
 
     def distribute_by_weights(self, weights_df: pd.DataFrame, cell_id_col: str, cut_missing_ids: bool = False):
-        self.df = h.distribute_by_weights(self.df, weights_df, cell_id_col, cut_missing_ids)
+        result = h.distribute_by_weights(self.df, weights_df, cell_id_col, cut_missing_ids)
+        self.df = self.df.merge(result[[s.UNIQUE_HH_ID_COL, 'home_loc']], on=s.UNIQUE_HH_ID_COL, how='left')
+
 
     def write_plans_to_matsim_xml(self):
         """
@@ -48,10 +50,10 @@ class PopulationFrameProcessor(DataFrameProcessor):
         with open(output_file, 'wb+') as f_write:
             writer = matsim.writers.PopulationWriter(f_write)
 
-            writer.start_population(attributes={"coordinateReferenceSystem": "UTM-32N"})  # TODO: verify CRS everywhere
+            writer.start_population(attributes={"coordinateReferenceSystem": "UTM-32N"})
 
-            for _, group in self.df.groupby(['unique_person_id']):
-                writer.start_person(group['unique_person_id'].iloc[0])
+            for _, group in self.df.groupby([s.UNIQUE_P_ID_COL]):
+                writer.start_person(group[s.UNIQUE_P_ID_COL].iloc[0])
                 writer.start_plan(selected=True)
 
                 # Add home activity
@@ -68,14 +70,14 @@ class PopulationFrameProcessor(DataFrameProcessor):
                         max_dur: int = round(row[s.ACT_DUR_SECONDS_COL] / 600) * 600
                         writer.add_activity(
                             type=f"{row['activity_translated_string']}_{max_dur}",
-                            x=row["random_point"].x, y=row["random_point"].y,
+                            x=row[s.COORD_TO_COL].x, y=row[s.COORD_TO_COL].y,
                             # The writer expects seconds. Also, we mean max_dur here, but the writer doesn't have that yet.
                             start_time=max_dur)
                     else:
                         # No time for the last activity
                         writer.add_activity(
                             type=row['activity_translated_string'],
-                            x=row["random_point"].x, y=row["random_point"].y)
+                            x=row[s.COORD_TO_COL].x, y=row[s.COORD_TO_COL].y)
 
                 writer.end_plan()
                 writer.end_person()
@@ -98,8 +100,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
                 households_writer.start_household(household_id)
                 households_writer.add_members(person_ids)
-                if vehicle_ids:
-                    households_writer.add_vehicles(vehicle_ids)
+                # if vehicle_ids:
+                #     households_writer.add_vehicles(vehicle_ids)
                 households_writer.end_household()
 
             households_writer.end_households()
@@ -155,13 +157,14 @@ class PopulationFrameProcessor(DataFrameProcessor):
         Assumes LEG_ID is ascending in order of legs (which it is in MiD and should be in other datasets).
         """
         logger.info("Changing last leg activity to home...")
-        self.df = self.df.sort_values(by=['unique_household_id', s.PERSON_ID_COL, s.LEG_NON_UNIQUE_ID_COL])
+        self.df = self.df.sort_values(by=[s.UNIQUE_LEG_ID_COL])
 
         is_last_leg = self.df[s.PERSON_ID_COL].ne(self.df[s.PERSON_ID_COL].shift(-1))
 
         number_of_rows_to_change = len(self.df[is_last_leg & (self.df[s.LEG_TO_ACTIVITY_COL] != s.ACTIVITY_HOME)])
 
         self.df.loc[is_last_leg, s.LEG_TO_ACTIVITY_COL] = s.ACTIVITY_HOME
+        self.df.loc[is_last_leg, 'activity_translated_string'] = "home"
         # We also need to remove markers for main or mirroring main activities, because home is never main
         self.df.loc[is_last_leg, s.IS_MAIN_ACTIVITY_COL] = 0
         self.df.loc[is_last_leg, s.MIRRORS_MAIN_ACTIVITY_COL] = 0
@@ -216,7 +219,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
         # Set the activity time of the last leg to None
         is_last_leg = self.df["unique_person_id"] != self.df["unique_person_id"].shift(-1)
         self.df.loc[is_last_leg, s.ACT_DUR_SECONDS_COL] = None
-        logger.info(f"Calculated activity duration.")
+        logger.info(f"Calculated activity duration in secs.")
 
     def assign_random_location(self):
         """
@@ -380,7 +383,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
             activity_time = similar_persons[similar_persons[s.LEG_TO_ACTIVITY_COL] == last_leg[s.LEG_TO_ACTIVITY_COL]][
                 s.ACT_DUR_SECONDS_COL].mean()
             if pd.isna(activity_time):
-                logger.info(f"Person {person_id} has no similar persons with the same last activity. ")
+                logger.debug(f"Person {person_id} has no similar persons with the same last activity. ")
                 activity_time = 3600  # 1 hour default
 
             # Create home_leg with the calculated duration
@@ -997,7 +1000,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
         logger.info("Marked mirroring main mischief, my merry miscreant mate.")
 
-    def find_home_to_main_time(self):  # TODO:test
+    def find_home_to_main_time(self):
         """
         Determines the time (and distance) between home and main activity for each person in the DataFrame.
         It may not look it, but this was a pain to write.

@@ -128,9 +128,14 @@ def read_csv(csv_path: str, test_col=None, use_cols=None):
     return df
 
 
-def string_to_shapely_point(point_string):
+def string_to_shapely_point(point_input):
+    if isinstance(point_input, Point):
+        return point_input
+    if not isinstance(point_input, str):
+        print ("Debug")
+
     # Use a regular expression to extract numbers
-    matches = re.findall(r"[-+]?\d*\.\d+|\d+", point_string)
+    matches = re.findall(r"[-+]?\d*\.\d+|\d+", point_input)
 
     # Convert the extracted strings to float and create a Shapely Point
     if len(matches) == 2:
@@ -191,7 +196,7 @@ def distribute_by_weights(data_to_distribute: pd.DataFrame, weighted_points_in_c
 
     if not data_to_distribute[external_id_column].isin(weighted_points_in_cells[external_id_column]).all():
         if cut_missing_ids:
-            logger.warning(f"Not all geography IDs in the population dataframe are in the weights dataframe. "
+            logger.info(f"Not all geography IDs in the population dataframe are in the weights dataframe. "
                            f"Cutting missing IDs: {set(data_to_distribute[external_id_column]) - set(weighted_points_in_cells[external_id_column])}")
             data_to_distribute = data_to_distribute[
                 data_to_distribute[external_id_column].isin(weighted_points_in_cells[external_id_column])].copy()
@@ -1148,24 +1153,28 @@ def find_nan_chains(df, column_name):
     return chain_dfs
 
 
-def assign_points(df, shapefile_path, cell_name_column):
+def assign_points(df, shapefile_path, df_cell_name_column, gdf_cell_name_column, point_column_name):
     """
-    Assigns a random point within the cell of a shapefile to rows in the DataFrame.
+    Assigns a random point within the cell of a shapefile to rows in the DataFrame,
+    while preserving existing points in a specified column.
 
     Parameters:
     df (DataFrame): The main DataFrame with a column containing cell names.
     shapefile_path (str): Path to the shapefile.
-    cell_name_column (str): Column in both DataFrame and GeoDataFrame that contains cell names.
+    df_cell_name_column (str): Column in DataFrame that contains cell names.
+    gdf_cell_name_column (str): Column in GeoDataFrame that contains cell names.
+    point_column_name (str): Column in DataFrame where random points will be assigned.
 
     Returns:
-    DataFrame: The DataFrame with an additional column for random points.
+    DataFrame: The DataFrame with an updated column for random points.
     """
+    logger.info("Assigning points based on cells...")
     # Read the shapefile
     gdf = gpd.read_file(shapefile_path)
-
+    logger.info(f"Loaded shapefile with {len(gdf)} cells.")
     # Ensure that the cell name column exists in both DataFrame and GeoDataFrame
-    if cell_name_column not in df.columns or cell_name_column not in gdf.columns:
-        raise ValueError(f"Column '{cell_name_column}' must exist in both DataFrame and GeoDataFrame")
+    if df_cell_name_column not in df.columns or gdf_cell_name_column not in gdf.columns:
+        raise ValueError(f"Column '{df_cell_name_column}' must exist in DataFrame and '{gdf_cell_name_column}' must exist in GeoDataFrame")
 
     # Function to generate a random point within a cell
     def random_point_in_cell(cell):
@@ -1176,9 +1185,44 @@ def assign_points(df, shapefile_path, cell_name_column):
                 return pnt
 
     # Create a dictionary to map cell names to their geometries
-    cell_geometry_map = gdf.set_index(cell_name_column)['geometry'].to_dict()
+    cell_geometry_map = gdf.set_index(gdf_cell_name_column)['geometry'].to_dict()
 
-    # Assign random points to DataFrame rows
-    df['to_location_point'] = df[cell_name_column].apply(lambda x: random_point_in_cell(cell_geometry_map[x]) if x in cell_geometry_map else None)
+    # Initialize the point column if not exists
+    if point_column_name not in df.columns:
+        df[point_column_name] = pd.NA
+
+    # Iterating over each row in the DataFrame TESTING
+    for index, row in df.iterrows():
+        cell_name = row[df_cell_name_column]
+        if pd.isna(row[point_column_name]):
+            if cell_name in cell_geometry_map:
+                # Debug print statements can be added here to check the process
+                logger.debug(f"Assigning point for cell: {cell_name}")
+                point = random_point_in_cell(cell_geometry_map[cell_name])
+                df.at[index, point_column_name] = point
+            else:
+                point_strings = [
+                    "POINT (557406.047302496 5804532.882341754)",
+                    "POINT (557461.4542418872 5805505.880049294)",
+                    "POINT (557406.047302496 5804532.882341754)",
+                    "POINT (558086.8481817514 5805003.171151079)",
+                    "POINT (550068.9344878009 5802820.698924298)",
+                    "POINT (551177.4849569078 5800578.928120851)",
+                    "POINT (549764.1748679808 5806810.51995238)",
+                    "POINT (547883.4262508928 5806678.701907538)",
+                    "POINT (545157.5826553579 5803478.569045149)"
+                ]
+                point = random.choice(point_strings)   # This should never happen. but catch it to be sure
+                logger.warning(f"Cell {cell_name} not found in shapefile. Assigning random point: {point}")
+                df.at[index, point_column_name] = point
+        else:
+            logger.debug(f"Skipping assignment for cell: {cell_name}")
+
+    # # Assign random points to DataFrame rows where the point column is empty
+    # df[point_column_name] = df.apply(
+    #     lambda row: random_point_in_cell(cell_geometry_map[row[df_cell_name_column]])
+    #     if row[df_cell_name_column] in cell_geometry_map and pd.isna(row[point_column_name])
+    #     else row[point_column_name], axis=1)
 
     return df
+

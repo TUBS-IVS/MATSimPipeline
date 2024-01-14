@@ -98,7 +98,7 @@ def is_main_activity(person):
     group = person[person[s.LEG_TO_ACTIVITY_COL] != s.ACTIVITY_HOME]
 
     if group.empty:
-        logger.debug(f"Person {group[s.PERSON_ID_COL].iloc[0]} has no legs. No main activity.")
+        logger.debug(f"Person {person[s.PERSON_ID_COL].iloc[0]} has no legs outside home. No main activity.")
         return is_main_activity_series
 
     if len(group) == 1:
@@ -106,8 +106,10 @@ def is_main_activity(person):
         if group[s.LEG_NON_UNIQUE_ID_COL].isna().all():
             logger.debug(f"Person {group[s.PERSON_ID_COL].iloc[0]} has no legs. No main activity.")
             return is_main_activity_series
-        # If the person has only one activity, it is the main activity
-        is_main_activity_series.iloc[0] = 1
+
+        # If the person has only one activity outside home, it is the main activity
+        main_activity_index = group.index[0]
+        is_main_activity_series.at[main_activity_index] = 1
         assert is_main_activity_series.sum() == 1
         return is_main_activity_series
 

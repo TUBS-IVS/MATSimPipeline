@@ -50,7 +50,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
         with open(output_file, 'wb+') as f_write:
             writer = matsim.writers.PopulationWriter(f_write)
 
-            writer.start_population(attributes={"coordinateReferenceSystem": "UTM-32N"})
+            writer.start_population()  #attributes={"coordinateReferenceSystem": "UTM-32N"}
 
             for _, group in self.df.groupby([s.UNIQUE_P_ID_COL]):
                 writer.start_person(group[s.UNIQUE_P_ID_COL].iloc[0])
@@ -73,12 +73,19 @@ class PopulationFrameProcessor(DataFrameProcessor):
                             x=row[s.COORD_TO_COL].x, y=row[s.COORD_TO_COL].y,
                             # The writer expects seconds. Also, we mean max_dur here, but the writer doesn't have that yet.
                             start_time=max_dur)
-                    else:
+                    elif idx == group.index[-1]:
                         # No time for the last activity
                         writer.add_activity(
                             type=row['activity_translated_string'],
                             x=row[s.COORD_TO_COL].x, y=row[s.COORD_TO_COL].y)
-
+                    else:
+                        # If for some reason we have no time
+                        max_dur: int = round(3600/ 600) * 600
+                        writer.add_activity(
+                            type=f"{row['activity_translated_string']}_{max_dur}",
+                            x=row[s.COORD_TO_COL].x, y=row[s.COORD_TO_COL].y,
+                            # The writer expects seconds. Also, we mean max_dur here, but the writer doesn't have that yet.
+                            start_time=max_dur)
                 writer.end_plan()
                 writer.end_person()
 

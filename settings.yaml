@@ -1,5 +1,5 @@
 
-sample_size: 0.001 # 0.1 = 10% of the population
+sample_size: 0.25 # 0.1 = 10% of the population
 n_closest_cells: 10 # Number of cell candidates to consider for main activity location
 default_slack_factor: 1.5
 sigmoid_beta: -0.15

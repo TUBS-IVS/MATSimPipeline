@@ -4,7 +4,6 @@ import multiprocessing as mp
 
 import pandas as pd
 import geopandas as gpd
-import winsound
 from pipelines.common import rules
 
 from pipelines.common import helpers as h
@@ -153,7 +152,7 @@ def popsim_to_matsim_plans_main():
     # locator = ActivityLocator(persons_with_cells)
     # located_pop = locator.locate_activities()
 
-    located_pop = parallel_locate_activities(persons_with_cells, num_processes=2)
+    located_pop = parallel_locate_activities(persons_with_cells, num_processes=20)
 
     # All legs are located to cells. Find appropriate points (to_coord) within the cells for each leg.
     located_pop_with_points = h.assign_points(located_pop, s.CAPA_CELLS_SHP_PATH, s.CELL_TO_COL, "NAME", s.COORD_TO_COL)
@@ -178,7 +177,7 @@ def popsim_to_matsim_plans_main():
     population.df[s.COORD_TO_COL] = population.df[s.COORD_TO_COL].apply(h.string_to_shapely_point)
 
     # Write plans to MATSim XML format
-    population.df.sort_values(by=[s.UNIQUE_LEG_ID_COL], inplace=True)
+    population.df.sort_values(by=[s.UNIQUE_LEG_ID_COL], inplace=True, ignore_index=True)
     pop_output_file = population.write_plans_to_matsim_xml()
     # Replace start_time with max_dur (temp workaround until matsim writer does max_dur)
     h.modify_text_file(pop_output_file, pop_output_file, 'start_time', 'max_dur')
@@ -234,18 +233,7 @@ def parallel_locate_activities(df, num_processes=None):
 
 if __name__ == '__main__':
     output_dir = matsim_pipeline_setup.create_output_directory()
-    try:
+    popsim_to_matsim_plans_main()
 
-        popsim_to_matsim_plans_main()
-
-    except Exception as e:
-        if s.DUN_DUN_DUUUN:
-            winsound.Beep(600, 500)
-            time.sleep(0.1)
-            winsound.Beep(500, 500)
-            time.sleep(0.2)
-            winsound.Beep(400, 1500)
-
-        raise
 else:
     output_dir = matsim_pipeline_setup.OUTPUT_DIR

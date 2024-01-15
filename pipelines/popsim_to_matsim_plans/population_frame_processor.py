@@ -60,7 +60,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 writer.add_activity(
                     type="home",
                     x=group['home_loc'].iloc[0].x, y=group['home_loc'].iloc[0].y,
-                    end_time=h.seconds_from_datetime(group[s.LEG_START_TIME_COL].iloc[0]))
+                    end_time=abs(h.seconds_from_datetime(group[s.LEG_START_TIME_COL].iloc[0])))
                 # One row in the df contains the leg and the following activity
                 for idx, row in group.iterrows():
                     writer.add_leg(mode=row['mode_translated_string'])

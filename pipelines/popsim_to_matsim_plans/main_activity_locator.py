@@ -305,7 +305,7 @@ class ActivityLocator:
         logger.info("Unconnected legs located.")
         return combined_df
 
-    def locate_single_activity(self, start_cell, end_cell, activity_type, time_start_to_act, time_act_to_end,  # TODO:finish
+    def locate_single_activity(self, start_cell, end_cell, activity_type, time_start_to_act, time_act_to_end,
                                mode_start, mode_end, start_hour,
                                min_tolerance=None, max_tolerance=None):
         """

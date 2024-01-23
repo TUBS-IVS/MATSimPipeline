@@ -46,7 +46,7 @@ def popsim_to_matsim_plans_main():
 
     # If "home_loc" is NaN after this, assign a random location within its cell (lowest level of geography)
     # This is the case for the surrounding region
-    population.df = h.assign_points(population.df, s.REGION_WITHOUT_CITY_GPKG_FILE, s.LOWEST_LEVEL_GEOGRAPHY, "id", "home_loc")  # TODO: finish
+    population.df = h.assign_points(population.df, s.REGION_WITHOUT_CITY_GPKG_FILE, s.LOWEST_LEVEL_GEOGRAPHY, "id", "home_loc")
 
     population.assign_random_location()  # Creates random location in a new column "random_point" for fallback
 

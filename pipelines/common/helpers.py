@@ -1130,6 +1130,7 @@ def add_from_cell_fast(person):
     Only for a single person.
     :return:
     """
+    person = person.copy()
     logger.debug("Adding/updating from_coord column for single person...")
     # Sort the DataFrame by person ID and leg number (the df should usually already be sorted this way)
     person.sort_values(by=[s.LEG_NON_UNIQUE_ID_COL], inplace=True, ignore_index=True)

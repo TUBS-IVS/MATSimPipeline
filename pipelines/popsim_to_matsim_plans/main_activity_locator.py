@@ -59,13 +59,14 @@ class ActivityLocator:
         logger.info(f"Locating main activity cells for person {person[s.UNIQUE_P_ID_COL].iloc[0]}...")
         if person[s.LEG_NON_UNIQUE_ID_COL].iloc[0] != 1:
             logger.error(f"Person {person[s.UNIQUE_P_ID_COL].iloc[0]} has no leg 1 and thus no start. Locating randomly.")
+            person = person.copy()
             person[s.CELL_FROM_COL] = random.choice(self.capa.capa_csv_df['NAME'].unique())
             return person
         n = s.N_CLOSEST_CELLS
         try:
             main_activity_index = person[person[s.IS_MAIN_ACTIVITY_COL] == 1].index[0]
         except IndexError:
-            logger.error(f"Person doesn't have a main activity. Not locating")
+            logger.info(f"Person doesn't have a main activity. Not locating main")
             return person
         # Select all rows from the beginning to the main activity row (inclusive)
         legs_to_place = person.loc[:main_activity_index]
@@ -223,20 +224,107 @@ class ActivityLocator:
             person_with_all = self.locate_sec_chains(person_with_main)
 
             # Update the original household df with the located person
+            original_index = household.index
             columns_to_update = [s.CELL_TO_COL, s.CELL_FROM_COL]
-            located_person_subset = person_with_all[columns_to_update]
-            household.update(located_person_subset)
+            located_person_subset = person_with_all.set_index(s.UNIQUE_LEG_ID_COL)[columns_to_update]
+            household.set_index(s.UNIQUE_LEG_ID_COL, inplace=True)
+            household.loc[located_person_subset.index, columns_to_update] = located_person_subset
+            household.reset_index(inplace=True)
+            household.set_index(original_index, inplace=True)
 
-            # Get all connected legs
-            connected_legs = household[household[s.CONNECTED_LEGS_COL] == 1]
-            #
+            # Keep track of which persons have been placed
+            fully_placed_persons = set()
+            fully_placed_persons.add(main_person_id)
+            connections_placed_persons = set()
 
-            results.append(person_with_all)
+            # Place all legs that are connected to the main person
+            for index, row in person_with_all.iterrows():
+                connected_leg_ids = row[s.CONNECTED_LEGS_COL]
+
+                if isinstance(connected_leg_ids, list):
+                    for leg_id in connected_leg_ids:
+                        # Get the leg ID without the HH ID
+                        leg_id_parts = leg_id.rsplit('_', 2)
+                        if len(leg_id_parts) < 2:
+                            logger.error(f"Invalid leg_id format: {leg_id} in household {household[s.UNIQUE_HH_ID_COL].iloc[0]}")
+                            continue
+                        leg_id = leg_id_parts[-2] + '_' + leg_id_parts[-1]
+
+                        # Skip own id
+                        if leg_id == row[s.LEG_ID_COL]:  # Not unique ID because connected legs are written at enhance stage
+                            continue
+                        # Find the row corresponding to the connected leg
+                        connected_leg_rows = household[household[s.LEG_ID_COL] == leg_id]  # Should be only one
+                        if connected_leg_rows.empty:
+                            logger.error(f"Could not find connected leg {leg_id} in household {household[s.UNIQUE_HH_ID_COL].iloc[0]}")
+                            continue
+                        if len(connected_leg_rows) > 1:
+                            logger.error(f"Found multiple legs with ID {leg_id} in household {household[s.UNIQUE_HH_ID_COL].iloc[0]}")
+                            continue
+
+                        # Update the CELL_TO and CELL_FROM values for the connected leg
+                        household.loc[connected_leg_rows.index, s.CELL_TO_COL] = row[s.CELL_TO_COL]
+                        try:
+                            household.loc[connected_leg_rows.index+1, s.CELL_FROM_COL] = row[s.CELL_TO_COL]
+                        except:  # Kann nicht existieren, kein Problem
+                            logger.debug(f"Did not update CELL_FROM for connected leg {leg_id} in household {household[s.UNIQUE_HH_ID_COL].iloc[0]}")
+
+                        # Add the person to the set of connected persons
+                        connected_person_id = connected_leg_rows[s.UNIQUE_P_ID_COL].iloc[0]
+                        connections_placed_persons.add(connected_person_id)
+
+            # Place remaining legs of connected persons
+            for _, person in household.groupby(s.UNIQUE_P_ID_COL):
+                if person[s.UNIQUE_P_ID_COL].iloc[0] in fully_placed_persons:
+                    continue
+                if person[s.UNIQUE_P_ID_COL].iloc[0] in connections_placed_persons:
+                    conn_person_with_all = self.locate_sec_chains(person)
+
+                    # Update the original household df with the located person
+                    original_index = household.index
+                    columns_to_update = [s.CELL_TO_COL, s.CELL_FROM_COL]
+                    located_person_subset = conn_person_with_all.set_index(s.UNIQUE_LEG_ID_COL)[columns_to_update]
+                    household.set_index(s.UNIQUE_LEG_ID_COL, inplace=True)
+                    household.loc[located_person_subset.index, columns_to_update] = located_person_subset
+                    household.reset_index(inplace=True)
+                    household.set_index(original_index, inplace=True)
+                    fully_placed_persons.add(person[s.UNIQUE_P_ID_COL].iloc[0])
+
+            if len(fully_placed_persons) != len(household[s.UNIQUE_P_ID_COL].unique()):
+                logger.info(f"Not all persons in household {household[s.UNIQUE_HH_ID_COL].iloc[0]} are connected to the main person.")
+                # Place remaining persons as main persons
+                for _, person in household.groupby(s.UNIQUE_P_ID_COL):
+                    if person[s.UNIQUE_P_ID_COL].iloc[0] in fully_placed_persons:
+                        continue
+                    person_with_main = self.locate_main_activity_cells(person)
+                    person_with_main = h.add_from_cell_fast(person_with_main)
+                    person_with_all = self.locate_sec_chains(person_with_main)
+
+                    # Update the original household df with the located person
+                    original_index = household.index
+                    columns_to_update = [s.CELL_TO_COL, s.CELL_FROM_COL]
+                    located_person_subset = person_with_all.set_index(s.UNIQUE_LEG_ID_COL)[columns_to_update]
+                    household.set_index(s.UNIQUE_LEG_ID_COL, inplace=True)
+                    household.loc[located_person_subset.index, columns_to_update] = located_person_subset
+                    household.reset_index(inplace=True)
+                    household.set_index(original_index, inplace=True)
+
+                    fully_placed_persons.add(person[s.UNIQUE_P_ID_COL].iloc[0])  # For checking
+
+            if len(fully_placed_persons) != len(household[s.UNIQUE_P_ID_COL].unique()):  # All should be placed now
+                logger.error(f"Not all persons in connected household {household[s.UNIQUE_HH_ID_COL].iloc[0]} were placed.")
+                logger.error(f"Fully placed persons: {fully_placed_persons}")
+                logger.error(f"Connected persons: {connections_placed_persons}")
+                logger.error(f"Remaining persons: {set(household[s.UNIQUE_P_ID_COL].unique()) - fully_placed_persons}")
+
+            results.append(household)
 
         logger.info("Concatenating results from connected legs.")
         combined_df = pd.concat(results, ignore_index=True)
         logger.info("Connected legs located.")
         return combined_df
+
+
 
     def locate_single_activity(self, start_cell, end_cell, activity_type, time_start_to_act, time_act_to_end,
                                mode_start, mode_end, start_hour,

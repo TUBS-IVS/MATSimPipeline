@@ -23,7 +23,7 @@ add_all_columns = True
 def enhance_travel_survey():
     """
     Creates a combined leg file from the MiD-survey household, person and trip files.
-    Imputes values, adds attributes, and removes unusable rows.
+    Imputes values, adds attributes.
     :return:
     Notes:
         - The ids of households, persons and trips must be unique within the population sample (e.g. MiD)
@@ -90,13 +90,6 @@ def enhance_travel_survey():
     logger.info(f"Population df after adding trips: \n{population.df.head()}")
     population.check_for_merge_suffixes()
 
-    # There might be people with 0 legs, meaning they didn't travel on the survey day.
-    # All people where there are 0 legs for other reasons, e.g. because of missing data, must be removed in the inputs.
-    # For MiD, all people with 0 legs can be assumed to not have travelled.
-    # We keep them in the population.
-
-    # population.df = population.df[population.df[s.LEG_ID_COL].notna()].reset_index()
-
     # Add trip attributes from MiD
     if add_all_columns:
         list_L_COLUMNS = None
@@ -136,25 +129,10 @@ def enhance_travel_survey():
     population.adjust_mode_based_on_license()
 
     population.find_connected_legs()
-    # # Savepoint for testing
-    # output_dir = "output/111"
-    # if not os.path.exists(output_dir):
-    #     os.makedirs(output_dir)
-    # population.df.to_csv("output/111/full_population_frame.csv", index=False)
-    # logger.info(f"Wrote population output file to output/111/full_population_frame.csv")
-    # population.df = pd.read_csv("output/111/full_population_frame.csv", dtype={s.CONNECTED_LEGS_COL: str})
-    # population.load_df_from_csv("output/111/full_population_frame.csv", if_df_exists='replace')
-    # population.df[s.CONNECTED_LEGS_COL] = population.df[s.CONNECTED_LEGS_COL].apply(lambda x: str(x) if x == x else x)
-    # population.df[s.CONNECTED_LEGS_COL].apply(h.clean_string)
-
     population.close_connected_leg_groups()
     population.mark_connected_persons_and_hhs()
     population.count_connected_legs_per_person()
-
     population.adjust_mode_based_on_connected_legs()
-    #
-
-    # population.set_column_type([s.LEG_START_TIME_COL, s.LEG_END_TIME_COL], "datetime64[ns]")  # testing, not necessary
 
     population.add_return_home_leg()
     population.update_number_of_legs(s.NUMBER_OF_LEGS_INCL_IMPUTED_COL)  # Writes new column
@@ -173,19 +151,11 @@ def enhance_travel_survey():
 
     logger.info(f"Population df after applying L group rules: \n{population.df.head()}")
 
-    # Remove cols that were used by rules, to keep the df clean
-    # population.remove_columns_marked_for_later_deletion()
-
-    # population.vary_times_by_person("unique_person_id", [s.LEG_START_TIME_COL, s.LEG_END_TIME_COL])
-
     # Write stats
-    population.write_stats()
-
-    # population.write_households_to_matsim_xml()  # TESTING (PASS())
-    # population.write_vehicles_to_matsim_xml()  # TESTING (PASS())
+    # population.write_stats()
 
     population.df.to_csv(os.path.join(matsim_pipeline_setup.OUTPUT_DIR, "enhanced_frame_final.csv"), index=False)
-    logger.info(f"Wrote population output file to {s.POPULATION_ANALYSIS_OUTPUT_FILE}")
+    logger.info(f"Wrote population output file.")
 
     logger.info(f"Finished enhance_travel_survey pipeline")
     return

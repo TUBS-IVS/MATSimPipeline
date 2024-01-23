@@ -33,7 +33,6 @@ class PopulationFrameProcessor(DataFrameProcessor):
         result = h.distribute_by_weights(self.df, weights_df, cell_id_col, cut_missing_ids)
         self.df = self.df.merge(result[[s.UNIQUE_HH_ID_COL, 'home_loc']], on=s.UNIQUE_HH_ID_COL, how='left')
 
-
     def write_plans_to_matsim_xml(self):
         """
         Write to MATSim xml.gz directly from the dataframe.
@@ -340,7 +339,6 @@ class PopulationFrameProcessor(DataFrameProcessor):
         # Convert datetime to numeric (timestamp) for calculation
         first_legs['timestamp'] = first_legs['leg_start_time'].view(np.int64)
 
-        # Group by activity type and calculate mean and std of timestamps
         result = first_legs.groupby(s.LEG_TO_ACTIVITY_COL)['timestamp'].agg(['mean', 'std'])
 
         result['mean'] = pd.to_datetime(result['mean'])
@@ -414,82 +412,6 @@ class PopulationFrameProcessor(DataFrameProcessor):
         self.df = pd.concat([self.df, new_rows_df]).sort_values([s.UNIQUE_P_ID_COL, s.LEG_ID_COL]).reset_index(drop=True)
         logger.info(f"Added return home legs.")
 
-    # def estimate_leg_times_averages(self):
-    #     """
-    #     Estimates leg_start_time and leg_end_time if they are missing.
-    #     """
-    #     persons = self.df.groupby("unique_person_id")
-    #     logger.info(f"Estimating times, where missing, for {len(persons)} persons...")
-    #
-    #     first_leg_start_time_distribution = (self.first_leg_start_time_distribution()).astype(int)
-    #     activity_times_distribution_seconds = (self.activity_times_distribution_seconds()).astype(int)
-    #     leg_duration_distribution_seconds = (self.leg_duration_distribution_seconds()).astype(int)
-    #
-    #     # Initialize an empty list for updates (significantly faster than updating the original df each time)
-    #     updated_persons = []
-    #
-    #     for person_id, person in persons:
-    #         person = person.copy()  # Work on a copy to avoid SettingWithCopyWarning
-    #
-    #         if len(person) == 1:
-    #             if pd.isna(person.at[person.index[0], s.LEG_NON_UNIQUE_ID_COL]):
-    #                 logger.debug(f"Person {person_id} has no legs. Skipping...")
-    #                 continue
-    #             # Persons with one leg might be problematic, but impute times for them anyway
-    #             logger.warning(f"Person {person_id} has only one leg.")
-    #
-    #         # Check for negative activity times
-    #         if (person[s.ACT_DUR_SECONDS_COL] < 0).any():
-    #             first_negative_time_index = person[person[s.ACT_DUR_SECONDS_COL] < 0].index[0]
-    #             logger.debug(f"Person {person_id} has negative activity times. Removing all times after the first bad time.")
-    #             for col in [s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]:
-    #                 person.loc[first_negative_time_index:, col] = None
-    #
-    #         if person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]].isna().any().any():
-    #             first_index = person.index[0]
-    #             first_missing_time_index = person[person[s.LEG_START_TIME_COL].isna() | person[s.LEG_END_TIME_COL].isna()].index[
-    #                 0]
-    #             if first_missing_time_index == first_index:
-    #                 logger.debug(
-    #                     f"Person {person_id} has no time information, imputation from index {first_missing_time_index}...")
-    #             else:
-    #                 logger.debug(
-    #                     f"Person {person_id} has some time information, imputation from index {first_missing_time_index}...")
-    #
-    #             # Start updating times from the first missing time
-    #             for idx in range(first_missing_time_index, first_index + len(person)):
-    #                 if idx == first_missing_time_index:
-    #                     if idx == first_index:  # Start of the day
-    #                         random_day_start = pd.Timestamp(s.BASE_DATE) + pd.Timedelta(hours=random.randint(5, 9),
-    #                                                                                     minutes=random.randint(0, 59))
-    #                         next_start_time = random_day_start if pd.isna(person.at[idx, s.LEG_START_TIME_COL]) else \
-    #                             person.at[idx, s.LEG_START_TIME_COL]
-    #                     else:
-    #                         prev_end_time = person.at[idx - 1, s.LEG_END_TIME_COL]
-    #                         next_start_time = prev_end_time + pd.Timedelta(
-    #                             seconds=average_activity_times[person.at[idx - 1, s.LEG_ACTIVITY_COL]])
-    #                 else:
-    #                     prev_end_time = person.at[idx - 1, s.LEG_END_TIME_COL]
-    #                     next_start_time = prev_end_time + pd.Timedelta(
-    #                         seconds=average_activity_times[person.at[idx - 1, s.LEG_ACTIVITY_COL]])
-    #
-    #                 person.at[idx, s.LEG_START_TIME_COL] = next_start_time
-    #                 person.at[idx, s.LEG_END_TIME_COL] = next_start_time + pd.Timedelta(
-    #                     seconds=average_leg_times[person.at[idx, s.LEG_ACTIVITY_COL]])
-    #
-    #             logger.debug(f"Person {person_id} updated times: \n{person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]]}")
-    #             if person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]].isna().any().any():
-    #                 logger.warning(f"Person {person_id} still has missing times. "
-    #                                f"Check the data and try again. Skipping...")
-    #                 continue
-    #             updated_persons.append(person)
-    #     if updated_persons:
-    #         logger.debug(f"Concatenating {len(updated_persons)} updated persons...")
-    #         updated_df = pd.concat(updated_persons)
-    #         logger.debug(f"Updating original df...")
-    #         self.df.update(updated_df)
-    #     logger.info("Time estimation completed.")
-
     def estimate_leg_times(self):
         """
         Estimates leg_start_time and leg_end_time if they are missing, using data from similar persons.
@@ -518,7 +440,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 for col in [s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]:
                     person.loc[first_bad_time_index:, col] = None
 
-            # Check for bad leg times (MiD-codes)  #TODO. rework this
+            # Check for bad leg times (MiD-codes)
             if (person[s.LEG_DURATION_MINUTES_COL] > 1000).any():
                 first_bad_time_index = person[person[s.LEG_DURATION_MINUTES_COL] > 1000].index[0]
                 logger.debug(f"Person {person_id} has bad leg times. Removing all times after the first bad time.")
@@ -651,7 +573,6 @@ class PopulationFrameProcessor(DataFrameProcessor):
         logger.info("Varying times by household...")
 
         def apply_time_shift(group):
-            # Generate a random time shift between -max_shift_minutes and +max_shift_minutes
             time_shift = timedelta(minutes=np.random.randint(-max_shift_minutes, max_shift_minutes + 1))
 
             # Apply this time shift to all time columns
@@ -659,7 +580,6 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 group[col] = group[col].apply(lambda x: x + time_shift if pd.notnull(x) else x)
             return group
 
-        # Group by person and apply the function
         self.df = self.df.groupby(hh_id_col).apply(apply_time_shift)
         logger.info("Times varied by person.")
 
@@ -845,7 +765,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
         logger.info("Updated activity for protagonist legs.")
 
-    def add_from_activity(self):  # MA DONE
+    def add_from_activity(self):
         """
         Add a 'from_activity' column to the DataFrame, which is the to_activity of the previous leg.
         For the first leg of each person, set 'from_activity' based on 'starts_at_home' (-> home or unspecified).
@@ -927,7 +847,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
                                                     'direct_mode',
                                                     'slack_factor'])
 
-    def list_cars_in_household(self):  # MA DONE
+    def list_cars_in_household(self):
         """
         Create a list of cars with unique ids in each household and add it to the DataFrame.
         """
@@ -954,7 +874,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
         logger.info(f"Listed {total_cars} cars in {len(hhs)} households for {self.df[s.UNIQUE_P_ID_COL].nunique()} persons, "
                     f"meaning {total_cars / self.df[s.UNIQUE_P_ID_COL].nunique()} cars per person on average.")
 
-    def impute_cars_in_household(self):  # TODO: add some actual imputation
+    def impute_cars_in_household(self):  # Unfinished.
         """
         Impute the number of cars in a household if unknown, based on the number of cars in similar households.
         """
@@ -965,7 +885,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
         # Set all other unknown values to 0
         self.df.loc[self.df[s.H_NUMBER_OF_CARS_COL].isna, s.H_NUMBER_OF_CARS_COL] = 0
 
-    def mark_mirroring_main_activities(self, duration_threshold_seconds=7200):  # C DONE, UNTESTED, MA NOT
+    def mark_mirroring_main_activities(self, duration_threshold_seconds=7200):
         """
         Mark activities that mirror the peron's main activity; activities that still likely represent the same main activity, but
         are separated by a different, short, activity (e.g. a lunch break between two work activities).
@@ -1172,7 +1092,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
         self.df[s.MAIN_MODE_TO_MAIN_ACT_DISTBASED_COL] = self.df[s.UNIQUE_P_ID_COL].map(main_modes_dist)
         logger.info("Determined main mode to main activity.")
 
-    def filter_home_to_home_legs(self):  # TODO: test PASSED
+    def filter_home_to_home_legs(self):
         """
         Filters out 'home to home' legs from the DataFrame.
         """
@@ -1182,7 +1102,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
         self.df = self.df[~home_to_home_condition].reset_index(drop=True)
         logger.info(f"Filtered out 'home to home' legs. {len(self.df)} rows remaining.")
 
-    def update_number_of_legs(self, col_to_write_to=s.NUMBER_OF_LEGS_COL):  # TODO: test PASSED. Repeat run.
+    def update_number_of_legs(self, col_to_write_to=s.NUMBER_OF_LEGS_COL):
         """
         Updates the NUMBER_OF_LEGS_COL with the correct number of legs for each person;
         or writes a new col with the given name.
@@ -1202,6 +1122,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
         Find connections between trip legs in a household.
         Uses unique_leg_id; lists all legs that are connected to each leg.
         """
+        logger.info("Finding connected legs...")
+
         # Group by household
         households = self.df.groupby(s.UNIQUE_HH_ID_COL)
         num_households = len(households)

@@ -73,30 +73,6 @@ def create_unique_leg_ids():
     logger.info(f"Created unique leg ids in {s.MiD_TRIPS_FILE}.")
 
 
-# def read_csv(csv_path: str, test_col=None, use_cols=None):
-#     """
-#     Read a csv file with unknown separator and return a dataframe.
-#     :param csv_path: Path to csv file.
-#     :param test_col: Column name that should be present in the file.
-#     :param use_cols: List of columns to use from the file. Defaults to all columns.
-#     """
-#     try:
-#         df = pd.read_csv(csv_path, sep=',', usecols=use_cols)
-#         if test_col is not None:
-#             test = df[test_col]
-#     except (KeyError, ValueError):  # Sometimes also throws without test_col, when the file is not comma-separated. This is good.
-#         logger.info(f"ID column '{test_col}' not found in {csv_path}, trying to read as ';' separated file...")
-#         df = pd.read_csv(csv_path, sep=';', usecols=use_cols)
-#         try:
-#             if test_col is not None:
-#                 test = df[test_col]
-#         except (KeyError, ValueError):
-#             logger.error(f"ID column '{test_col}' still not found in {csv_path}, verify column name and try again.")
-#             raise
-#         logger.info("Success.")
-#     return df
-
-
 def read_csv(csv_path: str, test_col=None, use_cols=None):
     """
     Read a csv file with unknown separator and return a dataframe.
@@ -129,6 +105,9 @@ def read_csv(csv_path: str, test_col=None, use_cols=None):
 
 
 def string_to_shapely_point(point_input):
+    """
+    Needed when loading a point from a csv file, because it is loaded as a string.
+    """
     if isinstance(point_input, Point):
         return point_input
     if not isinstance(point_input, str):
@@ -471,7 +450,7 @@ class SlackFactors:
             updated_leg_chain = self.solve_level(leg_chain, level)
             return self.get_all_estimated_times_with_slack(updated_leg_chain, level + 1)
 
-    def get_all_adjusted_times_with_slack(self, leg_chain, real_total_time):  # TODO: finish!!!
+    def get_all_adjusted_times_with_slack(self, leg_chain, real_total_time):
         """
         When the real total time is known, this function can be used to adjust the estimated times with slack.
         This guarantees that a valid leg chain can be built.
@@ -479,9 +458,9 @@ class SlackFactors:
         """
         df, highest_level = self.get_all_estimated_times_with_slack(leg_chain)
 
-        # Find the index of the row you want to modify
         if f'level_{highest_level}' in df.columns:
             highest_lvl_leg_index = df[df[f'level_{highest_level}'].notna()].index
+        # Fallback for when the highest level is 0 and similar cases
         elif f'level_{highest_level - 1}' in df.columns:
             highest_level = highest_level - 1
             highest_lvl_leg_index = df[df[f'level_{highest_level}'].notna()].index
@@ -491,53 +470,105 @@ class SlackFactors:
         else:
             raise ValueError(f"Could not find any column to adjust.")
 
-        # Check if the number of rows is exactly 1
+        # There should be one time in the highest level
         if len(highest_lvl_leg_index) != 1:
             logger.error(f"Expected 1 leg in highest level, found {len(highest_lvl_leg_index)}.")
 
-        # df.at[highest_lvl_leg_index[0], f'level_{highest_level}'] = real_total_time # TODO: implement
+        # Adjust the highest level
+        df.at[highest_lvl_leg_index[0], f'level_{highest_level}'] = real_total_time
 
+        # If highest level is 1, we're done
+        if highest_level == 1:
+            return df, highest_level
+
+        # Get highest level bounds
         lower_bound = df.at[highest_lvl_leg_index[0], f'level_{highest_level}_lower_bound']
         upper_bound = df.at[highest_lvl_leg_index[0], f'level_{highest_level}_upper_bound']
 
-        if lower_bound < real_total_time < upper_bound:
+        # Adjust all else if necessary
+        if lower_bound <= real_total_time <= upper_bound:
             logger.debug(f"Real total time is within bounds of highest level.")
             return df, highest_level
         else:
             logger.debug(f"Real total time is outside bounds of highest level, adjusting...")
-            return df, highest_level  # For now...
-            # Highest level to including level 1
-            # for level in range(highest_level, 0, -1):
-            #     # Adjust for every higher-level leg
-            #     for i, row in df.iterrows():
-            #         if df.loc[i, f'level_{level}'].isna():
-            #             continue
-            #         # # Check if there are non-NaN values to the right of the current leg in the higher-level columns
-            #         # # This means the leg already belongs to another higher-level leg ;(
-            #         # if df.loc[i, f'level_{level + 1}':].notna().any():
-            #         #     continue
-            #
-            #         # Find the first non-NaN values below the current row in the lower-level column
-            #         lower_level_legs = df.loc[i:, f'level_{level}'].dropna()
-            #
-            #         # If there are two legs below the current leg, apply the formula
-            #         if len(lower_level_legs) == 2:
-            #             leg1 = lower_level_legs.iloc[0]
-            #             leg2 = lower_level_legs.iloc[1]
-            #             delta_L_high = real_total_time - df.loc[i, f'level_{level + 1}']
-            #
-            #             L_bounds1 = df.loc[i, f'level_{level}_lower_bound']
-            #             L_bounds2 = df.loc[i, f'level_{level}_lower_bound']
-            #
-            #             L_high = df.loc[i, f'level_{level + 1}']
-            #
-            #             delta_L1 = (L_bounds1 * delta_L_high * (leg1 + leg2) ** 2) / (L_high * (leg1 * L_bounds1 + leg2 * L_bounds2))
-            #             delta_L2 = (L_bounds2 * delta_L_high * (leg1 + leg2) ** 2) / (L_high * (leg1 * L_bounds1 + leg2 * L_bounds2))
-            #
-            #             df.loc[i, f'level_{level}'] += delta_L1
-            #             df.loc[i + 1, f'level_{level}'] += delta_L2
-            #
-            # return df
+
+            # One below highest level down to including level 1
+            for level in range(highest_level - 1, 0, -1):
+
+                # Pair legs the same way as in the solver
+                times_col = f"level_{level}"  # Here we expect some NaN values
+
+                legs_to_process = df[df[times_col].notna()].copy()
+                legs_to_process['original_index'] = legs_to_process.index
+
+                # Reset index for reliable pairing
+                legs_to_process.reset_index(drop=True, inplace=True)
+                legs_to_process['pair_id'] = legs_to_process.index // 2
+
+                for pair_id, group in legs_to_process.groupby('pair_id'):
+                    if len(group) == 1:
+                        continue
+                    else:
+                        # Get the higher leg index and its values
+                        higher_leg_index = group['original_index'].iloc[-1]
+                        higher_leg_value = df.at[higher_leg_index, f'level_{level+1}']
+                        higher_leg_lower_bound = df.at[higher_leg_index, f'level_{level+1}_lower_bound']
+                        higher_leg_upper_bound = df.at[higher_leg_index, f'level_{level+1}_upper_bound']
+
+                        if higher_leg_value < higher_leg_lower_bound: # We have strongly overshot because the REAL higher value is lower than the lower bound
+                            # Make longer leg shorter, shorter leg longer
+                            leg1_value = df.at[group['original_index'].iloc[0], f'level_{level}']
+                            leg2_value = df.at[group['original_index'].iloc[1], f'level_{level}']
+
+                            if leg1_value > leg2_value:
+                                L_bounds1 = abs(df.at[group['original_index'].iloc[0], f'level_{level}_lower_bound'] - leg1_value)
+                                L_bounds2 = abs(df.at[group['original_index'].iloc[1], f'level_{level}_upper_bound'] - leg2_value)
+
+                                delta_L_high = abs(higher_leg_value - higher_leg_lower_bound)
+
+                                delta_L1 = (L_bounds1 * delta_L_high * (leg1_value + leg2_value) ** 2) / (
+                                        higher_leg_value * (leg1_value * L_bounds1 + leg2_value * L_bounds2))
+                                delta_L2 = (L_bounds2 * delta_L_high * (leg1_value + leg2_value) ** 2) / (
+                                        higher_leg_value * (leg1_value * L_bounds1 + leg2_value * L_bounds2))
+
+                                df.loc[group['original_index'].iloc[0], f'level_{level}'] -= delta_L1
+                                df.loc[group['original_index'].iloc[1], f'level_{level}'] += delta_L2
+                            else:
+                                L_bounds1 = abs(df.at[group['original_index'].iloc[0], f'level_{level}_upper_bound'] - leg1_value)
+                                L_bounds2 = abs(df.at[group['original_index'].iloc[1], f'level_{level}_lower_bound'] - leg2_value)
+
+                                delta_L_high = abs(higher_leg_value - higher_leg_lower_bound)
+
+                                delta_L1 = (L_bounds1 * delta_L_high * (leg1_value + leg2_value) ** 2) / (
+                                        higher_leg_value * (leg1_value * L_bounds1 + leg2_value * L_bounds2))
+                                delta_L2 = (L_bounds2 * delta_L_high * (leg1_value + leg2_value) ** 2) / (
+                                        higher_leg_value * (leg1_value * L_bounds1 + leg2_value * L_bounds2))
+
+                                df.loc[group['original_index'].iloc[0], f'level_{level}'] += delta_L1
+                                df.loc[group['original_index'].iloc[1], f'level_{level}'] -= delta_L2
+
+                        elif higher_leg_value > higher_leg_upper_bound: # We have strongly undershot because the REAL higher value is higher than the upper bound
+                            # Make both legs longer (both move to upper bound)
+                            leg1_value = df.at[group['original_index'].iloc[0], f'level_{level}']
+                            leg2_value = df.at[group['original_index'].iloc[1], f'level_{level}']
+
+                            L_bounds1 = abs(df.at[group['original_index'].iloc[0], f'level_{level}_upper_bound'] - leg1_value)
+                            L_bounds2 = abs(df.at[group['original_index'].iloc[1], f'level_{level}_upper_bound'] - leg2_value)
+
+                            delta_L_high = abs(higher_leg_value - higher_leg_upper_bound)
+
+                            delta_L1 = (L_bounds1 * delta_L_high * (leg1_value + leg2_value) ** 2) / (
+                                        higher_leg_value * (leg1_value * L_bounds1 + leg2_value * L_bounds2))
+                            delta_L2 = (L_bounds2 * delta_L_high * (leg1_value + leg2_value) ** 2) / (
+                                        higher_leg_value * (leg1_value * L_bounds1 + leg2_value * L_bounds2))
+
+                            df.loc[group['original_index'].iloc[0], f'level_{level}'] += delta_L1
+                            df.loc[group['original_index'].iloc[1], f'level_{level}'] += delta_L2
+
+                        else:
+                            return df, highest_level
+
+            return df, highest_level
 
     def solve_level(self, leg_chain, level):
         """
@@ -620,19 +651,9 @@ class TTMatrices:
             if mode in ['bike', 'walk']:
                 if len(matrices) != 1:
                     logger.warning(f"Expected 1 {mode} matrix, found {len(matrices)}")
-                # for df in matrices.values():
-                #     if not {'FROM', 'TO', 'VALUE'}.issubset(df.columns):
-                #         raise ValueError(f"Invalid {mode} matrix. Columns must include FROM, TO, VALUE.")
-                #     if len(df) != tt_rows_num:
-                #         raise ValueError(f"Invalid {mode} matrix. Number of rows must be {tt_rows_num}.")
             else:
                 if len(matrices) != 24:
                     logger.warning(f"Expected 24 {mode} matrices, found {len(matrices)}")
-                # for df in matrices.values():
-                #     if not {'FROM', 'TO', 'VALUE'}.issubset(df.columns):
-                #         raise ValueError(f"Invalid {mode} matrix. Columns must include FROM, TO, VALUE.")
-                #     if len(df) != tt_rows_num:
-                #         raise ValueError(f"Invalid {mode} matrix. Number of rows must be {tt_rows_num}.")
 
         logger.info(f"Loaded travel time matrices for {len(self.tt_matrices['car'])} hours.")
 
@@ -816,7 +837,7 @@ def check_mode(leg_to_find, leg_to_compare):
     return False
 
 
-def check_activity(leg_to_find, leg_to_compare):  # TODO: Possibly create a matrix of compatible activities
+def check_activity(leg_to_find, leg_to_compare):
     compatible_activities = {
         s.ACTIVITY_SHOPPING: [s.ACTIVITY_ERRANDS],
         s.ACTIVITY_ERRANDS: [s.ACTIVITY_SHOPPING, s.ACTIVITY_LEISURE],
@@ -856,7 +877,7 @@ class Capacities:
     """
 
     def __init__(self, capa_cells_shp_path: str = None, capa_points_shp_path: str = None, capa_cells_csv_path: str = None,
-                 capa_points_csv_path: str = None):  # TODO: add this flexibility, else remove from thesis
+                 capa_points_csv_path: str = None):  # Flexibility not implemented fully
 
         logger.info("Initializing capacities...")
         # if capa_points_shp_path is not None:
@@ -1200,29 +1221,9 @@ def assign_points(df, shapefile_path, df_cell_name_column, gdf_cell_name_column,
                 logger.debug(f"Assigning point for cell: {cell_name}")
                 point = random_point_in_cell(cell_geometry_map[cell_name])
                 df.at[index, point_column_name] = point
-            # else:
-            #     point_strings = [
-            #         "POINT (557406.047302496 5804532.882341754)",
-            #         "POINT (557461.4542418872 5805505.880049294)",
-            #         "POINT (557406.047302496 5804532.882341754)",
-            #         "POINT (558086.8481817514 5805003.171151079)",
-            #         "POINT (550068.9344878009 5802820.698924298)",
-            #         "POINT (551177.4849569078 5800578.928120851)",
-            #         "POINT (549764.1748679808 5806810.51995238)",
-            #         "POINT (547883.4262508928 5806678.701907538)",
-            #         "POINT (545157.5826553579 5803478.569045149)"
-            #     ]
-            #     point = random.choice(point_strings)   # This should never happen. but catch it to be sure
-            #     logger.warning(f"Cell {cell_name} not found in shapefile. Assigning random point: {point}")
-            #     df.at[index, point_column_name] = point
+
         else:
             logger.debug(f"Skipping assignment for cell: {cell_name}")
-
-    # # Assign random points to DataFrame rows where the point column is empty
-    # df[point_column_name] = df.apply(
-    #     lambda row: random_point_in_cell(cell_geometry_map[row[df_cell_name_column]])
-    #     if row[df_cell_name_column] in cell_geometry_map and pd.isna(row[point_column_name])
-    #     else row[point_column_name], axis=1)
 
     return df
 

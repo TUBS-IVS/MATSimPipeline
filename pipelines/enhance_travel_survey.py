@@ -149,7 +149,7 @@ def enhance_travel_survey():
     population.translate_modes()
     population.translate_activities()
 
-    logger.info(f"Population df after applying L group rules: \n{population.df.head()}")
+    logger.info(f"Final population df: \n{population.df.head()}")
 
     # Write stats
     # population.write_stats()

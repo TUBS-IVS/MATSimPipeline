@@ -10,7 +10,6 @@ from utils.logger import logging
 
 logger = logging.getLogger(__name__)
 
-
 class ActivityLocator:
     """
     TIME-based localizer.
@@ -324,6 +323,40 @@ class ActivityLocator:
         logger.info("Connected legs located.")
         return combined_df
 
+    def get_candidate_locations():
+        
+
+    def evaluate_location():
+        return 1
+    
+
+class CandidateIndex:
+    """
+    Spacial index of activity locations split by purpose.
+    This class is used to quickly find the nearest activity locations for a given location.
+    """
+    
+    def __init__(self, data):
+        self.data = data
+        self.indices = {}
+
+        for purpose, data in self.data.items():
+            print("Constructing spatial index for %s ..." % purpose)
+            self.indices[purpose] = sklearn.neighbors.KDTree(data["locations"])
+
+    def query(self, purpose, location, num_candidates = 1):
+        index = self.indices[purpose].query(location.reshape(1, -1), return_distance = False)[0][:num_candidates-1]
+        identifier = self.data[purpose]["identifiers"][index]
+        location = self.data[purpose]["locations"][index]
+        return identifier, location
+
+    def sample(self, purpose, random):
+        index = random.randint(0, len(self.data[purpose]["locations"]))
+        identifier = self.data[purpose]["identifiers"][index]
+        location = self.data[purpose]["locations"][index]
+        return identifier, location
+    
+
 
 
     def locate_single_activity(self, start_cell, end_cell, activity_type, time_start_to_act, time_act_to_end,
@@ -519,4 +552,5 @@ class ActivityLocator:
                 legs_to_locate.loc[located_leg_index + 1, s.CELL_FROM_COL] = cell
 
         return legs_to_locate
+    
 

@@ -153,7 +153,7 @@ def popsim_to_matsim_plans_main():
         located_pop_with_points.loc[located_pop_with_points[s.COORD_TO_COL].isna(), s.COORD_TO_COL] = (
             located_pop_with_points.loc)[located_pop_with_points[s.COORD_TO_COL].isna(), "home_loc"]
     else:
-        logger.info(f"All legs have a coord_to.")
+        logger.info("All legs have a coord_to.")
 
     population = PopulationFrameProcessor(located_pop_with_points)
 
@@ -183,7 +183,7 @@ def popsim_to_matsim_plans_main():
         logger.info(f"Wrote population analysis output file to {s.POPULATION_ANALYSIS_OUTPUT_FILE}")
 
     logger.info(f"Finished popsim_to_matsim_plans pipeline")
-    return
+    
 
 
 def process_chunk(chunk_df):

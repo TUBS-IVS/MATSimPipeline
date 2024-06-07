@@ -324,7 +324,7 @@ class ActivityLocator:
         return combined_df
 
     def get_candidate_locations():
-        
+        pass
 
     def evaluate_location():
         return 1

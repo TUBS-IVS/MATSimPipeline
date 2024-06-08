@@ -330,32 +330,75 @@ class ActivityLocator:
         return 1
     
 
+from typing import Tuple, List, Dict, Any
+import numpy as np
+from sklearn.neighbors import KDTree
+import random as rnd
+
 class CandidateIndex:
     """
-    Spacial index of activity locations split by purpose.
+    Spatial index of activity locations split by purpose.
     This class is used to quickly find the nearest activity locations for a given location.
     """
-    
-    def __init__(self, data):
-        self.data = data
-        self.indices = {}
 
-        for purpose, data in self.data.items():
-            print("Constructing spatial index for %s ..." % purpose)
-            self.indices[purpose] = sklearn.neighbors.KDTree(data["locations"])
+    def __init__(self, data: Dict[str, Dict[str, np.ndarray]], initial_capacities: Dict[str, np.ndarray]):
+        self.data: Dict[str, Dict[str, np.ndarray]] = data
+        self.initial_capacities: Dict[str, np.ndarray] = initial_capacities
+        self.capacities: Dict[str, np.ndarray] = {purpose: capacities.copy() for purpose, capacities in initial_capacities.items()}
+        self.indices: Dict[str, KDTree] = {}
 
-    def query(self, purpose, location, num_candidates = 1):
-        index = self.indices[purpose].query(location.reshape(1, -1), return_distance = False)[0][:num_candidates-1]
+        for purpose, pdata in self.data.items():
+            print(f"Constructing spatial index for {purpose} ...")
+            self.indices[purpose] = KDTree(pdata["locations"])
+
+    def query(self, purpose: str, location: np.ndarray, num_candidates: int = 1) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Find the nearest activity locations for a given location and purpose.
+        :param purpose: The purpose category to query.
+        :param location: A 1D numpy array representing the location to query (coordinates [1.5, 2.5]).
+        :param num_candidates: The number of nearest candidates to return.
+        :return: A tuple containing four numpy arrays: identifiers, locations, distances, and remaining capacities of the nearest candidates.
+        """
+        # Ensure location is a 2D array with a single location
+        location = location.reshape(1, -1)
+
+        # Query the KDTree for the nearest locations
+        distances, indices = self.indices[purpose].query(location, k=num_candidates)
+
+        # Get the identifiers, locations, and distances for the nearest neighbors
+        identifiers = np.array(self.data[purpose]["identifiers"])[indices[0]]
+        nearest_locations = np.array(self.data[purpose]["locations"])[indices[0]]
+        
+        # Get the remaining capacities for the nearest neighbors
+        remaining_capacities = self.capacities[purpose][indices[0]]
+
+        return identifiers, nearest_locations, distances, remaining_capacities
+
+    def sample(self, purpose: str, random: rnd.Random) -> Tuple[Any, np.ndarray]:
+        """
+        Sample a random activity location for a given purpose.
+        :param purpose: The purpose category to sample from.
+        :param random: A random number generator.
+        :return: A tuple containing the identifier and location of the sampled activity.
+        """
+        index = random.randint(0, len(self.data[purpose]["locations"]) - 1)
         identifier = self.data[purpose]["identifiers"][index]
         location = self.data[purpose]["locations"][index]
         return identifier, location
 
-    def sample(self, purpose, random):
-        index = random.randint(0, len(self.data[purpose]["locations"]))
-        identifier = self.data[purpose]["identifiers"][index]
-        location = self.data[purpose]["locations"][index]
-        return identifier, location
-    
+def evaluate_locations(identifiers: np.ndarray, locations: np.ndarray, distances: np.ndarray, capacities: np.ndarray) -> np.ndarray:
+    """
+    Evaluate the returned locations by distance and capacity and return a score.
+    :param identifiers: Numpy array of identifiers for the returned locations.
+    :param locations: Numpy array of locations for the returned locations.
+    :param distances: Numpy array of distances for the returned locations.
+    :param capacities: Numpy array of remaining capacities for the returned locations.
+    :return: Numpy array of scores for the returned locations.
+    """
+    # Calculate the score for each location
+    scores = capacities / distances  #TODO: Improve scoring function
+
+    return scores
 
 
 

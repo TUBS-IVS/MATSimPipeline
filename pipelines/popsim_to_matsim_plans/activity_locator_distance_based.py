@@ -335,7 +335,9 @@ import numpy as np
 from sklearn.neighbors import KDTree
 import random as rnd
 
-class CandidateIndex:
+
+
+class TargetLocations:
     """
     Spatial index of activity locations split by purpose.
     This class is used to quickly find the nearest activity locations for a given location.
@@ -386,19 +388,70 @@ class CandidateIndex:
         location = self.data[purpose]["locations"][index]
         return identifier, location
 
-def evaluate_locations(identifiers: np.ndarray, locations: np.ndarray, distances: np.ndarray, capacities: np.ndarray) -> np.ndarray:
-    """
-    Evaluate the returned locations by distance and capacity and return a score.
-    :param identifiers: Numpy array of identifiers for the returned locations.
-    :param locations: Numpy array of locations for the returned locations.
-    :param distances: Numpy array of distances for the returned locations.
-    :param capacities: Numpy array of remaining capacities for the returned locations.
-    :return: Numpy array of scores for the returned locations.
-    """
-    # Calculate the score for each location
-    scores = capacities / distances  #TODO: Improve scoring function
+import numpy as np
 
-    return scores
+import numpy as np
+
+class LocationScoringFunction:
+    def __init__(self, sigmoid_beta: float, sigmoid_delta_t: float):
+        """
+        Initialize the LocationScoringFunction with sigmoid parameters.
+        
+        :param sigmoid_beta: Controls the steepness of the sigmoid's transition.
+        :param sigmoid_delta_t: The midpoint of the sigmoid's transition.
+        """
+        self.sigmoid_beta = sigmoid_beta
+        self.sigmoid_delta_t = sigmoid_delta_t
+
+    def sigmoid(self, x):
+        """
+        Sigmoid function for likelihood calculation.
+
+        :param x: The input value (time differential) - can be a number, list, or numpy array.
+        :return: Sigmoid function value.
+        """
+        x = np.array(x)  # Ensure x is a numpy array
+        z = -self.sigmoid_beta * (x - self.sigmoid_delta_t)
+        # Use np.clip to limit the values in z to avoid overflow
+        z = np.clip(z, -500, 500)
+        return 1 / (1 + np.exp(z))
+
+    def score_locations(self, identifiers: np.ndarray, locations: np.ndarray, distances: np.ndarray, capacities: np.ndarray, time_diffs=None) -> np.ndarray:
+        """
+        Evaluate the returned locations by distance and capacity and return a score.
+        
+        :param identifiers: Numpy array of identifiers for the returned locations.
+        :param locations: Numpy array of locations for the returned locations.
+        :param distances: Numpy array of distances for the returned locations.
+        :param capacities: Numpy array of remaining capacities for the returned locations.
+        :param time_diffs: List or array of time differential values for each candidate.
+        :return: Numpy array of scores for the returned locations.
+        """
+        # Calculate the base score for each location
+        base_scores = capacities / distances  # TODO: Improve scoring function
+
+        # If time_diffs is provided, adjust scores using the sigmoid function
+        if time_diffs is not None:
+            sigmoid_values = self.sigmoid(time_diffs)
+            adjusted_scores = np.multiply(base_scores, sigmoid_values)
+        else:
+            adjusted_scores = base_scores
+
+        # Normalize the scores to ensure they sum to 1
+        scores = adjusted_scores / np.sum(adjusted_scores)
+        return scores
+
+# # Usage
+# location_scoring_function = LocationScoringFunction(sigmoid_beta=1.0, sigmoid_delta_t=0.0)
+# identifiers = np.array([1, 2, 3])
+# locations = np.array([[0, 0], [1, 1], [2, 2]])
+# distances = np.array([10, 20, 30])
+# capacities = np.array([100, 200, 300])
+# time_diffs = np.array([1, 2, 3])
+
+# scores = location_scoring_function.score_locations(identifiers, locations, distances, capacities, time_diffs)
+# print("Scores:", scores)
+
 
 
 

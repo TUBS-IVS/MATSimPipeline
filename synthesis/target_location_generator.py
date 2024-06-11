@@ -1,11 +1,13 @@
 """Produces target locations with potentials from pretty much any source."""
 
 from utils.logger import logging
+from pyproj import Transformer
 
 logger = logging.getLogger(__name__)
 import requests
 import numpy as np
 import unicodedata
+import pickle
 
 
 class OSMGetter:
@@ -27,10 +29,13 @@ class OSMGetter:
         return data
     
 class OSMDataProcessor:
-    def __init__(self, data):
+    def __init__(self, data, purpose_remap):
         self.data = data
+        self.purpose_remap = purpose_remap
+        self.transformer = Transformer.from_crs("epsg:4326", "epsg:25832")
 
     def get_purposes(self, element):
+        # Loop through possible keys to match elements with purposes
         for key in [
             "amenity",
             "building",
@@ -44,10 +49,10 @@ class OSMDataProcessor:
         ]:
             if key in element["tags"]:
                 value = element["tags"][key]
-                if value in purpose_remap[key]:
-                    return purpose_remap[key][value]
-                elif "*" in purpose_remap[key]:
-                    return purpose_remap[key]["*"]
+                if value in self.purpose_remap[key]:
+                    return self.purpose_remap[key][value]
+                elif "*" in self.purpose_remap[key]:
+                    return self.purpose_remap[key]["*"]
         return ["Unknown"]
 
     def format_name(self, name):
@@ -59,16 +64,30 @@ class OSMDataProcessor:
         # Truncate to first 12 characters
         return formatted_name[:12]
 
+    def transform_coords(self, lon, lat):
+        x, y = self.transformer.transform(lat, lon)
+        return x, y
+
+    def transform_elements_coords(self):
+        # Transform the coordinates of all elements in the JSON data
+        for element in self.data['elements']:
+            if 'lon' in element and 'lat' in element:
+                element['x'], element['y'] = self.transform_coords(element['lon'], element['lat'])
+                del element['lon']
+                del element['lat']
+
     def process_data(self):
+        # Ensure coordinates are transformed before processing anything else
+        self.transform_elements_coords()
+        
         locations_data = {}
+        
         for element in self.data["elements"]:
             if "tags" in element:
                 name = element["tags"].get("name", "Unnamed")
-                lat = float(element.get("lat", np.nan))
-                lon = float(element.get("lon", np.nan))
-                capacity = int(
-                    element["tags"].get("capacity", 0)
-                )  # Assuming capacity is an integer
+                x = element.get("x", np.nan)
+                y = element.get("y", np.nan)
+                capacity = int(element["tags"].get("capacity", 0))  # Assuming capacity is an integer
 
                 purposes = self.get_purposes(element)
 
@@ -79,18 +98,19 @@ class OSMDataProcessor:
                 formatted_name = self.format_name(name)
 
                 # Add the location to each purpose in the purpose dictionary
-                if lat and lon:
+                if not np.isnan(x) and not np.isnan(y):
                     for purpose in purposes:
                         if purpose not in locations_data:
                             locations_data[purpose] = {}
                         # Store the location data along with its capacity and formatted name
                         locations_data[purpose][location_id] = {
-                            "coordinates": np.array([lat, lon]),
+                            "coordinates": np.array([x, y]),
                             "capacity": capacity,
                             "name": formatted_name,
                         }
 
         return locations_data
+
 
 # def get_city_bbox(city_name):
 #     overpass_url = "http://overpass-api.de/api/interpreter"
@@ -419,9 +439,37 @@ def assign_potentials_from_point_data():
     raise NotImplementedError
 
 
-def assign_random_potentials():
-    """Assigns random potentials to locations."""
+def assign_random_capacities(locations_data):
+    """Assigns random capacities to locations."""
+    rng = np.random.default_rng()  # Creating a random number generator instance
+    for purpose, locations in locations_data.items():
+        for location_id, location in locations.items():
+            location["capacity"] = rng.integers(1, 100)
+    return locations_data
+    
 
 data = OSMGetter(query).get_data()
-locations_data = OSMDataProcessor(data).process_data()
-print(locations_data)
+logger.debug(f"OSM data: {data}")
+locations_data = OSMDataProcessor(data, purpose_remap).process_data()
+logger.debug(f"Processed OSM data: {locations_data}")
+
+with open('locations_data.pkl', 'wb') as file:
+    pickle.dump(locations_data, file)
+    
+with open('locations_data.pkl', 'rb') as file:
+    locations_data = pickle.load(file)
+
+locations_data = assign_random_capacities(locations_data)
+logger.debug(f"Locations data with potentials: {locations_data}")
+
+with open('locations_data_with_capacities.pkl', 'wb') as file:
+    pickle.dump(locations_data, file)
+    
+print("Processed OSM Data:")
+for purpose, locations in locations_data.items():
+    print(f"\nPurpose: {purpose}")
+    for location_id, info in locations.items():
+        print(f"  ID: {location_id}")
+        print(f"    Name: {info['name']}")
+        print(f"    Coordinates: {info['coordinates']}")
+        print(f"    Capacity: {info['capacity']}")

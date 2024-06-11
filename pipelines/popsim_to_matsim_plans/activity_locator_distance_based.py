@@ -14,8 +14,41 @@ from typing import Tuple, List, Dict, Any
 import numpy as np
 from sklearn.neighbors import KDTree
 import random as rnd
+import pickle
 
 # TODO: Zum lAufen kriegen 11.06.24
+
+
+def reformat_locations(locations_data: Dict[str, Dict[str, Dict[str, Any]]]) -> Dict[str, Dict[str, np.ndarray]]:
+    """Reformat locations data from a nested dictionary to a dictionary of numpy arrays."""
+    reformatted_data = {}
+
+    for purpose, locations in locations_data.items():
+        identifiers = []
+        names = []
+        coordinates = []
+        capacities = []
+
+        for location_id, location_details in locations.items():
+            identifiers.append(location_id)
+            names.append(location_details['name'])
+            coordinates.append(location_details['coordinates'])
+            capacities.append(location_details['capacity'])
+
+        reformatted_data[purpose] = {
+            'identifiers': np.array(identifiers, dtype=object),
+            'names': np.array(names, dtype=str),
+            'coordinates': np.array(coordinates, dtype=float),
+            'capacities': np.array(capacities, dtype=float)
+        }
+    
+    return reformatted_data
+
+
+from typing import Dict, Tuple, Any
+import numpy as np
+from sklearn.neighbors import KDTree
+import random as rnd
 
 class TargetLocations:
     """
@@ -23,15 +56,13 @@ class TargetLocations:
     This class is used to quickly find the nearest activity locations for a given location.
     """
 
-    def __init__(self, data: Dict[str, Dict[str, np.ndarray]], initial_capacities: Dict[str, np.ndarray]):
+    def __init__(self, data: Dict[str, Dict[str, np.ndarray]]):
         self.data: Dict[str, Dict[str, np.ndarray]] = data
-        self.initial_capacities: Dict[str, np.ndarray] = initial_capacities
-        self.capacities: Dict[str, np.ndarray] = {purpose: capacities.copy() for purpose, capacities in initial_capacities.items()}
         self.indices: Dict[str, KDTree] = {}
 
         for purpose, pdata in self.data.items():
             print(f"Constructing spatial index for {purpose} ...")
-            self.indices[purpose] = KDTree(pdata["locations"])
+            self.indices[purpose] = KDTree(pdata["coordinates"])
 
     def query(self, purpose: str, location: np.ndarray, num_candidates: int = 1) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -39,36 +70,36 @@ class TargetLocations:
         :param purpose: The purpose category to query.
         :param location: A 1D numpy array representing the location to query (coordinates [1.5, 2.5]).
         :param num_candidates: The number of nearest candidates to return.
-        :return: A tuple containing four numpy arrays: identifiers, locations, distances, and remaining capacities of the nearest candidates.
+        :return: A tuple containing four numpy arrays: identifiers, coordinates, distances, and remaining capacities of the nearest candidates.
         """
         # Ensure location is a 2D array with a single location
         location = location.reshape(1, -1)
 
         # Query the KDTree for the nearest locations
-        distances, indices = self.indices[purpose].query(location, k=num_candidates)
-        print(f"Distances: {distances}")
+        candidate_distances, indices = self.indices[purpose].query(location, k=num_candidates)
+        print(f"Distances: {candidate_distances}")
         print(f"Indices: {indices}")
 
-        # Get the identifiers, locations, and distances for the nearest neighbors
-        identifiers = np.array(self.data[purpose]["identifiers"])[indices[0]]
-        nearest_locations = np.array(self.data[purpose]["locations"])[indices[0]]
-        
-        # Get the remaining capacities for the nearest neighbors
-        remaining_capacities = self.capacities[purpose][indices[0]]
+        # Get the identifiers, coordinates, and distances for the nearest neighbors
+        candidate_identifiers = np.array(self.data[purpose]["identifiers"])[indices[0]]
+        candidate_names = np.array(self.data[purpose]["names"])[indices[0]]
+        candidate_coordinates = np.array(self.data[purpose]["coordinates"])[indices[0]]
+        candidate_capacities = np.array(self.data[purpose]["capacities"])[indices[0]]
 
-        return identifiers, nearest_locations, distances, remaining_capacities
+        return candidate_identifiers, candidate_names, candidate_coordinates, candidate_capacities, candidate_distances
 
     def sample(self, purpose: str, random: rnd.Random) -> Tuple[Any, np.ndarray]:
         """
         Sample a random activity location for a given purpose.
         :param purpose: The purpose category to sample from.
         :param random: A random number generator.
-        :return: A tuple containing the identifier and location of the sampled activity.
+        :return: A tuple containing the identifier and coordinates of the sampled activity.
         """
-        index = random.randint(0, len(self.data[purpose]["locations"]) - 1)
+        index = random.randint(0, len(self.data[purpose]["coordinates"]) - 1)
         identifier = self.data[purpose]["identifiers"][index]
-        location = self.data[purpose]["locations"][index]
-        return identifier, location
+        coordinates = self.data[purpose]["coordinates"][index]
+        return identifier, coordinates
+
 
 class LocationScoringFunction:
     def __init__(self, sigmoid_beta: float, sigmoid_delta_t: float):
@@ -119,6 +150,20 @@ class LocationScoringFunction:
         scores = adjusted_scores / np.sum(adjusted_scores)
         return scores
 
+with open('locations_data_with_capacities.pkl', 'rb') as file:
+    locations_data = pickle.load(file)
+
+logger.debug(f"Locations data with potentials: {locations_data}")
+
+reformatted_data = reformat_locations(locations_data)
+
+logger.debug(f"Reformatted locations data: {reformatted_data}")
+
+MyTargetLocations = TargetLocations(reformatted_data)
+#test with epsg:25832
+test_candidates = MyTargetLocations.query("shop", np.array([549637.87573102, 5796618.40418383]), 5)
+logger.debug(f"Test candidates for shop at 52.432047, 9.687902: Identifiers: {test_candidates[0]}, Names: {test_candidates[1]}, Coordinates: {test_candidates[2]}, Capacities: {test_candidates[3]}, Distances: {test_candidates[4]}")
+             
 # # Usage
 # location_scoring_function = LocationScoringFunction(sigmoid_beta=1.0, sigmoid_delta_t=0.0)
 # identifiers = np.array([1, 2, 3])
@@ -131,88 +176,112 @@ class LocationScoringFunction:
 # print("Scores:", scores)
 
 
+def find_circle_intersections(center1: np.ndarray, radius1: float, center2: np.ndarray, radius2: float) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Find the intersection points of two circles.
+    
+    :param center1: The center of the first circle (e.g., np.array([x1, y1])).
+    :param radius1: The radius of the first circle.
+    :param center2: The center of the second circle (e.g., np.array([x2, y2])).
+    :param radius2: The radius of the second circle.
+    :return: A tuple containing two intersection points (each as a np.ndarray).
+             If no direct intersections, returns the closest points on each circle's circumference.
+    """
+    x1, y1 = center1
+    x2, y2 = center2
+    r1 = radius1
+    r2 = radius2
+
+    # Calculate the distance between the two centers
+    d = np.linalg.norm(center1 - center2)
+
+    # Handle non-intersection conditions:
+    if d > (r1 + r2):
+        logger.info("No direct intersection: The circles are too far apart.")
+        logger.info("Finding point on the line with distances proportional to radii as fallback.")
+
+        # Find the point on the line connecting the centers with proportional distances to the radii
+        proportional_distance = r1 / (r1 + r2)
+        point_on_line = center1 + proportional_distance * (center2 - center1)
+        
+        return point_on_line, None
+
+    if d < abs(r1 - r2):
+        logger.info("No direct intersection: One circle is contained within the other.")
+        logger.info("Returning closest point on the circumference of the inner circle.")
+
+        # Find the point on the larger circle nearest to the center of the smaller circle
+        if r1 > r2:
+            closest_point = center2 + r2 * (center1 - center2) / d
+            return closest_point, None
+        else:
+            closest_point = center1 + r1 * (center2 - center1) / d
+            return closest_point, None
+
+    if d == 0 and r1 == r2:
+        logger.info("Infinite intersections: The start and end points and radii are identical.")
+        logger.info("Choosing a point on the perimeter of the circles.")
+        # Choose a point on the perimeter of the circles
+        intersect = np.array([x1 + r1, y1])
+        return intersect, None
+    
+    if d == (r1 + r2) or d == abs(r1 - r2):
+        logger.info("Whaaat? Tangential circles: The circles touch at exactly one point.")
+
+        a = (r1**2 - r2**2 + d**2) / (2 * d)
+        h = 0  # Tangential circles will have h = 0 as h = sqrt(r1^2 - a^2)
+
+        x3 = x1 + a * (x2 - x1) / d
+        y3 = y1 + a * (y2 - y1) / d
+
+        intersection = np.array([x3, y3])
+
+        return intersection, None
+
+    # Calculate points of intersection
+    a = (r1**2 - r2**2 + d**2) / (2 * d)
+    h = np.sqrt(r1**2 - a**2)
+
+    x3 = x1 + a * (x2 - x1) / d
+    y3 = y1 + a * (y2 - y1) / d
+
+    intersect1 = np.array([x3 + h * (y2 - y1) / d, y3 - h * (x2 - x1) / d])
+    intersect2 = np.array([x3 - h * (y2 - y1) / d, y3 + h * (x2 - x1) / d])
+
+    return intersect1, intersect2
+
+def locate_single_activity(start_coord: np.ndarray, end_coord: np.ndarray, purpose: str, distance_start_to_act: float, distance_act_to_end: float) -> Tuple[str, np.ndarray]:
+    """
+    Locate a single activity that is at a specified distance from both start and end points.
+    The activity should be located at the intersection of the two circles defined by the distances.
+
+    :param start_coord:  Coordinates of the start point (e.g., np.array([x1, y1])).
+    :param end_coord: Coordinates of the end point (e.g., np.array([x2, y2])).
+    :param purpose: The purpose identifier for the activity location (placeholder in this context).
+    :param distance_start_to_act: Distance from the start point to the activity location.
+    :param distance_act_to_end: Distance from the activity location to the end point.
+    :return: A tuple containing the activity identifier (as a placeholder) and its coordinates.
+    """
+    intersect1, intersect2 = find_circle_intersections(start_coord, distance_start_to_act, end_coord, distance_act_to_end)
+    
+    candidate_identifiers, candidate_names, candidate_coordinates, candidate_capacities, candidate_distances = MyTargetLocations.query(purpose, intersect1, 5)
+    
+    if intersect2 is not None:
+        candidate_identifiers2, candidate_names2, candidate_coordinates2, candidate_capacities2, candidate_distances2 = MyTargetLocations.query(purpose, intersect2, 5)
+
+        candidate_identifiers = np.concatenate((candidate_identifiers, candidate_identifiers2), axis=0)
+        candidate_names = np.concatenate((candidate_names, candidate_names2), axis=0)
+        candidate_coordinates = np.concatenate((candidate_coordinates, candidate_coordinates2), axis=0)
+        candidate_capacities = np.concatenate((candidate_capacities, candidate_capacities2), axis=0)
+        candidate_distances = np.concatenate((candidate_distances, candidate_distances2), axis=0)
+        
+    
 
 
-    # def locate_single_activity(self, start_cell, end_cell, activity_type, time_start_to_act, time_act_to_end,
-    #                            mode_start, mode_end, start_hour,
-    #                            min_tolerance=None, max_tolerance=None):
-    #     """
-    #     Locate a single activity between two known places using travel time matrix and capacity data.
-    #     When the maximum tolerance is exceeded, the tolerance is increased rapidly to find any viable location,
-    #     with a logged warning. If this still fails, a random cell is returned to keep the pipeline running,
-    #     with a logged error.
-    #     :param start_cell: Cell ID of the starting location.
-    #     :param end_cell: Cell ID of the ending location.
-    #     :param activity_type: Activity type of the activity to locate.
-    #     :param time_start_to_act: Travel time from the start to the activity in seconds.
-    #     :param time_act_to_end: Travel time from the activity to the end in seconds.
-    #     :param mode_start: Mode of travel from the start to the activity.
-    #     :param mode_end: Mode of travel from the activity to the end.
-    #     :param start_hour: Hour of the day when the leg starts.
-    #     :param min_tolerance: Minimum tolerance in minutes.
-    #     :param max_tolerance: Maximum tolerance in minutes.
-    #     :return: Cell ID of the best-suited location for the activity.
-    #     """
-    #     if min_tolerance is None:
-    #         min_tolerance = 10 * 60
-    #     if max_tolerance is None:
-    #         max_tolerance = 90 * 60
+    # Placeholder logic to choose one intersection point; here we choose the first one.
+    chosen_intersection = intersect1
 
-    #     step_size = max((max_tolerance - min_tolerance) / 5, 200)
-    #     tolerance = min_tolerance
-    #     exceed_max_tolerance_turns = 2
-
-    #     tt_matrix_start = self.tt.get_tt_matrix(mode_start, start_hour)
-    #     tt_matrix_end = self.tt.get_tt_matrix(mode_end, start_hour)
-
-    #     while True:
-
-    #         # Filter cells based on travel time criteria (times in seconds!)
-    #         potential_cells_start = tt_matrix_start[(tt_matrix_start['FROM'] == start_cell) &
-    #                                                 (tt_matrix_start['VALUE'] >= time_start_to_act - tolerance) &
-    #                                                 (tt_matrix_start['VALUE'] <= time_start_to_act + tolerance)]
-
-    #         potential_cells_end = tt_matrix_end[(tt_matrix_end['FROM'] == end_cell) &
-    #                                             (tt_matrix_end['VALUE'] >= time_act_to_end - tolerance) &
-    #                                             (tt_matrix_end['VALUE'] <= time_act_to_end + tolerance)]
-
-    #         # Find intersecting cells from both sets
-    #         potential_cells = set(potential_cells_start['TO']).intersection(set(potential_cells_end['TO']))
-    #         if potential_cells:
-    #             break
-    #         if tolerance <= max_tolerance:
-    #             tolerance += step_size
-    #         else:
-    #             # If max tolerance is exceeded, go mad to find a cell
-    #             tolerance += (step_size * 10)
-    #             exceed_max_tolerance_turns -= 1
-    #             logger.warning(
-    #                 f"Exceeding maximum tolerance of {max_tolerance} seconds to find viable location. Tolerance is now {tolerance} seconds.")
-    #             if exceed_max_tolerance_turns == 0:
-    #                 logger.error(
-    #                     f"No cell found for activity type {activity_type} between cells {start_cell} and {end_cell}."
-    #                     f"Returning random cell to keep the pipeline running.")
-    #                 return random.choice(self.capa.capa_csv_df['NAME'].unique())
-
-    #     # Choose the cell with the highest capacity for the activity type
-    #     candidate_capas = self.capa.capa_csv_df[self.capa.capa_csv_df['NAME'].isin(potential_cells)]
-    #     if candidate_capas.empty:
-    #         logger.error(f"Cells {potential_cells} not found in capacities. Returning random cell to keep the pipeline running.")
-    #         return random.choice(self.capa.capa_csv_df['NAME'].unique())
-
-    #     try:
-    #         activity_type_str = str(int(activity_type))
-    #         best_cell = candidate_capas.nlargest(1, activity_type_str)
-    #     except KeyError:
-    #         logger.debug(f"Could not find activity type {activity_type} in capacities.")
-    #         best_cell = candidate_capas.sample(n=1)
-
-    #     if best_cell.empty:
-    #         logger.error(f"No cell found for activity type {activity_type} between cells {start_cell} and {end_cell}."
-    #                      f"Returning random cell to keep the pipeline running.")
-    #         return random.choice(self.capa.capa_csv_df['NAME'].unique())
-
-    #     return best_cell['NAME'].iloc[0] if not best_cell.empty else None
+    return ("activity", chosen_intersection)
 
     # def locate_sec_chains(self, person):
     #     """

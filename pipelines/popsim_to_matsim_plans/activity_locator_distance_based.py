@@ -1,5 +1,9 @@
 import random
 
+import pandas as pd
+from collections import defaultdict
+from typing import List, Dict, Any
+
 import geopandas as gpd
 import numpy as np
 import pandas as pd
@@ -116,7 +120,7 @@ class LocationScoringFunction:
         """
         Sigmoid function for likelihood calculation.
 
-        :param x: The input value (time differential) - can be a number, list, or numpy array.
+        :param x: The input value (e.g. distance from desired point) - can be a number, list, or numpy array.
         :return: Sigmoid function value.
         """
         x = np.array(x)  # Ensure x is a numpy array
@@ -125,29 +129,19 @@ class LocationScoringFunction:
         z = np.clip(z, -500, 500)
         return 1 / (1 + np.exp(z))
 
-    def score_locations(self, identifiers: np.ndarray, locations: np.ndarray, distances: np.ndarray, capacities: np.ndarray, time_diffs=None) -> np.ndarray:
+    def score_locations(self, distances: np.ndarray, capacities: np.ndarray) -> np.ndarray:
         """
         Evaluate the returned locations by distance and capacity and return a score.
-        
-        :param identifiers: Numpy array of identifiers for the returned locations.
-        :param locations: Numpy array of locations for the returned locations.
-        :param distances: Numpy array of distances for the returned locations.
+
+        :param distances: Numpy array of distances from desired point for the returned locations.
         :param capacities: Numpy array of remaining capacities for the returned locations.
-        :param time_diffs: List or array of time differential values for each candidate.
         :return: Numpy array of scores for the returned locations.
         """
         # Calculate the base score for each location
         base_scores = capacities / distances  # TODO: Improve scoring function
 
-        # If time_diffs is provided, adjust scores using the sigmoid function
-        if time_diffs is not None:
-            sigmoid_values = self.sigmoid(time_diffs)
-            adjusted_scores = np.multiply(base_scores, sigmoid_values)
-        else:
-            adjusted_scores = base_scores
-
         # Normalize the scores to ensure they sum to 1
-        scores = adjusted_scores / np.sum(adjusted_scores)
+        scores = base_scores / np.sum(base_scores)
         return scores
 
 with open('locations_data_with_capacities.pkl', 'rb') as file:
@@ -184,8 +178,7 @@ def find_circle_intersections(center1: np.ndarray, radius1: float, center2: np.n
     :param radius1: The radius of the first circle.
     :param center2: The center of the second circle (e.g., np.array([x2, y2])).
     :param radius2: The radius of the second circle.
-    :return: A tuple containing two intersection points (each as a np.ndarray).
-             If no direct intersections, returns the closest points on each circle's circumference.
+    :return: A tuple containing one or two intersection points (each as a np.ndarray).
     """
     x1, y1 = center1
     x2, y2 = center2
@@ -200,7 +193,6 @@ def find_circle_intersections(center1: np.ndarray, radius1: float, center2: np.n
         logger.info("No direct intersection: The circles are too far apart.")
         logger.info("Finding point on the line with distances proportional to radii as fallback.")
 
-        # Find the point on the line connecting the centers with proportional distances to the radii
         proportional_distance = r1 / (r1 + r2)
         point_on_line = center1 + proportional_distance * (center2 - center1)
         
@@ -210,7 +202,6 @@ def find_circle_intersections(center1: np.ndarray, radius1: float, center2: np.n
         logger.info("No direct intersection: One circle is contained within the other.")
         logger.info("Returning closest point on the circumference of the inner circle.")
 
-        # Find the point on the larger circle nearest to the center of the smaller circle
         if r1 > r2:
             closest_point = center2 + r2 * (center1 - center2) / d
             return closest_point, None
@@ -221,7 +212,6 @@ def find_circle_intersections(center1: np.ndarray, radius1: float, center2: np.n
     if d == 0 and r1 == r2:
         logger.info("Infinite intersections: The start and end points and radii are identical.")
         logger.info("Choosing a point on the perimeter of the circles.")
-        # Choose a point on the perimeter of the circles
         intersect = np.array([x1 + r1, y1])
         return intersect, None
     
@@ -250,24 +240,16 @@ def find_circle_intersections(center1: np.ndarray, radius1: float, center2: np.n
 
     return intersect1, intersect2
 
-def locate_single_activity(start_coord: np.ndarray, end_coord: np.ndarray, purpose: str, distance_start_to_act: float, distance_act_to_end: float) -> Tuple[str, np.ndarray]:
+def find_location_candidates(start_coord: np.ndarray, end_coord: np.ndarray, purpose: str, distance_start_to_act: float, distance_act_to_end: float, num_candidates: int) -> Tuple[str, np.ndarray]:
     """
-    Locate a single activity that is at a specified distance from both start and end points.
-    The activity should be located at the intersection of the two circles defined by the distances.
-
-    :param start_coord:  Coordinates of the start point (e.g., np.array([x1, y1])).
-    :param end_coord: Coordinates of the end point (e.g., np.array([x2, y2])).
-    :param purpose: The purpose identifier for the activity location (placeholder in this context).
-    :param distance_start_to_act: Distance from the start point to the activity location.
-    :param distance_act_to_end: Distance from the activity location to the end point.
-    :return: A tuple containing the activity identifier (as a placeholder) and its coordinates.
+    Find n location candidates for a given activity purpose between two known locations.
     """
     intersect1, intersect2 = find_circle_intersections(start_coord, distance_start_to_act, end_coord, distance_act_to_end)
     
-    candidate_identifiers, candidate_names, candidate_coordinates, candidate_capacities, candidate_distances = MyTargetLocations.query(purpose, intersect1, 5)
+    candidate_identifiers, candidate_names, candidate_coordinates, candidate_capacities, candidate_distances = MyTargetLocations.query(purpose, intersect1, num_candidates)
     
     if intersect2 is not None:
-        candidate_identifiers2, candidate_names2, candidate_coordinates2, candidate_capacities2, candidate_distances2 = MyTargetLocations.query(purpose, intersect2, 5)
+        candidate_identifiers2, candidate_names2, candidate_coordinates2, candidate_capacities2, candidate_distances2 = MyTargetLocations.query(purpose, intersect2, num_candidates)
 
         candidate_identifiers = np.concatenate((candidate_identifiers, candidate_identifiers2), axis=0)
         candidate_names = np.concatenate((candidate_names, candidate_names2), axis=0)
@@ -275,125 +257,116 @@ def locate_single_activity(start_coord: np.ndarray, end_coord: np.ndarray, purpo
         candidate_capacities = np.concatenate((candidate_capacities, candidate_capacities2), axis=0)
         candidate_distances = np.concatenate((candidate_distances, candidate_distances2), axis=0)
         
+    candidate_scores = location_scoring_function.score_locations(candidate_distances, candidate_capacities)
+    
+    return (candidate_identifiers, candidate_names, candidate_coordinates, candidate_capacities, candidate_distances, candidate_scores)
+    
+    
+def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any]]]:
+    nested_dict = defaultdict(list)
+    
+    # Populate the defaultdict with data from the DataFrame
+    for row in df.itertuples(index=False):
+        identifier: str = row.person_id
+
+        from_location: np.ndarray = np.array(row.from_location) if row.from_location is not None else np.array([])
+        to_location: np.ndarray = np.array(row.to_location) if row.to_location is not None else np.array([])
+
+        leg_info: Dict[str, Any] = {
+            'leg_id': row.leg_id,
+            'to_activity': row.to_activity,
+            'distance': row.distance,
+            'from_location': from_location,
+            'to_location': to_location
+        }
+        nested_dict[identifier].append(leg_info)
+
+    # Convert defaultdict to dict for cleaner output and better compatibility
+    return dict(nested_dict)
+
+def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List[List[Dict[str, Any]]]]:
+    segmented_dict = defaultdict(list)
+    
+    for person_id, legs in nested_dict.items():
+        segment = []
+        for leg in legs:
+            if not segment:
+                # Start a new segment with the first leg
+                segment.append(leg)
+            else:
+                segment.append(leg)
+                if leg['to_location'].size > 0:
+                    segmented_dict[person_id].append(segment)
+                    segment = []
+        # If there are remaining legs in the segment after the loop, add them as well
+        if segment:
+            segmented_dict[person_id].append(segment)
+        
+    return dict(segmented_dict)
+
+
+
+
+data = {
+    'person_id': [
+        'A', 'A', 'A', 'A', 'A', # Person A
+        'B', 'B', 'B', 'B', 'B', 'B',  # Person B
+        'C', 'C', 'C', 'C'  # Person C
+    ],
+    'leg_id': list(range(1, 16)),
+    'to_activity': [
+        'activity_1', 'activity_2', 'activity_3', 'activity_4', 'activity_5',  # Person A
+        'activity_6', 'activity_7', 'activity_8', 'activity_9', 'activity_10', 'activity_11',  # Person B
+        'activity_12', 'activity_13', 'activity_14', 'activity_15'  # Person C
+    ],
+    'distance': [
+        100, 200, 300, 400, 500,  # Person A
+        600, 700, 800, 900, 1000, 1100,  # Person B
+        1200, 1300, 1400, 1500  # Person C
+    ],
+    'from_location': [
+        (1, 2), None, (3, 4), None, None,  # Person A
+        (5, 6), None, (7, 8), None, None, (9, 10),  # Person B
+        (11, 12), None, None, (13, 14)  # Person C
+    ],
+    'to_location': [
+        None, (3, 4), None, None, (5, 6),  # Person A
+        None, (7, 8), None, None, (9, 10), None,  # Person B
+        None, None, (13, 14), None  # Person C
+    ]
+}
+
+
+def calculate_length_with_slack(length1, length2, slack_factor, min_slack_lower = 0.2, min_slack_upper = 0.2):
+    """min_slacks must be between 0 and 0.49"""
+    
+    length_sum = length1 + length2
+    length_diff = abs(length1 - length2)
+    shorter_leg = min(length1, length2)
+    
+    result = length_sum / slack_factor
+    
+    wanted_minimum = length_diff + shorter_leg * min_slack_lower
+    wanted_maximum = length_sum - shorter_leg * min_slack_upper
+    
+    if result < wanted_minimum:
+        return wanted_minimum
+    elif result > wanted_maximum:
+        return wanted_maximum
+
+    return result  # Within bounds
     
 
 
-    # Placeholder logic to choose one intersection point; here we choose the first one.
-    chosen_intersection = intersect1
 
-    return ("activity", chosen_intersection)
 
-    # def locate_sec_chains(self, person):
-    #     """
-    #     Locates all secondary activity chains for a person.
-    #     Gets all individual unknown chains and sends them to the solver.
-    #     :param person:
-    #     :return:
-    #     """
-    #     logger.info(f"Locating secondary activity chains for person {person[s.UNIQUE_P_ID_COL].iloc[0]}...")
-    #     # Get all unknown chains
-    #     sec_chains = h.find_nan_chains(person, s.CELL_TO_COL)
-    #     for chain in sec_chains:
-    #         # Solve each chain
-    #         if chain.empty:
-    #             logger.warning(f"Found empty chain. Skipping.")
-    #             continue
-    #         located_chain = self.locate_sec_chain_solver(chain)
+diccy = populate_legs_dict_from_df(pd.DataFrame(data))
+segmented_dict = segment_legs(diccy)
 
-    #         # Update the original person df with the located chain
-    #         columns_to_update = [s.CELL_TO_COL, s.CELL_FROM_COL]
-    #         located_chain_subset = located_chain[columns_to_update]
-    #         person.update(located_chain_subset)
-    #     return person
-
-    # def locate_sec_chain_solver(self, legs_to_locate):
-    #     """
-    #     Locates any leg chain between two known locations using travel time matrix and capacity data.
-    #     :param legs_to_locate: DataFrame with the legs to locate. Must have the following columns:
-    #     cell_from, cell_to, activity_type, duration, mode, hour
-    #     For explanation of the algorithm, see the thesis.
-    #     :return: DataFrame with a new column with cells assigned to each leg.
-    #     """
-    #     legs_to_locate = legs_to_locate.copy()
-    #     # if len(legs_to_locate) > 2:
-    #     #     print("debug")
-    #     try:
-    #         hour = legs_to_locate.iloc[0][s.LEG_START_TIME_COL].hour
-    #     except Exception:
-    #         logger.error("Could not get hour. Using 8.")  # Never had this happen, but to be sure (e.g. if conversion failed)
-    #         hour = 8
-
-    #     if legs_to_locate[s.LEG_MAIN_MODE_COL].nunique() == 1:
-
-    #         direct_time = self.tt.get_travel_time(legs_to_locate.iloc[0][s.CELL_FROM_COL],
-    #                                               legs_to_locate.iloc[-1][s.CELL_TO_COL],
-    #                                               legs_to_locate.iloc[0][s.MODE_TRANSLATED_COL],
-    #                                               hour)
-    #     else:
-    #         mode_weights: dict = legs_to_locate.set_index(s.MODE_TRANSLATED_COL)[s.LEG_DURATION_MINUTES_COL].to_dict()
-    #         direct_time = self.tt.get_mode_weighted_travel_time(legs_to_locate.iloc[0][s.CELL_FROM_COL],
-    #                                                             legs_to_locate.iloc[-1][s.CELL_TO_COL],
-    #                                                             mode_weights,
-    #                                                             hour)
-
-    #     # Expects and returns minutes as in MiD. Thus, they must later be converted to seconds.
-    #     legs_to_locate, highest_level = self.sf.get_all_adjusted_times_with_slack(legs_to_locate, direct_time / 60)
-
-    #     def split_sec_legs_dataframe(df):
-    #         segments = []
-    #         start_idx = None
-
-    #         for i, row in df.iterrows():
-    #             if start_idx is None and pd.notna(row[s.CELL_FROM_COL]):
-    #                 start_idx = i
-    #             elif start_idx is not None and pd.notna(row[s.CELL_TO_COL]):
-    #                 segments.append(df.loc[start_idx:i])
-    #                 if pd.notna(row[s.CELL_FROM_COL]):
-    #                     start_idx = i
-    #                 else:
-    #                     start_idx = None
-
-    #         # Handle last segment if it ends with the DataFrame
-    #         if start_idx is not None:
-    #             segments.append(df.loc[start_idx:])
-
-    #         return segments
-
-    #     for level in range(highest_level - 1, -1, -1):  # to include 0
-    #         times_col = f"level_{level}" if level != 0 else s.LEG_DURATION_MINUTES_COL
-
-    #         if level == 0 and len(legs_to_locate[times_col].notna()) != len(legs_to_locate):
-    #             logger.warning(f"Found NaN values in {times_col}, may produce incorrect results.")
-
-    #         segments = split_sec_legs_dataframe(legs_to_locate)
-
-    #         for segment in segments:
-    #             if len(segment) == 1:
-    #                 continue  # If there is only one leg in the group, the cell is already known
-    #             times = segment.loc[segment[times_col].notna(), times_col]
-    #             if len(times) != 2:
-    #                 if len(segment) == 2:  # If the segment is two long, use the known times
-    #                     times_col = s.LEG_DURATION_MINUTES_COL
-    #                     times = segment.loc[segment[times_col].notna(), times_col]
-    #                     if len(times) != 2:
-    #                         logger.error(f"Found {len(times)} times in segment {segment}. Expected 2.")
-    #                 else:
-    #                     logger.error(f"Found {len(times)} times in segment {segment}. Expected 2.")
-    #                 continue
-    #             cell = self.locate_single_activity(segment[s.CELL_FROM_COL].iloc[0],
-    #                                                segment[s.CELL_TO_COL].iloc[-1],
-    #                                                segment[s.TO_ACTIVITY_WITH_CONNECTED_COL].iloc[0],
-    #                                                times.iloc[0] * 60,  # expects s, TTmatrices are in s
-    #                                                times.iloc[1] * 60,
-    #                                                segment[s.MODE_TRANSLATED_COL].iloc[0],
-    #                                                segment[s.MODE_TRANSLATED_COL].iloc[1],
-    #                                                hour)
-
-    #             located_leg_index = segment[times_col].first_valid_index()  # The time is placed at the to-locate leg
-
-    #             legs_to_locate.loc[located_leg_index, s.CELL_TO_COL] = cell
-    #             legs_to_locate.loc[located_leg_index + 1, s.CELL_FROM_COL] = cell
-
-    #     return legs_to_locate
-    
-
+for person_id, segments in segmented_dict.items():
+    print(f"Person {person_id}:")
+    for i, segment in enumerate(segments, 1):
+        print(f"  Segment {i}:")
+        for leg in segment:
+            print(f"    {leg}")
+    print()

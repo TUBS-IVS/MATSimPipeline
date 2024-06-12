@@ -1,28 +1,80 @@
+import pandas as pd
+from collections import defaultdict
+from typing import List, Dict, Any, Union
 import numpy as np
-import timeit
+import time
+import random
 
-def setup_and_concatenate():
-    # Mock data for testing
-    candidate_identifiers = np.random.randint(0, 100, size=(5,))
-    candidate_names = np.array(['name1', 'name2', 'name3', 'name4', 'name5'])
-    candidate_coordinates = np.random.rand(5, 2)
-    candidate_capacities = np.random.randint(1, 10, size=(5,))
-    candidate_distances = np.random.rand(5)
+class DataFrameConverter:
+    def __init__(self, df: pd.DataFrame):
+        self.df = df
+        self.nested_dict = defaultdict(list)
 
-    candidate_identifiers2 = np.random.randint(0, 100, size=(5,))
-    candidate_names2 = np.array(['name6', 'name7', 'name8', 'name9', 'name10'])
-    candidate_coordinates2 = np.random.rand(5, 2)
-    candidate_capacities2 = np.random.randint(1, 10, size=(5,))
-    candidate_distances2 = np.random.rand(5)
+    def convert_to_nested_dict(self):
+        current_identifier = None
+        for i, row in self.df.iterrows():
+            identifier = row['identifier']
+            if identifier != current_identifier:
+                # Start with an 'activity' entry for the new identifier
+                entry_type = 'activity'
+                current_identifier = identifier
+            else:
+                # Alternate the entry type
+                entry_type = 'leg' if entry_type == 'activity' else 'activity'
+                
+            if entry_type == 'activity':
+                info = {
+                    'type': 'activity',
+                    'location': np.array(row['location']),
+                    'purpose': row['purpose']
+                }
+            else:  # entry_type == 'leg'
+                info = {
+                    'type': 'leg',
+                    'leg_id': row['leg_id'],
+                    'distance': row['distance']
+                }
+            self.nested_dict[identifier].append(info)
+    
+    def get_nested_dict(self) -> Dict[str, List[Dict[str, Any]]]:
+        # Convert defaultdict to dict for cleaner output
+        return dict(self.nested_dict)
+    
+    def test_access_time(self, num_accesses: int = 1000) -> float:
+        identifiers = list(self.nested_dict.keys())
+        start_time = time.time()
+        
+        for _ in range(num_accesses):
+            id_to_access = random.choice(identifiers)
+            _ = self.nested_dict[id_to_access]
+        
+        end_time = time.time()
+        total_time = end_time - start_time
+        return total_time
 
-    # Concatenation process
-    candidate_identifiers = np.concatenate((candidate_identifiers, candidate_identifiers2), axis=0)
-    candidate_names = np.concatenate((candidate_names, candidate_names2), axis=0)
-    candidate_coordinates = np.concatenate((candidate_coordinates, candidate_coordinates2), axis=0)
-    candidate_capacities = np.concatenate((candidate_capacities, candidate_capacities2), axis=0)
-    candidate_distances = np.concatenate((candidate_distances, candidate_distances2), axis=0)
+# Sample DataFrame with alternating activity and leg entries
+data = {
+    'identifier': ['id1', 'id1', 'id1', 'id1', 'id2', 'id2', 'id2', 'id2'],
+    'location': [[1,2], [3,4], [5,6], [7,8], [9,10], [11,12], [13,14], [15,16]],
+    'purpose': ['work', None, 'home', None, 'gym', None, 'store', None],
+    'leg_id': [None, 'leg1', None, 'leg2', None, 'leg3', None, 'leg4'],
+    'distance': [None, 'dist1', None, 'dist2', None, 'dist3', None, 'dist4']
+}
 
-# Measure the time it takes to run the test using timeit
-execution_time = timeit.timeit("setup_and_concatenate()", setup="from __main__ import setup_and_concatenate", number=1000)
+df = pd.DataFrame(data)
 
-print(f"Average time for concatenation for 1000 runs: {execution_time:.8f} seconds")
+# Instantiate the converter with the DataFrame
+converter = DataFrameConverter(df)
+
+# Convert to nested dictionary
+converter.convert_to_nested_dict()
+
+# Retrieve the nested dictionary
+nested_dict = converter.get_nested_dict()
+
+# Print the nested dictionary
+print(nested_dict)
+
+# Testing access time
+elapsed_time = converter.test_access_time(1000)
+print(f"Time taken to access the dictionary 1000 times: {elapsed_time:.4f} seconds")

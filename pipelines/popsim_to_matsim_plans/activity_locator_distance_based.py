@@ -20,7 +20,6 @@ from sklearn.neighbors import KDTree
 import random as rnd
 import pickle
 
-# TODO: Zum lAufen kriegen 11.06.24
 
 
 def reformat_locations(locations_data: Dict[str, Dict[str, Dict[str, Any]]]) -> Dict[str, Dict[str, np.ndarray]]:
@@ -144,31 +143,34 @@ class LocationScoringFunction:
         scores = base_scores / np.sum(base_scores)
         return scores
 
-with open('locations_data_with_capacities.pkl', 'rb') as file:
-    locations_data = pickle.load(file)
+# with open('locations_data_with_capacities.pkl', 'rb') as file:
+#     locations_data = pickle.load(file)
 
-logger.debug(f"Locations data with potentials: {locations_data}")
+# logger.debug(f"Locations data with potentials: {locations_data}")
 
-reformatted_data = reformat_locations(locations_data)
+# reformatted_data = reformat_locations(locations_data)
 
-logger.debug(f"Reformatted locations data: {reformatted_data}")
+# logger.debug(f"Reformatted locations data: {reformatted_data}")
 
-MyTargetLocations = TargetLocations(reformatted_data)
-#test with epsg:25832
-test_candidates = MyTargetLocations.query("shop", np.array([549637.87573102, 5796618.40418383]), 5)
-logger.debug(f"Test candidates for shop at 52.432047, 9.687902: Identifiers: {test_candidates[0]}, Names: {test_candidates[1]}, Coordinates: {test_candidates[2]}, Capacities: {test_candidates[3]}, Distances: {test_candidates[4]}")
+# MyTargetLocations = TargetLocations(reformatted_data)
+# #test with epsg:25832
+# test_candidates = MyTargetLocations.query("shop", np.array([549637.87573102, 5796618.40418383]), 5)
+# logger.debug(f"Test candidates for shop at 52.432047, 9.687902: Identifiers: {test_candidates[0]}, Names: {test_candidates[1]}, Coordinates: {test_candidates[2]}, Capacities: {test_candidates[3]}, Distances: {test_candidates[4]}")
              
-# # Usage
-# location_scoring_function = LocationScoringFunction(sigmoid_beta=1.0, sigmoid_delta_t=0.0)
-# identifiers = np.array([1, 2, 3])
-# locations = np.array([[0, 0], [1, 1], [2, 2]])
-# distances = np.array([10, 20, 30])
-# capacities = np.array([100, 200, 300])
-# time_diffs = np.array([1, 2, 3])
+# # # Usage
+# # location_scoring_function = LocationScoringFunction(sigmoid_beta=1.0, sigmoid_delta_t=0.0)
+# # identifiers = np.array([1, 2, 3])
+# # locations = np.array([[0, 0], [1, 1], [2, 2]])
+# # distances = np.array([10, 20, 30])
+# # capacities = np.array([100, 200, 300])
+# # time_diffs = np.array([1, 2, 3])
 
-# scores = location_scoring_function.score_locations(identifiers, locations, distances, capacities, time_diffs)
-# print("Scores:", scores)
+# # scores = location_scoring_function.score_locations(identifiers, locations, distances, capacities, time_diffs)
+# # print("Scores:", scores)
 
+def euclidean_distance(start: np.ndarray, end: np.ndarray) -> float:
+    """Compute the Euclidean distance between two points."""
+    return np.linalg.norm(end - start)
 
 def find_circle_intersections(center1: np.ndarray, radius1: float, center2: np.ndarray, radius2: float) -> Tuple[np.ndarray, np.ndarray]:
     """
@@ -186,7 +188,7 @@ def find_circle_intersections(center1: np.ndarray, radius1: float, center2: np.n
     r2 = radius2
 
     # Calculate the distance between the two centers
-    d = np.linalg.norm(center1 - center2)
+    d = euclidean_distance(center1, center2)
 
     # Handle non-intersection conditions:
     if d > (r1 + r2):
@@ -263,19 +265,20 @@ def find_location_candidates(start_coord: np.ndarray, end_coord: np.ndarray, pur
     
     
 def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any]]]:
+    """Uses the MiD df to populate a nested dictionary with leg information for each person."""
     nested_dict = defaultdict(list)
     
     # Populate the defaultdict with data from the DataFrame
     for row in df.itertuples(index=False):
-        identifier: str = row.person_id
+        identifier: str = getattr(row, s.UNIQUE_P_ID_COL)
 
         from_location: np.ndarray = np.array(row.from_location) if row.from_location is not None else np.array([])
         to_location: np.ndarray = np.array(row.to_location) if row.to_location is not None else np.array([])
 
         leg_info: Dict[str, Any] = {
-            'leg_id': row.leg_id,
-            'to_activity': row.to_activity,
-            'distance': row.distance,
+            'leg_id': getattr(row, s.UNIQUE_LEG_ID_COL),
+            'to_activity': getattr(row, s.LEG_TO_ACTIVITY_COL),
+            'distance': getattr(row, s.LEG_DISTANCE_COL),
             'from_location': from_location,
             'to_location': to_location
         }
@@ -283,6 +286,36 @@ def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any
 
     # Convert defaultdict to dict for cleaner output and better compatibility
     return dict(nested_dict)
+
+
+def generate_random_location_within_hanover():
+    """Generate a random coordinate within Hanover, Germany, in EPSG:25832."""
+    xmin, xmax = 546000, 556000
+    ymin, ymax = 5800000, 5810000
+    x = random.uniform(xmin, xmax)
+    y = random.uniform(ymin, ymax)
+    return np.array([x, y])
+
+def prepare_mid_df_for_legs_dict() -> pd.DataFrame:
+    """Temporarily prepare the MiD DataFrame for the leg dictionary function."""
+    df = h.read_csv(s.ENHANCED_MID_FILE)
+    
+    # Initialize columns with empty objects to ensure dtype compatibility
+    df["from_location"] = None
+    df["to_location"] = None
+
+    # Ensure these columns are treated as object type to store arrays
+    df["from_location"] = df["from_location"].astype(object)
+    df["to_location"] = df["to_location"].astype(object)
+
+    # Process each person
+    for person_id, group in df.groupby(s.PERSON_ID_COL):
+        random_location = generate_random_location_within_hanover()
+        df.at[group.index[0], "from_location"] = random_location
+        df.at[group.index[-1], "to_location"] = random_location
+    
+    print(df.head())
+    return df
 
 def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List[List[Dict[str, Any]]]]:
     segmented_dict = defaultdict(list)
@@ -304,44 +337,11 @@ def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List
         
     return dict(segmented_dict)
 
-
-
-
-data = {
-    'person_id': [
-        'A', 'A', 'A', 'A', 'A', # Person A
-        'B', 'B', 'B', 'B', 'B', 'B',  # Person B
-        'C', 'C', 'C', 'C'  # Person C
-    ],
-    'leg_id': list(range(1, 16)),
-    'to_activity': [
-        'activity_1', 'activity_2', 'activity_3', 'activity_4', 'activity_5',  # Person A
-        'activity_6', 'activity_7', 'activity_8', 'activity_9', 'activity_10', 'activity_11',  # Person B
-        'activity_12', 'activity_13', 'activity_14', 'activity_15'  # Person C
-    ],
-    'distance': [
-        100, 200, 300, 400, 500,  # Person A
-        600, 700, 800, 900, 1000, 1100,  # Person B
-        1200, 1300, 1400, 1500  # Person C
-    ],
-    'from_location': [
-        (1, 2), None, (3, 4), None, None,  # Person A
-        (5, 6), None, (7, 8), None, None, (9, 10),  # Person B
-        (11, 12), None, None, (13, 14)  # Person C
-    ],
-    'to_location': [
-        None, (3, 4), None, None, (5, 6),  # Person A
-        None, (7, 8), None, None, (9, 10), None,  # Person B
-        None, None, (13, 14), None  # Person C
-    ]
-}
-
-
-def calculate_length_with_slack(length1, length2, slack_factor, min_slack_lower = 0.2, min_slack_upper = 0.2):
+def calculate_length_with_slack(length1, length2, slack_factor = 2, min_slack_lower = 0.2, min_slack_upper = 0.2) -> List[float]:
     """min_slacks must be between 0 and 0.49"""
     
-    length_sum = length1 + length2
-    length_diff = abs(length1 - length2)
+    length_sum = length1 + length2 # is also real maximum length
+    length_diff = abs(length1 - length2) # is also real minimum length
     shorter_leg = min(length1, length2)
     
     result = length_sum / slack_factor
@@ -349,24 +349,206 @@ def calculate_length_with_slack(length1, length2, slack_factor, min_slack_lower 
     wanted_minimum = length_diff + shorter_leg * min_slack_lower
     wanted_maximum = length_sum - shorter_leg * min_slack_upper
     
-    if result < wanted_minimum:
-        return wanted_minimum
+    if result <= wanted_minimum:
+        result = wanted_minimum
     elif result > wanted_maximum:
-        return wanted_maximum
+        result = wanted_maximum
 
-    return result  # Within bounds
+    return [length_diff, wanted_minimum, result, wanted_maximum, length_sum]
+    
+def build_estimation_tree(distances: List[float]) -> List[List[List[float]]]: # Tree level, Leg, Lengths
+    tree: List[List[List[float]]] = []  
+    
+    while len(distances) > 1:
+        new_distances: List[float] = []
+        combined_pairs: List[List[float]] = []
+        for i in range(0, len(distances) - 1, 2):
+            combined_list: List[float] = calculate_length_with_slack(distances[i], distances[i + 1])
+            new_distances.append(combined_list[2])
+            combined_pairs.append(combined_list)
+        
+        if len(distances) % 2 != 0:
+            new_distances.append(distances[-1])
+            # In odd cases, the last one is passed through with mins and maxes as itself
+            combined_pairs.append([distances[-1], distances[-1], distances[-1], distances[-1], distances[-1]])
+        
+        distances = new_distances
+        tree.append(combined_pairs)
+
+    return tree
+
+def adjust_estimation_tree(tree: List[List[List[float]]], real_distance: float, strong_adjust: bool = False) -> List[List[List[float]]]: # Tree level, Leg, Lengths
+    """If there is strong overshooting or undershooting in the estimation tree, adjust the distances. 
+    It tries to keep given slack constraints, unless it is not possible.
+    Parameters:
+    tree: The estimation tree to adjust.
+    real_distance: The real total distance to adjust the tree to.
+    strong_adjust: If True, real_bounds are used for adjustment, if False, wanted_bounds are used.
+    """
+            
+    # Adjust the highest level
+    tree[-1][0][2] = real_distance
+
+    # If highest level is 1, we're done (we can't adjust anything, but this is never needed with level 1 - trees anyway)
+    if len(tree) == 1:
+        return tree
+    
+    if strong_adjust:
+        l_bound_idx = 0
+        u_bound_idx = 4
+    else:
+        l_bound_idx = 1
+        u_bound_idx = 3
+
+    if tree[-1][0][1] < real_distance < tree[-1][0][3]: # Checking for wanted maximum and minimum, not real maximum and minimum
+        logger.debug("Real total distance is within bounds of highest level.")
+        return tree
+    else:
+        # Traverse from one below the highest level down to including level 1 (which has index 0) - and then down to -1 just for the last check
+        for level in range(len(tree) - 1, -2, -1):
+            
+            # At the lowest level, check plausibilities and return
+            # TODO: Move to end??
+            if level == -1:
+                plausible = True
+                for i in range(0, len(tree[0]), 1):
+                    leg_value = tree[0][i][2]
+                    leg_lower_bound = tree[0][i][l_bound_idx]
+                    leg_upper_bound = tree[0][i][u_bound_idx]
+                    if not leg_lower_bound <= leg_value <= leg_upper_bound:
+                        plausible = False
+                        break
+                
+                if strong_adjust:
+                    if plausible:
+                        logger.debug("Strong adjustment succeeded.")
+                        return tree
+                    else:
+                        logger.debug("Strong adjustment failed.")
+                        return tree
+                else:
+                    if plausible:
+                        # These are the bounds of the first level estimation, which are set in stone by the known real distances
+                        logger.debug("Adjustment succeeded with wanted bounds.")
+                        return tree
+                    else:
+                        logger.debug("Adjustment failed with wanted bounds, trying strong adjustment with real bounds.")
+                        return adjust_estimation_tree(tree, real_distance, strong_adjust = True)
+                        
+                        
+            for i in range(0, len(tree[level]), 2): # Traverse in pairs, skipping the last one if it's an odd number
+                if i == len(tree[level]) - 1:
+                    continue
+                
+                higher_leg_value = tree[level+1][i//2][2]
+                higher_leg_lower_bound = tree[level+1][i//2][l_bound_idx]
+                higher_leg_upper_bound = tree[level+1][i//2][u_bound_idx]
+
+                
+                        
+                leg1_value = tree[level][i][2]
+                leg2_value = tree[level][i+1][2]
+
+                if higher_leg_value < higher_leg_lower_bound: # (Real) higher_leg_value can be zero if start and end location are the same
+                    logger.debug(f"Strong overshot. Level: {level}, i: {i}, higher_leg_value: {higher_leg_value}, higher_leg_lower_bound: {higher_leg_lower_bound}")
+                    # Yes, overshot: The "ground truth" is lower than the lower bound of the estimation
+                    if leg1_value > leg2_value:
+                        # Make longer leg shorter, shorter leg longer
+                        L_bounds1 = abs(tree[level][i][l_bound_idx] - leg1_value)
+                        L_bounds2 = abs(tree[level][i+1][u_bound_idx] - leg2_value)
+                        delta_L_high = abs(higher_leg_value - higher_leg_lower_bound)
+
+                        delta_L1 = (L_bounds1 * delta_L_high) / (L_bounds1 + L_bounds2)
+                        delta_L2 = (L_bounds2 * delta_L_high)/ (L_bounds1 + L_bounds2)
+
+                        tree[level][i][2] -= delta_L1
+                        tree[level][i+1][2] += delta_L2
+                    else:
+                        L_bounds1 = abs(tree[level][i][u_bound_idx] - leg1_value)
+                        L_bounds2 = abs(tree[level][i+1][l_bound_idx] - leg2_value)
+                        delta_L_high = abs(higher_leg_value - higher_leg_lower_bound)
+
+                        delta_L1 = (L_bounds1 * delta_L_high) / (L_bounds1 + L_bounds2)
+                        delta_L2 = (L_bounds2 * delta_L_high)/ (L_bounds1 + L_bounds2)
+
+                        tree[level][i][2] += delta_L1
+                        tree[level][i+1][2] -= delta_L2
+
+                elif higher_leg_value > higher_leg_upper_bound: 
+                    
+                    logger.debug(f"Strong undershot. Level: {level}, i: {i}, higher_leg_value: {higher_leg_value}, higher_leg_upper_bound: {higher_leg_upper_bound}")
+                    # Yes, undershot: The "ground truth" is higher than the upper bound of the estimation
+                    # Make both legs longer (both move to upper bound)
+                    L_bounds1 = abs(tree[level][i][1] - leg1_value)
+                    L_bounds2 = abs(tree[level][i+1][1] - leg2_value)
+                    delta_L_high = abs(higher_leg_value - higher_leg_upper_bound)
+
+                    delta_L1 = (L_bounds1 * delta_L_high) / (L_bounds1 + L_bounds2)
+                    delta_L2 = (L_bounds2 * delta_L_high)/ (L_bounds1 + L_bounds2)
+
+                    tree[level][i][2] += delta_L1
+                    tree[level][i+1][2] += delta_L2
+
+    
+
+def locate_segment(segment):
+    
+    # If there is only one leg, both start and end should be known.
+    if len(segment) == 0:
+        raise ValueError("No legs in segment.")
+    elif len(segment) == 1:
+        assert segment[0]['from_location'].size > 0 and segment[0]['to_location'].size > 0, "Both start and end locations must be known for a single leg."
+        return segment
+    # if there are only two legs, we can find the loc immediately
+    elif len(segment) == 2:
+        return segment #TODO: Implement this
+    else:
+    
+        
+        # get distance entries of all legs
+        distances = [leg['distance'] for leg in segment]
+        for distance in distances: # no distance must be inf
+            assert distance != float('inf'), "No distance must be infinite."
+        real_distance = euclidean_distance(segment[0]['from_location'], segment[-1]['to_location'])
+        
+        tree = build_estimation_tree(distances)
+        tree = adjust_estimation_tree(tree, real_distance, strong_adjust = False)
+        
+        print (tree)
+    
+
     
 
 
+# diccy = populate_legs_dict_from_df(pd.DataFrame(data))
+# segmented_dict = segment_legs(diccy)
 
+# for person_id, segments in segmented_dict.items():
+#     print(f"Person {person_id}:")
+#     for i, segment in enumerate(segments, 1):
+#         print(f"  Segment {i}:")
+#         for leg in segment:
+#             print(f"    {leg}")
+#     print()
 
-diccy = populate_legs_dict_from_df(pd.DataFrame(data))
-segmented_dict = segment_legs(diccy)
+df = prepare_mid_df_for_legs_dict()
+print("df prepared.")
+dictu = populate_legs_dict_from_df(df)
+print("dict populated.")
+print(dictu)
+segmented_dict = segment_legs(dictu)
+print("dict segmented.")
+print(segmented_dict)
+# for person_id, segments in segmented_dict.items():
+#     print(f"Person {person_id}:")
+#     for i, segment in enumerate(segments, 1):
+#         print(f"  Segment {i}:")
+#         for leg in segment:
+#             print(f"    {leg}")
+#     print()
 
 for person_id, segments in segmented_dict.items():
-    print(f"Person {person_id}:")
-    for i, segment in enumerate(segments, 1):
-        print(f"  Segment {i}:")
-        for leg in segment:
-            print(f"    {leg}")
-    print()
+    for segment in segments:
+        locate_segment(segment)
+        
+print("done")

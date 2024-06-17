@@ -441,7 +441,7 @@ def assign_potentials_from_point_data():
 
 def assign_random_capacities(locations_data):
     """Assigns random capacities to locations."""
-    rng = np.random.default_rng()  # Creating a random number generator instance
+    rng = np.random.default_rng(999)  # Creating a random number generator instance
     for purpose, locations in locations_data.items():
         for location_id, location in locations.items():
             location["capacity"] = rng.integers(1, 100)
@@ -468,8 +468,8 @@ with open('locations_data_with_capacities.pkl', 'wb') as file:
 print("Processed OSM Data:")
 for purpose, locations in locations_data.items():
     print(f"\nPurpose: {purpose}")
-    for location_id, info in locations.items():
-        print(f"  ID: {location_id}")
-        print(f"    Name: {info['name']}")
-        print(f"    Coordinates: {info['coordinates']}")
-        print(f"    Capacity: {info['capacity']}")
+    # for location_id, info in locations.items():
+    #     print(f"  ID: {location_id}")
+    #     print(f"    Name: {info['name']}")
+    #     print(f"    Coordinates: {info['coordinates']}")
+    #     print(f"    Capacity: {info['capacity']}")

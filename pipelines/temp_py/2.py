@@ -4,19 +4,12 @@
 
 # nested dict is much faster than df for most operations
 
-def build_position_on_segment_info(n: int) -> list[list[int]]:
-    # The first list contains numbers from 0 to n-2
-    original_list = list(range(n-1))
-    result = []
+from pipelines.common import helpers as h
+import pandas as pd
 
-    # Process lists until no more elements can be taken
-    while original_list:
-        result.append(original_list)
-        # Generate the next list by taking every second element starting from index 1 (second element)
-        original_list = original_list[1::2]
-            
-    return result
+mydf = h.read_csv("data\\enhanced_frame_final.csv")
 
-# Example
-print(build_position_on_segment_info(9))
+# copy columns "km_routing" and "weg_km_imp" to new file
+mydf[["km_routing", "wegkm_imp"]].to_csv("data\\km_routing_wegkm_imp.csv", index=False)
+
 

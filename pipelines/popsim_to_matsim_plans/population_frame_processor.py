@@ -167,9 +167,9 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
         is_last_leg = self.df[s.PERSON_ID_COL].ne(self.df[s.PERSON_ID_COL].shift(-1))
 
-        number_of_rows_to_change = len(self.df[is_last_leg & (self.df[s.LEG_TO_ACTIVITY_COL] != s.ACTIVITY_HOME)])
+        number_of_rows_to_change = len(self.df[is_last_leg & (self.df[s.LEG_TO_ACTIVITY_COL] != s.ACT_HOME)])
 
-        self.df.loc[is_last_leg, s.LEG_TO_ACTIVITY_COL] = s.ACTIVITY_HOME
+        self.df.loc[is_last_leg, s.LEG_TO_ACTIVITY_COL] = s.ACT_HOME
         self.df.loc[is_last_leg, 'activity_translated_string'] = "home"
         # We also need to remove markers for main or mirroring main activities, because home is never main
         self.df.loc[is_last_leg, s.IS_MAIN_ACTIVITY_COL] = 0
@@ -268,23 +268,23 @@ class PopulationFrameProcessor(DataFrameProcessor):
         """
         logger.info(f"Translating activities...")
         activity_translation = {
-            s.ACTIVITY_WORK: "work",
-            s.ACTIVITY_BUSINESS: "work",
-            s.ACTIVITY_EDUCATION: "education",
-            s.ACTIVITY_SHOPPING: "shopping",
-            s.ACTIVITY_ERRANDS: "leisure",
-            s.ACTIVITY_PICK_UP_DROP_OFF: "other",
-            s.ACTIVITY_LEISURE: "leisure",
-            s.ACTIVITY_HOME: "home",
-            s.ACTIVITY_RETURN_JOURNEY: "other",
-            s.ACTIVITY_OTHER: "other",
-            s.ACTIVITY_EARLY_EDUCATION: "education",
-            s.ACTIVITY_DAYCARE: "education",
-            s.ACTIVITY_ACCOMPANY_ADULT: "other",
-            s.ACTIVITY_SPORTS: "leisure",
-            s.ACTIVITY_MEETUP: "leisure",
-            s.ACTIVITY_LESSONS: "leisure",
-            s.ACTIVITY_UNSPECIFIED: "other",
+            s.ACT_WORK: "work",
+            s.ACT_BUSINESS: "work",
+            s.ACT_EDUCATION: "education",
+            s.ACT_SHOPPING: "shopping",
+            s.ACT_ERRANDS: "leisure",
+            s.ACT_PICK_UP_DROP_OFF: "other",
+            s.ACT_LEISURE: "leisure",
+            s.ACT_HOME: "home",
+            s.ACT_RETURN_JOURNEY: "other",
+            s.ACT_OTHER: "other",
+            s.ACT_EARLY_EDUCATION: "education",
+            s.ACT_DAYCARE: "education",
+            s.ACT_ACCOMPANY_ADULT: "other",
+            s.ACT_SPORTS: "leisure",
+            s.ACT_MEETUP: "leisure",
+            s.ACT_LESSONS: "leisure",
+            s.ACT_UNSPECIFIED: "other",
         }
         self.df['activity_translated_string'] = self.df[s.TO_ACTIVITY_WITH_CONNECTED_COL].map(activity_translation)
         logger.info(f"Translated activities.")
@@ -362,7 +362,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
             if pd.isna(group.at[group.index[0], s.LEG_NON_UNIQUE_ID_COL]):
                 logger.debug(f"Person {person_id} has no legs. Skipping...")
                 continue
-            if group[s.LEG_TO_ACTIVITY_COL].iloc[-1] == s.ACTIVITY_HOME:
+            if group[s.LEG_TO_ACTIVITY_COL].iloc[-1] == s.ACT_HOME:
                 logger.debug(f"Person {person_id} already has a home leg. Skipping...")
                 continue
             logger.debug(f"Adding return home leg for person {person_id}...")
@@ -397,7 +397,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
             home_leg[s.UNIQUE_LEG_ID_COL] = rules.unique_leg_id(home_leg)
             home_leg[s.LEG_START_TIME_COL] = last_leg[s.LEG_END_TIME_COL] + pd.Timedelta(seconds=activity_time)
             home_leg[s.LEG_END_TIME_COL] = home_leg[s.LEG_START_TIME_COL] + pd.Timedelta(minutes=home_leg_duration)
-            home_leg[s.LEG_TO_ACTIVITY_COL] = s.ACTIVITY_HOME
+            home_leg[s.LEG_TO_ACTIVITY_COL] = s.ACT_HOME
             home_leg[s.LEG_DURATION_MINUTES_COL] = home_leg_duration
             home_leg[s.LEG_DISTANCE_COL] = None  # Could also be estimated, but isn't necessary for the current use case
             home_leg[s.IS_MAIN_ACTIVITY_COL] = 0
@@ -780,10 +780,10 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
         # For the first leg of each person, set 'from_activity' based on 'starts_at_home'
         self.df.loc[(self.df[s.LEG_NON_UNIQUE_ID_COL] == 1) & (
-                self.df[s.FIRST_LEG_STARTS_AT_HOME_COL] == s.FIRST_LEG_STARTS_AT_HOME), s.LEG_FROM_ACTIVITY_COL] = s.ACTIVITY_HOME
+                self.df[s.FIRST_LEG_STARTS_AT_HOME_COL] == s.FIRST_LEG_STARTS_AT_HOME), s.LEG_FROM_ACTIVITY_COL] = s.ACT_HOME
         self.df.loc[(self.df[s.LEG_NON_UNIQUE_ID_COL] == 1) & (
                 self.df[
-                    s.FIRST_LEG_STARTS_AT_HOME_COL] != s.FIRST_LEG_STARTS_AT_HOME), s.LEG_FROM_ACTIVITY_COL] = s.ACTIVITY_UNSPECIFIED
+                    s.FIRST_LEG_STARTS_AT_HOME_COL] != s.FIRST_LEG_STARTS_AT_HOME), s.LEG_FROM_ACTIVITY_COL] = s.ACT_UNSPECIFIED
 
         # Handle cases with no legs (NA in leg_id)
         self.df.loc[self.df[s.LEG_NON_UNIQUE_ID_COL].isna(), s.LEG_FROM_ACTIVITY_COL] = None
@@ -947,7 +947,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
             # Extract the indices for main activity, mirroring main and home activities
             main_activity_idx = np.where(person[s.IS_MAIN_ACTIVITY_COL])[0]  # where returns a tuple. Legs to main
             mirroring_main_idx = np.where(person[s.MIRRORS_MAIN_ACTIVITY_COL])[0]  # Legs to mirrored main
-            home_indices = np.where(person[s.LEG_TO_ACTIVITY_COL] == s.ACTIVITY_HOME)[0]  # legs to home
+            home_indices = np.where(person[s.LEG_TO_ACTIVITY_COL] == s.ACT_HOME)[0]  # legs to home
 
             if main_activity_idx.size == 0:
                 logger.warning(f"Person {pid} has no main activity. Skipping this person.")
@@ -1058,7 +1058,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
                     # If the person has no legs, there is no main activity
                     logger.debug(f"Person {pid} has no legs. Skipping...")
                     continue
-                if person[s.LEG_TO_ACTIVITY_COL].iloc[0] == s.ACTIVITY_HOME:
+                if person[s.LEG_TO_ACTIVITY_COL].iloc[0] == s.ACT_HOME:
                     # If the person has only one leg, and it's home, there is no main activity
                     logger.debug(f"Person {pid} has only one leg and it's home. Skipping...")
                     continue
@@ -1071,7 +1071,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 continue
 
             # Find the closest previous home activity or the start of the day. FROM_activity so the trip to home is excluded.
-            home_indices = person[person[s.LEG_FROM_ACTIVITY_COL] == s.ACTIVITY_HOME].index
+            home_indices = person[person[s.LEG_FROM_ACTIVITY_COL] == s.ACT_HOME].index
             start_idx = home_indices[home_indices < main_activity_idx].max() if not home_indices.empty else person.index[0]
             if pd.isna(start_idx):
                 start_idx = person.index[0]
@@ -1097,8 +1097,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
         Filters out 'home to home' legs from the DataFrame.
         """
         logger.info(f"Filtering out 'home to home' legs from {len(self.df)} rows...")
-        home_to_home_condition = (self.df[s.LEG_FROM_ACTIVITY_COL] == s.ACTIVITY_HOME) & \
-                                 (self.df[s.LEG_TO_ACTIVITY_COL] == s.ACTIVITY_HOME)
+        home_to_home_condition = (self.df[s.LEG_FROM_ACTIVITY_COL] == s.ACT_HOME) & \
+                                 (self.df[s.LEG_TO_ACTIVITY_COL] == s.ACT_HOME)
         self.df = self.df[~home_to_home_condition].reset_index(drop=True)
         logger.info(f"Filtered out 'home to home' legs. {len(self.df)} rows remaining.")
 

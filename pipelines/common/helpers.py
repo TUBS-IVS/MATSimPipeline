@@ -839,19 +839,19 @@ def check_mode(leg_to_find, leg_to_compare):
 
 def check_activity(leg_to_find, leg_to_compare):
     compatible_activities = {
-        s.ACTIVITY_SHOPPING: [s.ACTIVITY_ERRANDS],
-        s.ACTIVITY_ERRANDS: [s.ACTIVITY_SHOPPING, s.ACTIVITY_LEISURE],
-        s.ACTIVITY_LEISURE: [s.ACTIVITY_ERRANDS, s.ACTIVITY_SHOPPING, s.ACTIVITY_MEETUP],
-        s.ACTIVITY_MEETUP: [s.ACTIVITY_LEISURE]}
+        s.ACT_SHOPPING: [s.ACT_ERRANDS],
+        s.ACT_ERRANDS: [s.ACT_SHOPPING, s.ACT_LEISURE],
+        s.ACT_LEISURE: [s.ACT_ERRANDS, s.ACT_SHOPPING, s.ACT_MEETUP],
+        s.ACT_MEETUP: [s.ACT_LEISURE]}
 
     type_to_find = leg_to_find[s.LEG_TO_ACTIVITY_COL]
     type_to_compare = leg_to_compare[s.LEG_TO_ACTIVITY_COL]
 
     if (type_to_find == type_to_compare or
-            s.ACTIVITY_ACCOMPANY_ADULT in [type_to_find, type_to_compare] or
-            s.ACTIVITY_PICK_UP_DROP_OFF in [type_to_find, type_to_compare]):
+            s.ACT_ACCOMPANY_ADULT in [type_to_find, type_to_compare] or
+            s.ACT_PICK_UP_DROP_OFF in [type_to_find, type_to_compare]):
         return True
-    elif s.ACTIVITY_UNSPECIFIED in [type_to_find, type_to_compare] or pd.isnull([type_to_find, type_to_compare]).any():
+    elif s.ACT_UNSPECIFIED in [type_to_find, type_to_compare] or pd.isnull([type_to_find, type_to_compare]).any():
         logger.debug("Activity Type Undefined or Null (which usually means person has no legs).")
         return False
     # Assuming trip home (works, but not really plausible, thus commented out for now)

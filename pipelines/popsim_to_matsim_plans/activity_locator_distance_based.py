@@ -66,7 +66,7 @@ class TargetLocations:
         self.indices: Dict[str, KDTree] = {}
 
         for purpose, pdata in self.data.items():
-            print(f"Constructing spatial index for {purpose} ...")
+            logger.debug(f"Constructing spatial index for {purpose} ...")
             self.indices[purpose] = KDTree(pdata["coordinates"])
 
     def query(self, purpose: str, location: np.ndarray, num_candidates: int = 1) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -82,8 +82,8 @@ class TargetLocations:
 
         # Query the KDTree for the nearest locations
         candidate_distances, indices = self.indices[purpose].query(location, k=num_candidates)
-        print(f"Distances: {candidate_distances}")
-        print(f"Indices: {indices}")
+        logger.debug(f"Query Distances: {candidate_distances}")
+        logger.debug(f"Query Indices: {indices}")
 
         # Get the identifiers, coordinates, and distances for the nearest neighbors
         candidate_identifiers = np.array(self.data[purpose]["identifiers"])[indices[0]]
@@ -91,7 +91,7 @@ class TargetLocations:
         candidate_coordinates = np.array(self.data[purpose]["coordinates"])[indices[0]]
         candidate_capacities = np.array(self.data[purpose]["capacities"])[indices[0]]
 
-        return candidate_identifiers, candidate_names, candidate_coordinates, candidate_capacities, candidate_distances
+        return candidate_identifiers, candidate_names, candidate_coordinates, candidate_capacities, candidate_distances [0]
 
     def sample(self, purpose: str, random: rnd.Random) -> Tuple[Any, np.ndarray]:
         """
@@ -160,8 +160,22 @@ def find_circle_intersections(center1: np.ndarray, radius1: float, center2: np.n
 
     # Calculate the distance between the two centers
     d = euclidean_distance(center1, center2)
+    
+    logger.debug(f"Center 1: {center1}, Radius 1: {radius1}, Center 2: {center2}, Radius 2: {radius2}")
 
     # Handle non-intersection conditions:
+    if d == 0:
+        if abs(r1 - r2) < 1e-4:
+            logger.info("Infinite intersections: The start and end points and radii are identical.")
+            logger.info("Choosing a point on the perimeter of the circles.")
+            intersect = np.array([x1 + r1, y1])
+            return intersect, None
+        else:
+            logger.info("No intersection: The circles are identical but have different radii.")
+            logger.info("Choosing a point on the perimeter of the circles.")
+            intersect = np.array([x1 + r1, y1])
+            return intersect, None
+    
     if d > (r1 + r2):
         logger.info("No direct intersection: The circles are too far apart.")
         logger.info("Finding point on the line with distances proportional to radii as fallback.")
@@ -182,12 +196,7 @@ def find_circle_intersections(center1: np.ndarray, radius1: float, center2: np.n
             closest_point = center1 + r1 * (center2 - center1) / d
             return closest_point, None
 
-    if d == 0 and r1 == r2:
-        logger.info("Infinite intersections: The start and end points and radii are identical.")
-        logger.info("Choosing a point on the perimeter of the circles.")
-        intersect = np.array([x1 + r1, y1])
-        return intersect, None
-    
+
     if d == (r1 + r2) or d == abs(r1 - r2):
         logger.info("Whaaat? Tangential circles: The circles touch at exactly one point.")
 
@@ -240,6 +249,12 @@ def greedy_select_single_activity(start_coord: np.ndarray, end_coord: np.ndarray
                                  distance_start_to_act: float, distance_act_to_end: float, 
                                  num_candidates: int):
     """Place a single activity at the most likely location."""
+    logger.debug(f"Greedy selecting activity for purpose {purpose} between {start_coord} and {end_coord}.")
+    
+    # Home locations aren't among the targets and are for now replaced by the start location
+    if purpose == s.ACT_HOME:
+        logger.info("Home activity detected. Secondary locator shouldn't be used for that. Returning start location.")
+        return None, "home", start_coord, None, None, None
 
     candidates1, candidates2 = find_location_candidates(start_coord, end_coord, purpose, distance_start_to_act, distance_act_to_end, num_candidates)
 
@@ -256,9 +271,6 @@ def greedy_select_single_activity(start_coord: np.ndarray, end_coord: np.ndarray
 
     return best_candidate
 
-        
-            
-    
     
 def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any]]]:
     """Uses the MiD df to populate a nested dictionary with leg information for each person."""
@@ -315,10 +327,11 @@ def prepare_mid_df_for_legs_dict() -> pd.DataFrame:
         df.at[group.index[0], "from_location"] = random_location
         df.at[group.index[-1], "to_location"] = random_location
     
-    print(df.head())
+    logger.debug(df.head())
     return df
 
 def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List[List[Dict[str, Any]]]]:
+    logger.debug(f"Segmenting legs for {len(nested_dict)} persons.")
     segmented_dict = defaultdict(list)
     
     for person_id, legs in nested_dict.items():
@@ -361,6 +374,7 @@ def estimate_length_with_slack(length1, length2, slack_factor = 2, min_slack_low
     return [length_diff, wanted_minimum, result, wanted_maximum, length_sum]
     
 def build_estimation_tree(distances: List[float]) -> List[List[List[float]]]: # Tree level, Leg, Lengths
+    logger.debug(f"Building estimation tree for {len(distances)} legs.")	
     tree: List[List[List[float]]] = []  
     
     while len(distances) > 1:
@@ -509,6 +523,7 @@ def greedy_locate_segment(segment):
         return segment
     # if there are only two legs, we can find the loc immediately
     elif len(segment) == 2:
+        logger.debug("Greedy locating. Only two legs in segment.")
         act_identifier, act_name, act_coord, act_cap, act_dist, act_score = greedy_select_single_activity(segment[0]['from_location'], segment[-1]['to_location'], segment[0]['to_act_purpose'], segment[0]['distance'], segment[-1]['distance'], 5)
         segment[0]['to_location'] = act_coord
         segment[-1]['from_location'] = act_coord
@@ -518,6 +533,7 @@ def greedy_locate_segment(segment):
         segment[0]['to_act_score'] = act_score
         return segment
     else:
+        logger.debug(f"Greedy locating. Segment has {len(segment)} legs.")
         distances = [leg['distance'] for leg in segment]
 
         real_distance = euclidean_distance(segment[0]['from_location'], segment[-1]['to_location'])
@@ -527,22 +543,30 @@ def greedy_locate_segment(segment):
         position_on_segment_info = build_position_on_segment_info(len(distances)) # tells us at each level which legs to look at
         assert len(tree) == len(position_on_segment_info), "Tree and position info must have the same length."
 
-        for level in range(len(tree), 0, -1):
-            for leg_idx,i in enumerate(position_on_segment_info[level - 1]):
+        for level in range(len(tree)-1, -1, -1):
+            for i, leg_idx in enumerate(position_on_segment_info[level]):
+                print(f"Level: {level}, i: {i}, leg_idx: {leg_idx}")
                 segment_step = 2**level
-                from_location_idx = leg_idx - segment_step
+                from_location_idx = leg_idx - segment_step + 1
                 assert from_location_idx >= 0, "From location index must be greater or equal to 0."
                 to_location_idx = min(len(segment) - 1, leg_idx + segment_step)
                 
+                if level == 0:
+                    dist_start_to_act = segment[leg_idx]['distance']
+                    dist_act_to_end = segment[to_location_idx]['distance']
+                else:
+                    dist_start_to_act = tree[level-1][2 * i][2]
+                    dist_act_to_end = tree[level-1][2 * i+1][2]
+                
                 act_identifier, act_name, act_coord, act_cap, act_dist, act_score = \
-                greedy_select_single_activity(segment[from_location_idx]['from_location'], segment[to_location_idx]['to_location'], segment[leg_idx]['to_act_purpose'], tree[level][i][2], tree[level][i+1][2], 5)
+                greedy_select_single_activity(segment[from_location_idx]['from_location'], segment[to_location_idx]['to_location'], segment[leg_idx]['to_act_purpose'], dist_start_to_act, dist_act_to_end, 5)
                 segment[leg_idx]['to_location'] = act_coord
                 segment[leg_idx -1]['from_location'] = act_coord
                 segment[leg_idx]['to_act_identifier'] = act_identifier
                 segment[leg_idx]['to_act_name'] = act_name
                 segment[leg_idx]['to_act_cap'] = act_cap
                 segment[leg_idx]['to_act_score'] = act_score
-
+        return segment
         
 def build_position_on_segment_info(n: int) -> list[list[int]]:
     """Based on the number of legs in a segment, this function returns a list of lists that tells us at each level which legs to process."""
@@ -564,39 +588,42 @@ def build_position_on_segment_info(n: int) -> list[list[int]]:
         seen_elements.update(cleaned_list)
         cleaned_result.append(cleaned_list)
 
+    cleaned_result.reverse()
+    
     return cleaned_result
     
 
 def build_candidate_tree(segment, tree):
+    """Work in progress. """
     
     # At the second highest level, get n candidates with score for the location
     candidates = find_location_candidates(segment[0]['from_location'], segment[-1]['to_location'], segment[0]['to_act_purpose'], tree[0][0][2], tree[0][1][2], 5)
-    print(candidates)
+    logger.debug(candidates)
     
     # At the next levels, get n candidates with score for each connected location
     for level in range(1, len(tree)):
         for i in range(0, len(tree[level]), 2):
             candidates = find_location_candidates(segment[i]['from_location'], segment[i+1]['to_location'], segment[i]['to_act_purpose'], tree[level][i][2], tree[level][i+1][2], 5)
-            print(candidates)
+            logger.debug(candidates)
 
 df = prepare_mid_df_for_legs_dict()
-print("df prepared.")
+logger.debug("df prepared.")
 dictu = populate_legs_dict_from_df(df)
-print("dict populated.")
+logger.debug("dict populated.")
 segmented_dict = segment_legs(dictu)
-print("dict segmented.")
-print (segmented_dict)
+logger.debug("dict segmented.")
+logger.debug (segmented_dict)
 # for person_id, segments in segmented_dict.items():
-#     print(f"Person {person_id}:")
+#     logger.debug(f"Person {person_id}:")
 #     for i, segment in enumerate(segments, 1):
-#         print(f"  Segment {i}:")
+#         logger.debug(f"  Segment {i}:")
 #         for leg in segment:
-#             print(f"    {leg}")
-#     print()
+#             logger.debug(f"    {leg}")
+#     logger.debug()
 
 for person_id, segments in segmented_dict.items():
     for segment in segments:
         greedy_locate_segment(segment)
         
-print("done")
+logger.debug("done")
 

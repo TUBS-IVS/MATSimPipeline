@@ -95,8 +95,8 @@ def popsim_to_matsim_plans_main():
     population.change_last_leg_activity_to_home()
 
     # Set coord_to to home_loc for all legs where activity is home
-    population.df.loc[population.df[s.LEG_TO_ACTIVITY_COL] == s.ACTIVITY_HOME, s.COORD_TO_COL] = (
-        population.df.loc)[population.df[s.LEG_TO_ACTIVITY_COL] == s.ACTIVITY_HOME, "home_loc"]
+    population.df.loc[population.df[s.LEG_TO_ACTIVITY_COL] == s.ACT_HOME, s.COORD_TO_COL] = (
+        population.df.loc)[population.df[s.LEG_TO_ACTIVITY_COL] == s.ACT_HOME, "home_loc"]
 
     # Set coord_from
     population.df = h.add_from_coord(population.df)
@@ -113,8 +113,8 @@ def popsim_to_matsim_plans_main():
     if missing_cells_count > 0:
         logger.warning(f"{missing_cells_count} persons without a cell. They will be ignored.")
     # To_cell
-    persons_with_cells.loc[persons_with_cells[s.LEG_TO_ACTIVITY_COL] == s.ACTIVITY_HOME, s.CELL_TO_COL] = (
-        persons_with_cells.loc)[persons_with_cells[s.LEG_TO_ACTIVITY_COL] == s.ACTIVITY_HOME, s.HOME_CELL_COL]
+    persons_with_cells.loc[persons_with_cells[s.LEG_TO_ACTIVITY_COL] == s.ACT_HOME, s.CELL_TO_COL] = (
+        persons_with_cells.loc)[persons_with_cells[s.LEG_TO_ACTIVITY_COL] == s.ACT_HOME, s.HOME_CELL_COL]
     # From_cell
     persons_with_cells = h.add_from_cell(persons_with_cells)
     persons_with_cells = pd.DataFrame(persons_with_cells)

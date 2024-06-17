@@ -95,7 +95,7 @@ def is_main_activity(person):
     is_main_activity_series = pd.Series(0, index=person.index)  # Initialize all values to 0
 
     # Filter out home activities (home must not be the main activity)
-    group = person[person[s.LEG_TO_ACTIVITY_COL] != s.ACTIVITY_HOME]
+    group = person[person[s.LEG_TO_ACTIVITY_COL] != s.ACT_HOME]
 
     if group.empty:
         logger.debug(f"Person {person[s.PERSON_ID_COL].iloc[0]} has no legs outside home. No main activity.")
@@ -114,7 +114,7 @@ def is_main_activity(person):
         return is_main_activity_series
 
     # If the person has more than one activity, the main activity is the first work activity
-    work_activity_rows = group[group[s.LEG_TO_ACTIVITY_COL] == s.ACTIVITY_WORK]
+    work_activity_rows = group[group[s.LEG_TO_ACTIVITY_COL] == s.ACT_WORK]
     if not work_activity_rows.empty:
         is_main_activity_series[work_activity_rows.index[0]] = 1
         assert is_main_activity_series.sum() == 1
@@ -123,7 +123,7 @@ def is_main_activity(person):
 
     # If the person has no work activity, the main activity is the first education activity
     education_activity_rows = group[
-        group[s.LEG_TO_ACTIVITY_COL].isin([s.ACTIVITY_EDUCATION, s.ACTIVITY_EARLY_EDUCATION, s.ACTIVITY_DAYCARE])]
+        group[s.LEG_TO_ACTIVITY_COL].isin([s.ACT_EDUCATION, s.ACT_EARLY_EDUCATION, s.ACT_DAYCARE])]
     if not education_activity_rows.empty:
         is_main_activity_series[education_activity_rows.index[0]] = 1
         assert is_main_activity_series.sum() == 1
@@ -301,17 +301,17 @@ def is_protagonist(household_group):
     # Ranked activities (lowest to highest probability of being protagonist). Not an exact science.
     # Activities not in this list are ranked lowest.
     activities_ranked = [
-        s.ACTIVITY_ERRANDS,
-        s.ACTIVITY_LEISURE,
-        s.ACTIVITY_MEETUP,
-        s.ACTIVITY_SHOPPING,
-        s.ACTIVITY_EDUCATION,
-        s.ACTIVITY_LESSONS,
-        s.ACTIVITY_SPORTS,
-        s.ACTIVITY_EARLY_EDUCATION,
-        s.ACTIVITY_DAYCARE,  # Likely to be dropped off/picked up
-        s.ACTIVITY_BUSINESS,  # Likely to be accompanied
-        s.ACTIVITY_HOME]  # Home must stay home
+        s.ACT_ERRANDS,
+        s.ACT_LEISURE,
+        s.ACT_MEETUP,
+        s.ACT_SHOPPING,
+        s.ACT_EDUCATION,
+        s.ACT_LESSONS,
+        s.ACT_SPORTS,
+        s.ACT_EARLY_EDUCATION,
+        s.ACT_DAYCARE,  # Likely to be dropped off/picked up
+        s.ACT_BUSINESS,  # Likely to be accompanied
+        s.ACT_HOME]  # Home must stay home
 
     # Keep track of checked legs, so we don't waste time checking them again
     checked_legs = []

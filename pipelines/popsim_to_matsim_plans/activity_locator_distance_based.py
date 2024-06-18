@@ -14,7 +14,7 @@ from pipelines.common import helpers as h
 from utils import settings_values as s
 from utils.logger import logging
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)    
 
 stats_tracker =  h.StatsTracker()
 

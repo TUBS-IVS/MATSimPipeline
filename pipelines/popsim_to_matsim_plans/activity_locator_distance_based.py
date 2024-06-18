@@ -1,32 +1,22 @@
-import random
-
-import pandas as pd
+import random as rnd
+import pickle
 from collections import defaultdict
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+from sklearn.neighbors import KDTree
+
+import math
 
 from pipelines.common import helpers as h
 from utils import settings_values as s
 from utils.logger import logging
 
-logger = logging.getLogger(__name__)    
+logger = logging.getLogger(__name__)
 
-from typing import Tuple, List, Dict, Any
-import numpy as np
-from sklearn.neighbors import KDTree
-import random as rnd
-import pickle
-
-
-from typing import Dict, Tuple, Any
-import numpy as np
-from sklearn.neighbors import KDTree
-import random as rnd
-
-
+stats_tracker =  h.StatsTracker()
 
 def reformat_locations(locations_data: Dict[str, Dict[str, Dict[str, Any]]]) -> Dict[str, Dict[str, np.ndarray]]:
     """Reformat locations data from a nested dictionary to a dictionary of numpy arrays."""
@@ -69,7 +59,7 @@ class TargetLocations:
             logger.debug(f"Constructing spatial index for {purpose} ...")
             self.indices[purpose] = KDTree(pdata["coordinates"])
 
-    def query(self, purpose: str, location: np.ndarray, num_candidates: int = 1) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def query_closest(self, purpose: str, location: np.ndarray, num_candidates: int = 1) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Find the nearest activity locations for a given location and purpose.
         :param purpose: The purpose category to query.
@@ -92,7 +82,71 @@ class TargetLocations:
         candidate_capacities = np.array(self.data[purpose]["capacities"])[indices[0]]
 
         return candidate_identifiers, candidate_names, candidate_coordinates, candidate_capacities, candidate_distances [0]
+    
+    def query_within_radius(self, purpose: str, location: np.ndarray, radius: float) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Find the activity locations within a given radius of a location and purpose.
+        :param purpose: The purpose category to query.
+        :param location: A 1D numpy array representing the location to query (coordinates [1.5, 2.5]).
+        :param radius: The maximum distance from the location to search for candidates.
+        :return: A tuple containing four numpy arrays: identifiers, coordinates, distances, and remaining capacities of the nearest candidates.
+        """
+        # Ensure location is a 2D array with a single location
+        location = location.reshape(1, -1)
 
+        # Query the KDTree for the nearest locations
+        candidate_indices = self.indices[purpose].query_radius(location, radius)
+        logger.debug(f"Query Indices: {candidate_indices}")
+
+        # Get the identifiers, coordinates, and distances for locations within the radius
+        candidate_identifiers = np.array(self.data[purpose]["identifiers"])[candidate_indices[0]]
+        candidate_names = np.array(self.data[purpose]["names"])[candidate_indices[0]]
+        candidate_coordinates = np.array(self.data[purpose]["coordinates"])[candidate_indices[0]]
+        candidate_capacities = np.array(self.data[purpose]["capacities"])[candidate_indices[0]]
+        # candidate_distances = np.linalg.norm(candidate_coordinates - location, axis=1)
+        candidate_distances = None
+
+        return candidate_identifiers, candidate_names, candidate_coordinates, candidate_capacities, candidate_distances
+
+    def query_within_ring(self, purpose: str, location: np.ndarray, radius1: float, radius2: float) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Find the activity locations within a ring defined by two radii around a location and purpose.
+        :param purpose: The purpose category to query.
+        :param location: A 1D numpy array representing the location to query (coordinates [1.5, 2.5]).
+        :param inner_radius: The minimum distance from the location to search for candidates.
+        :param outer_radius: The maximum distance from the location to search for candidates.
+        :return: A tuple containing four numpy arrays: identifiers, coordinates, distances, and remaining capacities of the nearest candidates.
+        """
+        # Ensure location is a 2D array with a single location
+        location = location.reshape(1, -1)
+        
+        outer_radius = max(radius1, radius2)
+        inner_radius = min(radius1, radius2)
+
+        outer_indices = self.indices[purpose].query_radius(location, outer_radius)
+        if outer_indices is None:
+            return None
+        if len(outer_indices[0]) == 0:
+            return None
+
+        inner_indices = self.indices[purpose].query_radius(location, inner_radius)
+        
+        outer_indices_set = set(outer_indices[0])
+        inner_indices_set = set(inner_indices[0])
+        
+        annulus_indices = list(outer_indices_set - inner_indices_set)
+        if not annulus_indices:
+            return None
+
+        # Get the identifiers, coordinates, and distances for locations within the annulus
+        candidate_identifiers = np.array(self.data[purpose]["identifiers"])[annulus_indices]
+        candidate_names = np.array(self.data[purpose]["names"])[annulus_indices]
+        candidate_coordinates = np.array(self.data[purpose]["coordinates"])[annulus_indices]
+        candidate_capacities = np.array(self.data[purpose]["capacities"])[annulus_indices]
+        candidate_distances = None
+
+        return candidate_identifiers, candidate_names, candidate_coordinates, candidate_capacities, candidate_distances
+    
     def sample(self, purpose: str, random: rnd.Random) -> Tuple[Any, np.ndarray]:
         """
         Sample a random activity location for a given purpose.
@@ -104,11 +158,6 @@ class TargetLocations:
         identifier = self.data[purpose]["identifiers"][index]
         coordinates = self.data[purpose]["coordinates"][index]
         return identifier, coordinates
-
-with open('locations_data_with_capacities.pkl', 'rb') as file:
-    locations_data = pickle.load(file)
-reformatted_data = reformat_locations(locations_data)
-MyTargetLocations = TargetLocations(reformatted_data)
 
 
 def sigmoid(x):
@@ -124,7 +173,7 @@ def sigmoid(x):
     z = np.clip(z, -500, 500)
     return 1 / (1 + np.exp(z))
 
-def score_locations(distances: np.ndarray, capacities: np.ndarray) -> np.ndarray:
+def score_locations(capacities: np.ndarray, distances: np.ndarray = None) -> np.ndarray:
     """
     Evaluate the returned locations by distance and capacity and return a score.
 
@@ -132,8 +181,11 @@ def score_locations(distances: np.ndarray, capacities: np.ndarray) -> np.ndarray
     :param capacities: Numpy array of remaining capacities for the returned locations.
     :return: Numpy array of scores for the returned locations.
     """
-    # Calculate the base score for each location
-    base_scores = capacities / distances  # TODO: Improve scoring function
+    if distances is not None:
+        base_scores = capacities / distances  # TODO: Improve scoring function
+    
+    else:
+        base_scores = capacities
 
     # Normalize the scores to ensure they sum to 1
     scores = base_scores / np.sum(base_scores)
@@ -232,10 +284,10 @@ def find_location_candidates(start_coord: np.ndarray, end_coord: np.ndarray, pur
     """
     intersect1, intersect2 = find_circle_intersections(start_coord, distance_start_to_act, end_coord, distance_act_to_end)
     
-    candidate_identifiers, candidate_names, candidate_coordinates, candidate_capacities, candidate_distances = MyTargetLocations.query(purpose, intersect1, num_candidates)
+    candidate_identifiers, candidate_names, candidate_coordinates, candidate_capacities, candidate_distances = MyTargetLocations.query_closest(purpose, intersect1, num_candidates)
     
     if intersect2 is not None:
-        candidate_identifiers2, candidate_names2, candidate_coordinates2, candidate_capacities2, candidate_distances2 = MyTargetLocations.query(purpose, intersect2, num_candidates)
+        candidate_identifiers2, candidate_names2, candidate_coordinates2, candidate_capacities2, candidate_distances2 = MyTargetLocations.query_closest(purpose, intersect2, num_candidates)
     
         return (candidate_identifiers, candidate_names, candidate_coordinates, candidate_capacities, candidate_distances),\
             (candidate_identifiers2, candidate_names2, candidate_coordinates2, candidate_capacities2, candidate_distances2)
@@ -263,14 +315,30 @@ def greedy_select_single_activity(start_coord: np.ndarray, end_coord: np.ndarray
     else:
         combined_candidates = candidates1
 
-    scores = score_locations(combined_candidates[-1], combined_candidates[-2])
-    best_candidate_index = np.argmax(scores)
+    # scores = score_locations(combined_candidates[-1], combined_candidates[-2])
+    # best_candidate_index = np.argmax(scores)
         
-    # Get the best candidate information.
-    best_candidate = tuple(arr[best_candidate_index] for arr in combined_candidates) + (scores[best_candidate_index],)
+    # # Get the best candidate information.
+    # best_candidate = tuple(arr[best_candidate_index] for arr in combined_candidates) + (scores[best_candidate_index],)
 
-    return best_candidate
+    # return best_candidate
+    return monte_carlo_select_candidate(combined_candidates)
 
+def monte_carlo_select_candidate(candidates, use_distance = True):
+    if use_distance:
+        scores = score_locations(candidates[-2], candidates[-1])
+    else:
+        scores = score_locations(candidates[-2])
+    
+    # Verify that scores are normalized to 1
+    assert np.isclose(np.sum(scores), 1.0), "Scores are not normalized to 1." # TODO: Remove this line in production
+    
+    chosen_index = np.random.choice(len(scores), p=scores)
+    
+    # Return the chosen candidate with its score
+    chosen_candidate = tuple((arr[chosen_index] if arr is not None else None) for arr in candidates) + (scores[chosen_index],)
+
+    return chosen_candidate
     
 def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any]]]:
     """Uses the MiD df to populate a nested dictionary with leg information for each person."""
@@ -300,8 +368,8 @@ def generate_random_location_within_hanover():
     """Generate a random coordinate within Hanover, Germany, in EPSG:25832."""
     xmin, xmax = 546000, 556000
     ymin, ymax = 5800000, 5810000
-    x = random.uniform(xmin, xmax)
-    y = random.uniform(ymin, ymax)
+    x = rnd.uniform(xmin, xmax)
+    y = rnd.uniform(ymin, ymax)
     return np.array([x, y])
 
 def prepare_mid_df_for_legs_dict() -> pd.DataFrame:
@@ -321,11 +389,14 @@ def prepare_mid_df_for_legs_dict() -> pd.DataFrame:
     df["from_location"] = df["from_location"].astype(object)
     df["to_location"] = df["to_location"].astype(object)
 
-    # Process each person
+    # Add random home locations for each person
     for person_id, group in df.groupby(s.PERSON_ID_COL):
-        random_location = generate_random_location_within_hanover()
-        df.at[group.index[0], "from_location"] = random_location
-        df.at[group.index[-1], "to_location"] = random_location
+        home_location = generate_random_location_within_hanover()
+        df.at[group.index[0], "from_location"] = home_location
+        df.at[group.index[-1], "to_location"] = home_location
+    
+    # In-place convert km to meters for distance column
+    df[s.LEG_DISTANCE_COL] = df[s.LEG_DISTANCE_COL] * 1000
     
     logger.debug(df.head())
     return df
@@ -409,8 +480,8 @@ def adjust_estimation_tree(tree: List[List[List[float]]], real_distance: float, 
     """
     
     logger.debug(tree)
-            
-    # Adjust the highest level
+                
+    # Enter real distance as basis for possible adjustments
     tree[-1][0][2] = real_distance
 
     # If highest level is 1, we're done (we can't adjust anything, but this is never needed with level 1 - trees anyway)
@@ -425,43 +496,13 @@ def adjust_estimation_tree(tree: List[List[List[float]]], real_distance: float, 
         u_bound_idx = 3
 
     if tree[-1][0][1] < real_distance < tree[-1][0][3]: # Checking for wanted maximum and minimum, not real maximum and minimum
-        logger.debug("Real total distance is within bounds of highest level.")
+        logger.debug("Real total distance is within bounds of highest level, no adjustment needed.")
+        stats_tracker.increment("adjustment_total_runs")
+        stats_tracker.increment("adjustment_no_adjustment")
         return tree
     else:
         # Traverse from one below the highest level down to including level 1 (which has index 0) - and then down to -1 just for the last check
-        for level in range(len(tree) - 1, -2, -1):
-            
-            # At the lowest level, check plausibilities and return
-            # TODO: Move to end??
-            if level == -1:
-                plausible = True
-                for i in range(0, len(tree[0]), 1):
-                    leg_value = tree[0][i][2]
-                    leg_lower_bound = tree[0][i][0]
-                    leg_upper_bound = tree[0][i][4]
-                    if not leg_lower_bound <= leg_value <= leg_upper_bound:
-                        plausible = False
-                        break
-                
-                if strong_adjust:
-                    if plausible:
-                        logger.debug("Strong adjustment succeeded.")
-                        logger.debug(tree)
-                        return tree
-                    else:
-                        logger.debug("Strong adjustment failed.")
-                        logger.debug(tree)
-                        return tree
-                else:
-                    if plausible:
-                        # These are the bounds of the first level estimation, which are set in stone by the known real distances
-                        logger.debug("Adjustment succeeded with wanted bounds.")
-                        return tree
-                    else:
-                        logger.debug("Adjustment failed with wanted bounds, trying strong adjustment with real bounds.")
-                        return adjust_estimation_tree(tree, real_distance, strong_adjust = True)
-                        
-                        
+        for level in range(len(tree) - 1, -1, -1):     
             for i in range(0, len(tree[level]), 2): # Traverse in pairs, skipping the last one if it's an odd number
                 if i == len(tree[level]) - 1:
                     continue
@@ -475,6 +516,7 @@ def adjust_estimation_tree(tree: List[List[List[float]]], real_distance: float, 
 
                 if higher_leg_value < higher_leg_lower_bound: # (Real) higher_leg_value can be zero if start and end location are the same
                     logger.debug(f"Strong overshot. Level: {level}, i: {i}, higher_leg_value: {higher_leg_value}, higher_leg_lower_bound: {higher_leg_lower_bound}")
+                    stats_tracker.increment("adjustment_overshot_cases")
                     # Yes, overshot: The "ground truth" is lower than the lower bound of the estimation
                     if leg1_value > leg2_value:
                         # Make longer leg shorter, shorter leg longer
@@ -501,8 +543,10 @@ def adjust_estimation_tree(tree: List[List[List[float]]], real_distance: float, 
                 elif higher_leg_value > higher_leg_upper_bound: 
                     
                     logger.debug(f"Strong undershot. Level: {level}, i: {i}, higher_leg_value: {higher_leg_value}, higher_leg_upper_bound: {higher_leg_upper_bound}")
+                    stats_tracker.increment("adjustment_undershot_cases")
                     # Yes, undershot: The "ground truth" is higher than the upper bound of the estimation
                     # Make both legs longer (both move to upper bound)
+                    
                     L_bounds1 = abs(tree[level][i][4] - leg1_value)
                     L_bounds2 = abs(tree[level][i+1][4] - leg2_value)
                     delta_L_high = abs(higher_leg_value - higher_leg_upper_bound)
@@ -512,7 +556,38 @@ def adjust_estimation_tree(tree: List[List[List[float]]], real_distance: float, 
 
                     tree[level][i][2] += delta_L1
                     tree[level][i+1][2] += delta_L2
-
+        
+        # Check plausibilities and return
+        plausible = True
+        for i in range(0, len(tree[0]), 1):
+            leg_value = tree[0][i][2]
+            leg_lower_bound = tree[0][i][0]
+            leg_upper_bound = tree[0][i][4]
+            if not leg_lower_bound <= leg_value <= leg_upper_bound:
+                plausible = False
+                break
+        
+        if strong_adjust:
+            if plausible:
+                logger.debug("Strong adjustment succeeded.")
+                logger.debug(tree)
+                stats_tracker.increment("adjustment_total_runs")
+                stats_tracker.increment("adjustment_strong_adjustment_success")
+                return tree
+            else:
+                logger.debug("Strong adjustment failed.")
+                logger.debug(tree)
+                stats_tracker.increment("adjustment_total_runs")
+                stats_tracker.increment("adjustment_strong_adjustment_failure")
+                return tree
+        else:
+            if plausible:
+                # These are the bounds of the first level estimation, which are set in stone by the known real distances
+                logger.debug("Adjustment succeeded with wanted bounds.")
+                return tree
+            else:
+                logger.debug("Adjustment failed with wanted bounds, trying strong adjustment with real bounds.")
+                return adjust_estimation_tree(tree, real_distance, strong_adjust = True)
 
 def greedy_locate_segment(segment):
     
@@ -545,9 +620,9 @@ def greedy_locate_segment(segment):
 
         for level in range(len(tree)-1, -1, -1):
             for i, leg_idx in enumerate(position_on_segment_info[level]):
-                print(f"Level: {level}, i: {i}, leg_idx: {leg_idx}")
+                logger.debug(f"Level: {level}, i: {i}, leg_idx: {leg_idx}")
                 segment_step = 2**level
-                from_location_idx = leg_idx - segment_step + 1
+                from_location_idx = leg_idx - segment_step + 1 # + 1 because we get the from_location
                 assert from_location_idx >= 0, "From location index must be greater or equal to 0."
                 to_location_idx = min(len(segment) - 1, leg_idx + segment_step)
                 
@@ -561,15 +636,64 @@ def greedy_locate_segment(segment):
                 act_identifier, act_name, act_coord, act_cap, act_dist, act_score = \
                 greedy_select_single_activity(segment[from_location_idx]['from_location'], segment[to_location_idx]['to_location'], segment[leg_idx]['to_act_purpose'], dist_start_to_act, dist_act_to_end, 5)
                 segment[leg_idx]['to_location'] = act_coord
-                segment[leg_idx -1]['from_location'] = act_coord
+                if leg_idx + 1 < len(segment)+1:
+                    segment[leg_idx + 1]['from_location'] = act_coord 
                 segment[leg_idx]['to_act_identifier'] = act_identifier
                 segment[leg_idx]['to_act_name'] = act_name
                 segment[leg_idx]['to_act_cap'] = act_cap
                 segment[leg_idx]['to_act_score'] = act_score
         return segment
-        
+
+def add_from_locations(segment):
+    """Add the from_location to each leg in the segment."""
+    for i, leg in enumerate(segment):
+        if i != 0:
+            leg['from_location'] = segment[i-1]['to_location']
+    return segment
+
+def insert_placed_distances(segment):
+    """Inserts info on the actual distances between placed activities for a fully located segment.
+    Optional; for debugging and evaluation purposes."""
+    for leg in segment:
+        leg['placed_distance'] = euclidean_distance(leg['from_location'], leg['to_location'])
+        leg['placed_distance_absolute_diff'] = abs(leg['distance'] - leg['placed_distance'])
+        leg['placed_distance_relative_diff'] = leg['placed_distance_absolute_diff'] / leg['distance']
+    return segment
+
+def summarize_placement_results(flattened_segmented_dict): 
+    """Summarizes the placement results of a fully located segment.
+    Optional; for debugging and evaluation purposes."""
+    discretization_errors = []
+    relative_errors = []
+    total_number_of_legs = sum([len(segment) for segment in flattened_segmented_dict.values()])
+    for person_id, segment in flattened_segmented_dict.items():
+        for leg in segment:
+            discretization_errors.append(leg['placed_distance_absolute_diff'])
+            relative_errors.append(leg['placed_distance_relative_diff'])
+    mean_discretization_error = sum(discretization_errors) / total_number_of_legs
+    mean_relative_error = sum(relative_errors) / total_number_of_legs
+    median_discretization_error = np.median(discretization_errors)
+    median_relative_error = np.median(relative_errors)
+    
+    logger.info(f"Total number of legs: {total_number_of_legs}")
+    logger.info(f"Average discretization error: {mean_discretization_error}")
+    logger.info(f"Average relative error: {mean_relative_error}")
+    logger.info(f"Median discretization error: {median_discretization_error}")
+    logger.info(f"Median relative error: {median_relative_error}")
+    
+    return total_number_of_legs, mean_discretization_error, mean_relative_error, median_discretization_error, median_relative_error
+
+def select_interesting_trips(flattened_segmented_dict, n: int): # TODO: Implement
+    """Selects a few interesting agent trips for debugging and evaluation purposes."""
+    interesting_trips = []
+    for person_id, segment in flattened_segmented_dict.items():
+        if len(segment) > 2:
+            interesting_trips.append(segment)
+    return interesting_trips
+    
+
 def build_position_on_segment_info(n: int) -> list[list[int]]:
-    """Based on the number of legs in a segment, this function returns a list of lists that tells us at each level which legs to process."""
+    """Based on the number of legs in a segment, returns a list of lists that tells us at each level which legs to process."""
     # The first list contains numbers from 0 to n-2
     original_list = list(range(n-1))
     result = []
@@ -592,38 +716,181 @@ def build_position_on_segment_info(n: int) -> list[list[int]]:
     
     return cleaned_result
     
+def flatten_segmented_dict(segmented_dict: Dict[str, List[List[Dict[str, Any]]]]) -> Dict[str, List[Dict[str, Any]]]:
+    """Recombine the segments of each person into a single list of legs."""
+    for person_id, segments in segmented_dict.items():
+        segmented_dict[person_id] = [leg for segment in segments for leg in segment]
+    return segmented_dict
 
-def build_candidate_tree(segment, tree):
-    """Work in progress. """
+# def build_candidate_tree(segment, tree):
+#     """Work in progress. """
     
-    # At the second highest level, get n candidates with score for the location
-    candidates = find_location_candidates(segment[0]['from_location'], segment[-1]['to_location'], segment[0]['to_act_purpose'], tree[0][0][2], tree[0][1][2], 5)
-    logger.debug(candidates)
+#     # At the second highest level, get n candidates with score for the location
+#     candidates = find_location_candidates(segment[0]['from_location'], segment[-1]['to_location'], segment[0]['to_act_purpose'], tree[0][0][2], tree[0][1][2], 5)
+#     logger.debug(candidates)
     
-    # At the next levels, get n candidates with score for each connected location
-    for level in range(1, len(tree)):
-        for i in range(0, len(tree[level]), 2):
-            candidates = find_location_candidates(segment[i]['from_location'], segment[i+1]['to_location'], segment[i]['to_act_purpose'], tree[level][i][2], tree[level][i+1][2], 5)
-            logger.debug(candidates)
+#     # At the next levels, get n candidates with score for each connected location
+#     for level in range(1, len(tree)):
+#         for i in range(0, len(tree[level]), 2):
+#             candidates = find_location_candidates(segment[i]['from_location'], segment[i+1]['to_location'], segment[i]['to_act_purpose'], tree[level][i][2], tree[level][i+1][2], 5)
+#             logger.debug(candidates)
+
+
+def spread_distances(distance1, distance2, iteration = 0, first_step = 20):
+    """Increases the difference between two distances, keeping them positive."""
+    step = first_step * 2**(iteration+1)
+    if distance1 > distance2:
+        distance1 += step
+        distance2 -= step
+    else:
+        distance1 -= step
+        distance2 += step
+    return max(0, distance1), max(0, distance2)
+    
+
+
+def simple_locate_segment(segment):
+    """Assumes start and end locations of segment are identical."""
+    if len(segment) == 0:
+        raise ValueError("No legs in segment.")
+    
+    elif len(segment) == 1:
+        assert segment[0]['from_location'].size > 0 and segment[0]['to_location'].size > 0, "Both start and end locations must be known for a single leg."
+        return segment
+        
+    # if there are only two legs, get a location within the two circles around home
+    elif len(segment) == 2:
+        logger.debug("Simple locating. Only two legs in segment.")
+        distance1 = segment[0]['distance']
+        distance2 = segment[1]['distance']
+        if abs(distance1 - distance2) < 30: # always meters!
+            distance1, distance2 = spread_distances(distance1, distance2, first_step=20)
+        candidates = find_ring_candidates(segment[0]['to_act_purpose'], segment[0]['from_location'], distance1, distance2)
+        act_identifier, act_name, act_coord, act_cap, act_dist, act_score = monte_carlo_select_candidate(candidates)
+        segment[0]['to_location'] = act_coord
+        segment[-1]['from_location'] = act_coord
+        segment[0]['to_act_identifier'] = act_identifier
+        segment[0]['to_act_name'] = act_name
+        segment[0]['to_act_cap'] = act_cap
+        segment[0]['to_act_score'] = act_score
+        return segment
+    
+    else:
+        total_distance = sum([leg['distance'] for leg in segment])
+        traveled_distance = 0
+        for i, leg in enumerate(segment):
+            traveled_distance += leg['distance']
+            remaining_legs = len(segment) - i
+            
+            if remaining_legs == 1:
+                break # done because no processing on last leg needed
+            
+            elif segment[i]['to_act_purpose'] == s.ACT_HOME:
+                logger.debug("Home activity. Placing at, you guessed it, home (start location).")
+                act_identifier, act_name, act_coord, act_cap, act_dist, act_score = None, "home", segment[i]['from_location'], None, None, None
+            
+            elif traveled_distance >= total_distance / 2:
+                
+                if remaining_legs == 2:
+                    logger.debug("Selecting location using simple two-leg method.")
+                    assert segment[-1] == segment[i+1], "Last leg must be the last leg." # TODO: Remove this line in production
+                    act_identifier, act_name, act_coord, act_cap, act_dist, act_score = \
+                        greedy_select_single_activity(segment[i]['from_location'], segment[-1]['to_location'], segment[i]['to_act_purpose'], segment[i]['distance'], segment[-1]['distance'], 5)
+
+                else:
+                    logger.debug("Selecting location using ring with angle restriction.")
+                    distance = segment[i]['distance']
+                    radius1, radius2 = spread_distances(distance, distance, iteration = 0, first_step=20)
+                    candidates = find_ring_candidates(segment[i]['to_act_purpose'], segment[i]['from_location'], radius1, radius2, max_iterations = 5)
+                    # Angle restriction (pi/2 = 90 degrees)
+                    candidates = [candidate for candidate in candidates if is_within_angle(candidate[2], segment[i]['from_location'], segment[-1]['to_location'], math.pi/2)]
+                    act_identifier, act_name, act_coord, act_cap, act_dist, act_score = monte_carlo_select_candidate(candidates)
+            else:
+                logger.debug("Selecting location using ring.")
+                distance = segment[i]['distance']
+                radius1, radius2 = spread_distances(distance, distance, iteration = 0, first_step=20)
+                candidates = find_ring_candidates(segment[i]['to_act_purpose'], segment[i]['from_location'], radius1, radius2, max_iterations = 5)
+                act_identifier, act_name, act_coord, act_cap, act_dist, act_score = monte_carlo_select_candidate(candidates)
+                
+            segment[i]['to_location'] = act_coord
+            segment[i+1]['from_location'] = act_coord
+            segment[i]['to_act_identifier'] = act_identifier
+            segment[i]['to_act_name'] = act_name
+            segment[i]['to_act_cap'] = act_cap
+            segment[i]['to_act_score'] = act_score
+            
+        return segment 
+            
+        
+
+def find_ring_candidates(purpose: str, center: np.ndarray, radius1: float, radius2: float, max_iterations = 5) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Find candidates within a ring around a center point."""
+    i = 0
+    logger.debug(f"Finding candidates for purpose {purpose} within a ring around {center} with radii {radius1} and {radius2}.")
+    while True:
+        candidates = MyTargetLocations.query_within_ring(purpose, center, radius1, radius2)
+        if candidates is not None:
+            return candidates
+        radius1, radius1 = spread_distances(radius1, radius1, iteration = i, first_step=20)
+        i += 1
+        logger.debug(f"Iteration {i}. Increasing radii to {radius1} and {radius2}.")
+        if i > max_iterations:
+            raise ValueError(f"No candidates found after {max_iterations} iterations.")
+        
+def angle_between(p1, p2):
+    delta_y = p2[1] - p1[1]
+    delta_x = p2[0] - p1[0]
+    angle = math.atan2(delta_y, delta_x)
+    return angle
+
+def is_within_angle(point, center, direction_point, angle_range):
+    angle_to_point = angle_between(center, point)
+    angle_to_direction = angle_between(center, direction_point)
+    lower_bound = angle_to_direction - angle_range / 2
+    upper_bound = angle_to_direction + angle_range / 2
+    
+    # Normalize angles between -pi and pi
+    angle_to_point = (angle_to_point + 2 * math.pi) % (2 * math.pi)
+    lower_bound = (lower_bound + 2 * math.pi) % (2 * math.pi)
+    upper_bound = (upper_bound + 2 * math.pi) % (2 * math.pi)
+
+    if lower_bound < upper_bound:
+        return lower_bound <= angle_to_point <= upper_bound
+    else:  # Covers the case where the angle range crosses the -pi/pi boundary
+        return angle_to_point >= lower_bound or angle_to_point <= upper_bound
+    
+
+with open('locations_data_with_capacities.pkl', 'rb') as file:
+    locations_data = pickle.load(file)
+reformatted_data = reformat_locations(locations_data)
+MyTargetLocations = TargetLocations(reformatted_data)
 
 df = prepare_mid_df_for_legs_dict()
 logger.debug("df prepared.")
 dictu = populate_legs_dict_from_df(df)
 logger.debug("dict populated.")
-segmented_dict = segment_legs(dictu)
+flattened_segmented_dict = segment_legs(dictu)
 logger.debug("dict segmented.")
-logger.debug (segmented_dict)
-# for person_id, segments in segmented_dict.items():
-#     logger.debug(f"Person {person_id}:")
-#     for i, segment in enumerate(segments, 1):
-#         logger.debug(f"  Segment {i}:")
-#         for leg in segment:
-#             logger.debug(f"    {leg}")
-#     logger.debug()
+logger.debug (flattened_segmented_dict)
 
-for person_id, segments in segmented_dict.items():
+# for person_id, segments in flattened_segmented_dict.items():
+#     for segment in segments:
+#         segment = greedy_locate_segment(segment)
+#         segment = insert_placed_distances(segment)
+
+for person_id, segments in flattened_segmented_dict.items():
     for segment in segments:
-        greedy_locate_segment(segment)
+        segment = simple_locate_segment(segment)
+        segment = insert_placed_distances(segment)
+
+flattened_segmented_dict = flatten_segmented_dict(flattened_segmented_dict)
+for person_id, segment in flattened_segmented_dict.items():
+    logger.debug(f"Person ID: {person_id}")
+    for leg in segment:
+        logger.debug(leg)
+
+summarize_placement_results(flattened_segmented_dict)
+
+stats_tracker.print_stats()
         
 logger.debug("done")
-

@@ -1228,3 +1228,27 @@ def assign_points(df, shapefile_path, df_cell_name_column, gdf_cell_name_column,
 
     return df
 
+class StatsTracker:
+    def __init__(self):
+        self.stats = {
+
+        }
+
+    def increment(self, stat):
+        if stat in self.stats:
+            self.stats[stat] += 1
+            logging.debug(f"{stat} incremented to {self.stats[stat]}")
+        else:
+            logging.debug(f"Stat {stat} not found in stats, creating it.")
+            self.stats[stat] = 1
+            
+    def get_stats(self):
+        return self.stats
+    
+    def reset(self):
+        self.stats = {}
+        logging.debug("Stats reset.")
+        
+    def print_stats(self):
+        for stat, value in self.stats.items():
+            logging.info(f"{stat}: {value}")

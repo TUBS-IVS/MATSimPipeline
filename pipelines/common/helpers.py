@@ -1241,7 +1241,15 @@ class StatsTracker:
         else:
             logging.debug(f"Stat {stat} not found in stats, creating it.")
             self.stats[stat] = 1
-            
+
+    def log(self, stat, value):
+        if stat in self.stats:
+            self.stats[stat].append(value)
+            logging.debug(f"Value {value} added to {stat}")
+        else:
+            logging.debug(f"Stat {stat} not found in stats, creating it.")
+            self.stats[stat] = [value]
+
     def get_stats(self):
         return self.stats
     

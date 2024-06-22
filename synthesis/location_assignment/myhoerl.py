@@ -68,13 +68,15 @@ class CustomDiscretizationSolver:
 
 
 
-
+# the ooooooverall run function
 def process(context, arguments):
     df_trips, df_primary, random_seed = arguments
 
     # Set up RNG
-    random = np.random.RandomState(context.config("random_seed"))
-    maximum_iterations = context.config("secloc_maximum_iterations")
+    # random = np.random.RandomState(context.config("random_seed"))
+    random = np.random.RandomState()
+    # maximum_iterations = context.config("secloc_maximum_iterations")
+    maximum_iterations = 1000
 
     # Set up discretization solver
     destinations = context.data("destinations")
@@ -108,7 +110,7 @@ def process(context, arguments):
 
     assignment_objective = DiscretizationErrorObjective(thresholds=thresholds)
     assignment_solver = AssignmentSolver(
-        distance_sampler=distance_sampler,
+        #distance_sampler=distance_sampler,
         relaxation_solver=relaxation_solver,
         discretization_solver=discretization_solver,
         objective=assignment_objective,
@@ -273,12 +275,18 @@ def check_feasibility(distances, direct_distance, consider_total_distance = True
     return calculate_feasibility(distances, direct_distance, consider_total_distance) == 0.0
 
 def calculate_feasibility(distances, direct_distance, consider_total_distance = True):
+    # Really elegant way to calculate the feasibility of any chain
+
     total_distance = np.sum(distances)
     delta_distance = 0.0
 
+    # Remaining is the diff between each individual dist and the sum of all dists (so remaining is the sum of all distances except itself)
     remaining_distance = total_distance - distances
+    # So this checks if we can get "back" to the end if one dist is very large and gets us far away
+    # If delta is larger than one, we can't get back to the end
     delta = max(distances - direct_distance - remaining_distance)
 
+    # Delta gets positive if the real dist is larger than the sum of all distances
     if consider_total_distance:
         delta = max(delta, direct_distance - total_distance)
 
@@ -303,7 +311,7 @@ class AssignmentObjective:
     def evaluate(self, problem, distance_result, relaxation_result, discretization_result):
         raise NotImplementedError()
 
-
+# The overall solver
 class AssignmentSolver:
     def __init__(self, distance_sampler, relaxation_solver, discretization_solver, objective, maximum_iterations=1000):
         self.maximum_iterations = maximum_iterations

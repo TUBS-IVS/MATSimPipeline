@@ -1,9 +1,13 @@
+# TODO: Refactor and remove obsolete functions.
+# TODO: Medium term goal: Remove. We're trying to get away from this architecture
+#  (running code on individual rows through this setup, where possible we should use vectorized operations, where not
+#  this architecture is still not needed).
+
 import random
 
 import pandas as pd
 
-from pipelines.common import helpers as h
-from utils import settings_values as s
+from utils import settings_values as s, helpers as h
 from utils.logger import logging
 
 logger = logging.getLogger(__name__)

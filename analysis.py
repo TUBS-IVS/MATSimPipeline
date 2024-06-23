@@ -6,9 +6,8 @@ from sklearn.preprocessing import OneHotEncoder
 import numpy as np
 import os
 
-from pipelines.common import helpers as h
-from pipelines.popsim_to_matsim_plans.population_frame_processor import PopulationFrameProcessor
-from utils import settings_values as s
+from utils.population_frame_processor import PopulationFrameProcessor
+from utils import helpers as h
 from utils import matsim_pipeline_setup as m
 from utils.logger import logging
 

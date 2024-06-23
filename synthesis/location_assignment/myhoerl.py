@@ -1,4 +1,3 @@
-# import synthesis.population.spatial.secondary.rda as rda
 import sklearn.neighbors
 import numpy as np
 import shapely.geometry as geo
@@ -7,6 +6,9 @@ import pandas as pd
 import numpy.linalg as la
 
 # COMPONENTS
+
+# TODO: Give him my locations
+# TODO: Give him my segments in the right format
 
 # For retrieving locations quickly
 class CandidateIndex:
@@ -42,7 +44,7 @@ class CustomDiscretizationSolver:
         discretized_identifiers = []
 
         for location, purpose in zip(locations, problem["purposes"]):
-            identifier, location = self.index.query(purpose, location.reshape(1, -1))
+            identifier, location = self.index.query(purpose, location.reshape(1, -1)) # TODO: Use own index.query or, rather, use own data for their index
 
             discretized_identifiers.append(identifier)
             discretized_locations.append(location)

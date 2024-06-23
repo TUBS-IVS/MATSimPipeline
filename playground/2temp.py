@@ -4,8 +4,7 @@
 
 # nested dict is much faster than df for most operations
 
-from pipelines.common import helpers as h
-import pandas as pd
+from utils import helpers as h
 
 mydf = h.read_csv("data\\enhanced_frame_final.csv")
 

@@ -8,10 +8,8 @@ import matsim.writers
 import numpy as np
 import pandas as pd
 
-from pipelines.common import helpers as h
-from pipelines.common import rules
-from pipelines.common.data_frame_processor import DataFrameProcessor
-from utils import matsim_pipeline_setup
+from utils.data_frame_processor import DataFrameProcessor
+from utils import matsim_pipeline_setup, helpers as h, rules
 from utils import settings_values as s
 from utils.logger import logging
 

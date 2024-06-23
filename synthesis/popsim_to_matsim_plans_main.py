@@ -1,15 +1,12 @@
 import os
-import time
 import multiprocessing as mp
 
 import pandas as pd
 import geopandas as gpd
-from pipelines.common import rules
 
-from pipelines.common import helpers as h
-from pipelines.popsim_to_matsim_plans.main_activity_locator import ActivityLocator
-from pipelines.popsim_to_matsim_plans.population_frame_processor import PopulationFrameProcessor
-from utils import matsim_pipeline_setup
+from synthesis.location_assignment.main_activity_locator import ActivityLocator
+from utils.population_frame_processor import PopulationFrameProcessor
+from utils import matsim_pipeline_setup, helpers as h, rules
 from utils import settings_values as s
 from utils.logger import logging
 

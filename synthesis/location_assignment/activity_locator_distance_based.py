@@ -3,16 +3,13 @@ import pickle
 from collections import defaultdict
 from typing import List, Dict, Any, Tuple
 
-import geopandas as gpd
 import numpy as np
 import pandas as pd
-from numpy import ndarray, dtype, void
 from sklearn.neighbors import KDTree
 
 import math
 
-from pipelines.common import helpers as h
-from utils import settings_values as s
+from utils import settings_values as s, helpers as h
 from utils.logger import logging
 
 logger = logging.getLogger(__name__)
@@ -310,7 +307,7 @@ def find_location_candidates(start_coord: np.ndarray, end_coord: np.ndarray, pur
         candidate_identifiers, candidate_names, candidate_coordinates, candidate_capacities, candidate_distances), None
 
 
-from typing import Tuple, Optional
+from typing import Tuple
 import numpy as np
 
 

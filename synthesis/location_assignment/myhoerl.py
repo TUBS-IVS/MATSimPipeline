@@ -4,7 +4,10 @@ import shapely.geometry as geo
 import geopandas as gpd
 import pandas as pd
 import numpy.linalg as la
+from typing import Dict, List, Any
+from typing import List, Dict, Any
 
+from collections import defaultdict
 # COMPONENTS
 
 # TODO: Give him my locations
@@ -16,20 +19,20 @@ class CandidateIndex:
         self.data = data
         self.indices = {}
 
-        for purpose, data in self.data.items():
+        for purpose, pdata in self.data.items():
             print("Constructing spatial index for %s ..." % purpose)
-            self.indices[purpose] = sklearn.neighbors.KDTree(data["locations"])
+            self.indices[purpose] = sklearn.neighbors.KDTree(pdata["coordinates"])
 
     def query(self, purpose, location):
         index = self.indices[purpose].query(location.reshape(1, -1), return_distance=False)[0][0]
         identifier = self.data[purpose]["identifiers"][index]
-        location = self.data[purpose]["locations"][index]
+        location = self.data[purpose]["coordinates"][index]
         return identifier, location
 
     def sample(self, purpose, random):
         index = random.randint(0, len(self.data[purpose]["locations"]))
         identifier = self.data[purpose]["identifiers"][index]
-        location = self.data[purpose]["locations"][index]
+        location = self.data[purpose]["coordinates"][index]
         return identifier, location
 
 
@@ -44,7 +47,8 @@ class CustomDiscretizationSolver:
         discretized_identifiers = []
 
         for location, purpose in zip(locations, problem["purposes"]):
-            identifier, location = self.index.query(purpose, location.reshape(1, -1)) # TODO: Use own index.query or, rather, use own data for their index
+            identifier, location = self.index.query(purpose, location.reshape(1,
+                                                                              -1))
 
             discretized_identifiers.append(identifier)
             discretized_locations.append(location)
@@ -54,6 +58,54 @@ class CustomDiscretizationSolver:
         return dict(
             valid=True, locations=np.vstack(discretized_locations), identifiers=discretized_identifiers
         )
+
+
+def format_segmented_legs(segmented_dict: Dict[str, List[List[Dict[str, Any]]]]) -> List[Dict[str, Any]]:
+    mode_mapping = {
+        1: "walk",
+        2: "bike",
+        3: "car_passenger",
+        4: "car",
+        5: "pt",
+        9: "no_information"
+    }
+    formatted_problems = []
+
+    for person_id, segments in segmented_dict.items():
+        for trip_index, segment in enumerate(segments):
+            purposes = [leg['to_act_purpose'] for leg in segment]
+            purposes = purposes[
+                       :-1]  # Removing the last purpose (in segments, the last to purpose heads to a fixed activity)
+
+            modes = [mode_mapping.get(leg['mode'], "unknown") for leg in segment]
+            distances = [leg['distance'] for leg in segment]  # Assuming 'distance' acts as a proxy for travel time
+
+            # Finding the origins and destinations
+            origin_location = segment[0]['from_location'] if np.size(segment[0]['from_location']) > 0 else None
+            destination_location = segment[-1]['to_location'] if np.size(segment[-1]['to_location']) > 0 else None
+
+            # Convert locations to numpy arrays if they exist
+            if origin_location is not None:
+                origin_location = np.array(origin_location).reshape(1, -1)
+            if destination_location is not None:
+                destination_location = np.array(destination_location).reshape(1, -1)
+
+            problem = {
+                'person_id': person_id,
+                'trip_index': trip_index,
+                'purposes': purposes,
+                'modes': modes,
+                'travel_times': distances,
+                'size': len(purposes),
+                'origin': origin_location,
+                'destination': destination_location,
+                'activity_index': trip_index + 1  # Starting index from 1
+            }
+
+            formatted_problems.append(problem)
+
+    return formatted_problems
+
 
 
 # ---------------------------------
@@ -68,12 +120,10 @@ class CustomDiscretizationSolver:
 # LOCATIONS
 
 
-
-
 # the ooooooverall run function
-def process(context, arguments):
-    df_trips, df_primary, random_seed = arguments
-
+# def process(context, arguments):
+def process(destinations, segmented_dict):
+    """Destinations is the reformatted version of my locations. Segmented_dict is the reformatted version of my segments."""
     # Set up RNG
     # random = np.random.RandomState(context.config("random_seed"))
     random = np.random.RandomState()
@@ -81,8 +131,7 @@ def process(context, arguments):
     maximum_iterations = 1000
 
     # Set up discretization solver
-    destinations = context.data("destinations")
-    candidate_index = CandidateIndex(destinations)
+    candidate_index = CandidateIndex(destinations)  # TODO: Give him my locations
     discretization_solver = CustomDiscretizationSolver(candidate_index)
 
     # Set up distance sampler -- not needed for now
@@ -112,7 +161,7 @@ def process(context, arguments):
 
     assignment_objective = DiscretizationErrorObjective(thresholds=thresholds)
     assignment_solver = AssignmentSolver(
-        #distance_sampler=distance_sampler,
+        distance_sampler=None,
         relaxation_solver=relaxation_solver,
         discretization_solver=discretization_solver,
         objective=assignment_objective,
@@ -124,7 +173,10 @@ def process(context, arguments):
 
     last_person_id = None
 
-    for problem in find_assignment_problems(df_trips, df_primary):
+    # for problem in find_assignment_problems(df_trips, df_primary):
+    #     result = assignment_solver.solve(problem)
+
+    for problem in format_segmented_legs(segmented_dict):
         result = assignment_solver.solve(problem)
 
         starting_activity_index = problem["activity_index"]
@@ -141,7 +193,6 @@ def process(context, arguments):
 
         if problem["person_id"] != last_person_id:
             last_person_id = problem["person_id"]
-            context.progress.update()
 
     df_locations = pd.DataFrame.from_records(df_locations,
                                              columns=["person_id", "activity_index", "location_id", "geometry"])
@@ -164,9 +215,9 @@ def process(context, arguments):
 # PROBLEMS
 
 
-
 FIELDS = ["person_id", "trip_index", "preceding_purpose", "following_purpose", "mode", "travel_time"]
 FIXED_PURPOSES = ["home", "work", "education"]
+
 
 # instead of this maybe just feed it with my "segments" but reformatted.
 
@@ -210,6 +261,8 @@ def find_assignment_problems(df, df_locations):
           - Locations of the fixed activities
           - Size of the problem
           - Reduces purposes to the variable ones
+
+          df_locations contains the locations of the fixed, primary activities
     """
     location_iterator = df_locations[LOCATION_FIELDS].itertuples(index=False)
     current_location = None
@@ -273,10 +326,11 @@ def find_assignment_problems(df, df_locations):
 # RDA
 
 
-def check_feasibility(distances, direct_distance, consider_total_distance = True):
+def check_feasibility(distances, direct_distance, consider_total_distance=True):
     return calculate_feasibility(distances, direct_distance, consider_total_distance) == 0.0
 
-def calculate_feasibility(distances, direct_distance, consider_total_distance = True):
+
+def calculate_feasibility(distances, direct_distance, consider_total_distance=True):
     # Really elegant way to calculate the feasibility of any chain
 
     total_distance = np.sum(distances)
@@ -294,6 +348,7 @@ def calculate_feasibility(distances, direct_distance, consider_total_distance = 
 
     return float(max(delta, 0))
 
+
 class DiscretizationSolver:
     def solve(self, problem, locations):
         raise NotImplementedError()
@@ -309,9 +364,59 @@ class DistanceSampler:
         raise NotImplementedError()
 
 
+class FeasibleDistanceSampler(DistanceSampler):
+    def __init__(self, random, maximum_iterations=1000):
+        self.maximum_iterations = maximum_iterations
+        self.random = random
+
+    def sample_distances(self, problem):
+        # Return distance chains per row
+        raise NotImplementedError()
+
+    def sample(self, problem):
+        # Extract necessary information from the problem
+        origin = problem["origin"]
+        destination = problem["destination"]
+        distances = problem["travel_times"]
+
+        # Ensure distances are in the correct format, directly returning them
+        if problem["size"] == 1 and np.linalg.norm(destination - origin, axis=1) < 1e-3:
+            distances = np.array([distances[0], distances[0]])
+
+        return {
+            "valid": True,
+            "distances": distances,
+            "iterations": None  # No iterations needed as distances are known and valid
+        }
+
+#
+# class CustomDistanceSampler(FeasibleDistanceSampler):
+#     def __init__(self, random, distributions, maximum_iterations=1000):
+#         FeasibleDistanceSampler.__init__(self, random=random, maximum_iterations=maximum_iterations)
+#
+#         self.random = random
+#         self.distributions = distributions
+#
+#     def sample_distances(self, problem):
+#         distances = np.zeros((len(problem["modes"])))
+#
+#         for index, (mode, travel_time) in enumerate(zip(problem["modes"], problem["travel_times"])):
+#             mode_distribution = self.distributions[mode]
+#
+#             bound_index = np.count_nonzero(travel_time > mode_distribution["bounds"])
+#             mode_distribution = mode_distribution["distributions"][bound_index]
+#
+#             distances[index] = mode_distribution["values"][
+#                 np.count_nonzero(self.random.random_sample() > mode_distribution["cdf"])
+#             ]
+#
+#         return distances
+
+
 class AssignmentObjective:
     def evaluate(self, problem, distance_result, relaxation_result, discretization_result):
         raise NotImplementedError()
+
 
 # The overall solver
 class AssignmentSolver:
@@ -323,11 +428,13 @@ class AssignmentSolver:
         self.discretization_solver = discretization_solver
         self.objective = objective
 
+        if distance_sampler is None:
+            self.distance_sampler = FeasibleDistanceSampler(random=None)
     def solve(self, problem):
         best_result = None
 
         for assignment_iteration in range(self.maximum_iterations):
-            distance_result = self.distance_sampler.sample(problem)
+            distance_result = self.distance_sampler.sample(problem)  # dict mit "distances", "valid", "iterations"
 
             relaxation_result = self.relaxation_solver.solve(problem, distance_result["distances"])
             discretization_result = self.discretization_solver.solve(problem, relaxation_result["locations"])
@@ -368,43 +475,6 @@ class GeneralRelaxationSolver(RelaxationSolver):
         return self.chain_solver.solve(problem, distances)
 
 
-def sample_tail(random, anchor, distances):
-    angles = random.random_sample(len(distances)) * 2.0 * np.pi
-    offsets = np.vstack([np.cos(angles), np.sin(angles)]).T * distances[:, np.newaxis]
-
-    locations = [anchor]
-
-    for k in range(len(distances)):
-        locations.append(locations[-1] + offsets[k])
-
-    return np.vstack(locations[1:])
-
-
-class AngularTailSolver(RelaxationSolver):
-    def __init__(self, random):
-        self.random = random
-
-    def solve(self, problem, distances):
-        anchor, reverse = None, None
-
-        if problem["origin"] is None:
-            anchor = problem["destination"]
-            reverse = False
-
-        elif problem["destination"] is None:
-            anchor = problem["origin"]
-            reverse = True
-
-        else:
-            raise RuntimeError("Invalid chain for AngularTailSolver")
-
-        locations = sample_tail(self.random, anchor, distances)
-        if reverse: locations = locations[::-1, :]
-
-        assert len(locations) == len(distances)
-        return dict(valid=True, locations=locations)
-
-
 # The actual relaxation solver.
 class GravityChainSolver:
     def __init__(self, random, alpha=0.3, eps=1.0, maximum_iterations=1000, lateral_deviation=None):
@@ -414,8 +484,8 @@ class GravityChainSolver:
         self.random = random
         self.lateral_deviation = lateral_deviation
 
-# Very similar to my two-leg solver (just better written).
-# When the two circles overlap, it chooses one intersection at random.
+    # Very similar to my two-leg solver (just better written).
+    # When the two circles overlap, it chooses one intersection at random.
     def solve_two_points(self, problem, origin, destination, distances, direction, direct_distance):
         if direct_distance == 0.0:
             location = origin + direction * distances[0]
@@ -465,7 +535,7 @@ class GravityChainSolver:
                 valid=True, locations=location.reshape(-1, 2), iterations=None
             )
 
-# This is the actual relaxation algorithm.
+    # This is the actual relaxation algorithm.
     def solve(self, problem, distances):
         origin, destination = problem["origin"], problem["destination"]
 
@@ -501,14 +571,14 @@ class GravityChainSolver:
         locations = np.vstack([origin, locations, destination])
 
         if not check_feasibility(distances, direct_distance):
-            return dict(  # We still return some locations although they may not be perfect
+            return dict(  # We still return some locations, although they may not be perfect
                 valid=False, locations=locations[1:-1], iterations=None
             )
 
         # Add lateral devations
         lateral_deviation = self.lateral_deviation if not self.lateral_deviation is None else max(direct_distance, 1.0)
         locations[1:-1] += normal * 2.0 * (
-                    self.random.normal(size=len(distances) - 1)[:, np.newaxis] - 0.5) * lateral_deviation
+                self.random.normal(size=len(distances) - 1)[:, np.newaxis] - 0.5) * lateral_deviation
 
         # Prepare gravity simulation
         valid = False
@@ -546,6 +616,7 @@ class GravityChainSolver:
             valid=valid, locations=locations[1:-1], iterations=k
         )
 
+
 # Returns valid if the discretization error is below the threshold
 class DiscretizationErrorObjective(AssignmentObjective):
     def __init__(self, thresholds):
@@ -563,7 +634,7 @@ class DiscretizationErrorObjective(AssignmentObjective):
         discretized_distances = la.norm(discretized_locations[:-1] - discretized_locations[1:], axis=1)
         discretization_error = np.abs(sampled_distances - discretized_distances)
 
-        objective = 0.0
+        objective = 0.0 # TODO: In die segments die modes reinbringen für hörl problem, aber bei mir wieder entfernen (?)
         for error, mode in zip(discretization_error, problem["modes"]):
             target_error = self.thresholds[mode]
             excess_error = max(0.0, error - target_error)

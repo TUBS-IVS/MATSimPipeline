@@ -8,6 +8,8 @@ import matsim.writers
 import numpy as np
 import pandas as pd
 
+import synthesis.location_assignment.activity_locator_distance_based as ald
+
 from utils.data_frame_processor import DataFrameProcessor
 from utils import matsim_pipeline_setup, helpers as h, rules
 from utils import settings_values as s
@@ -16,7 +18,7 @@ from utils.logger import logging
 logger = logging.getLogger(__name__)
 
 
-class PopulationFrameProcessor(DataFrameProcessor):
+class MiDDataEnhancer(DataFrameProcessor):
     """
     A class to process population dataframes.
     Contains methods that are specific to population dataframes and need full access to the dataframe and/or
@@ -26,6 +28,9 @@ class PopulationFrameProcessor(DataFrameProcessor):
     def __init__(self, df: pd.DataFrame = None, id_column: str = None):
         super().__init__(df, id_column)
         self.sf = h.SlackFactors(s.SLACK_FACTORS_FILE)
+
+    def enhance(self): #TODO
+        pass
 
     def distribute_by_weights(self, weights_df: pd.DataFrame, cell_id_col: str, cut_missing_ids: bool = False):
         result = h.distribute_by_weights(self.df, weights_df, cell_id_col, cut_missing_ids)
@@ -47,7 +52,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
         with open(output_file, 'wb+') as f_write:
             writer = matsim.writers.PopulationWriter(f_write)
 
-            writer.start_population()  #attributes={"coordinateReferenceSystem": "UTM-32N"}
+            writer.start_population()  # attributes={"coordinateReferenceSystem": "UTM-32N"}
 
             for _, group in self.df.groupby([s.UNIQUE_P_ID_COL]):
                 writer.start_person(group[s.UNIQUE_P_ID_COL].iloc[0])
@@ -77,7 +82,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
                             x=row[s.COORD_TO_COL].x, y=row[s.COORD_TO_COL].y)
                     else:
                         # If for some reason we have no time
-                        max_dur: int = round(3600/ 600) * 600
+                        max_dur: int = round(3600 / 600) * 600
                         writer.add_activity(
                             type=f"{row['activity_translated_string']}_{max_dur}",
                             x=row[s.COORD_TO_COL].x, y=row[s.COORD_TO_COL].y,
@@ -199,7 +204,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
         This works because connection analysis only matches undefined legs to car legs.
         """
         logger.info("Adjusting mode based on connected legs...")
-        conditions = (self.df[s.LEG_MAIN_MODE_COL] == s.MODE_UNDEFINED) & (isinstance(self.df[s.CONNECTED_LEGS_COL], list))
+        conditions = (self.df[s.LEG_MAIN_MODE_COL] == s.MODE_UNDEFINED) & (
+            isinstance(self.df[s.CONNECTED_LEGS_COL], list))
         self.df.loc[conditions, s.LEG_MAIN_MODE_COL] = s.MODE_RIDE
         logger.info(f"Adjusted mode based on connected legs for {conditions.sum()} of {len(self.df)} rows.")
 
@@ -364,7 +370,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 logger.debug(f"Person {person_id} already has a home leg. Skipping...")
                 continue
             logger.debug(f"Adding return home leg for person {person_id}...")
-            main_activity_index = group[group['is_main_activity'] == 1].index[0]  # There should only be one main activity
+            main_activity_index = group[group['is_main_activity'] == 1].index[
+                0]  # There should only be one main activity
             sum_durations_before_main = group.loc[:main_activity_index, s.LEG_DURATION_MINUTES_COL].sum()
             sum_durations_after_main = group.loc[main_activity_index:, s.LEG_DURATION_MINUTES_COL].sum()
 
@@ -404,10 +411,12 @@ class PopulationFrameProcessor(DataFrameProcessor):
             new_rows.append(home_leg)
 
         new_rows_df = pd.DataFrame(new_rows)
-        logger.info(f"Adding {len(new_rows_df)} return home legs for {len(self.df[s.UNIQUE_P_ID_COL].unique())} persons.")
+        logger.info(
+            f"Adding {len(new_rows_df)} return home legs for {len(self.df[s.UNIQUE_P_ID_COL].unique())} persons.")
 
         # Sorting by person_id and leg_id_col will insert the new rows in the correct place
-        self.df = pd.concat([self.df, new_rows_df]).sort_values([s.UNIQUE_P_ID_COL, s.LEG_ID_COL]).reset_index(drop=True)
+        self.df = pd.concat([self.df, new_rows_df]).sort_values([s.UNIQUE_P_ID_COL, s.LEG_ID_COL]).reset_index(
+            drop=True)
         logger.info(f"Added return home legs.")
 
     def estimate_leg_times(self):
@@ -434,7 +443,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
             # Check for negative activity times
             if (person[s.ACT_DUR_SECONDS_COL] < 0).any():
                 first_bad_time_index = person[person[s.ACT_DUR_SECONDS_COL] < 0].index[0]
-                logger.debug(f"Person {person_id} has negative activity times. Removing all times after the first bad time.")
+                logger.debug(
+                    f"Person {person_id} has negative activity times. Removing all times after the first bad time.")
                 for col in [s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]:
                     person.loc[first_bad_time_index:, col] = None
 
@@ -448,7 +458,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
             # Process each person
             if person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]].isna().any().any():
                 first_index = person.index[0]
-                first_missing_time_index = person[person[s.LEG_START_TIME_COL].isna() | person[s.LEG_END_TIME_COL].isna()].index[
+                first_missing_time_index = \
+                person[person[s.LEG_START_TIME_COL].isna() | person[s.LEG_END_TIME_COL].isna()].index[
                     0]
                 if first_missing_time_index == first_index:
                     logger.info(
@@ -493,13 +504,17 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
                             if idx == first_index:  # Start of the day
                                 similar_persons_same_activity = similar_persons_with_last_legs.loc[
-                                    (similar_persons_with_last_legs[s.LEG_TO_ACTIVITY_COL] == row[s.LEG_TO_ACTIVITY_COL]) &
-                                    (similar_persons_with_last_legs[s.LEG_NON_UNIQUE_ID_COL] == 1), s.LEG_START_TIME_COL]
+                                    (similar_persons_with_last_legs[s.LEG_TO_ACTIVITY_COL] == row[
+                                        s.LEG_TO_ACTIVITY_COL]) &
+                                    (similar_persons_with_last_legs[
+                                         s.LEG_NON_UNIQUE_ID_COL] == 1), s.LEG_START_TIME_COL]
                                 if similar_persons_same_activity.empty:
-                                    logger.info(f"Person {person_id} has no similar persons with the same first activity."
-                                                f"Lowering standards.")
+                                    logger.info(
+                                        f"Person {person_id} has no similar persons with the same first activity."
+                                        f"Lowering standards.")
                                     similar_persons_same_activity = similar_persons_with_last_legs.loc[
-                                        (similar_persons_with_last_legs[s.LEG_NON_UNIQUE_ID_COL] == 1), s.LEG_START_TIME_COL]
+                                        (similar_persons_with_last_legs[
+                                             s.LEG_NON_UNIQUE_ID_COL] == 1), s.LEG_START_TIME_COL]
 
                                 typical_day_start = similar_persons_same_activity.sample(1).iloc[0]
                                 my_start_time = typical_day_start if pd.isna(person.at[idx, s.LEG_START_TIME_COL]) else \
@@ -527,7 +542,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
                             if similar_persons_same_activity.empty:
                                 logger.info(f"Person {person_id} has no similar persons with the same activity. "
                                             f"Lowering standards.")
-                                similar_persons_same_activity = similar_persons_with_last_legs[s.LEG_DURATION_MINUTES_COL]
+                                similar_persons_same_activity = similar_persons_with_last_legs[
+                                    s.LEG_DURATION_MINUTES_COL]
                             my_leg_duration = similar_persons_same_activity.sample(1).iloc[0]
 
                             # Assign times
@@ -643,8 +659,10 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
         # Log cases where license status was wrongly reported based on age
         self.df.loc[
-            (self.df[s.HAS_LICENSE_COL] == s.LICENSE_YES) & (self.df[s.PERSON_AGE_COL] < 17), 'imputed_license'] = s.LICENSE_NO
-        logger.info(f"Changed {self.df['imputed_license'].eq(s.LICENSE_NO).sum()} license status to no license based on age.")
+            (self.df[s.HAS_LICENSE_COL] == s.LICENSE_YES) & (
+                        self.df[s.PERSON_AGE_COL] < 17), 'imputed_license'] = s.LICENSE_NO
+        logger.info(
+            f"Changed {self.df['imputed_license'].eq(s.LICENSE_NO).sum()} license status to no license based on age.")
 
         # Cases where license status is known
         self.df['imputed_license'] = valid_entries[s.HAS_LICENSE_COL]
@@ -671,7 +689,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
         condition = unknown_license & ~no_car
         num_rows = self.df[condition].shape[0]
         self.df.loc[condition, 'imputed_license'] = np.random.choice(
-            [s.LICENSE_NO, s.LICENSE_YES], size=num_rows, p=[1 - licence_likelihood_with_car, licence_likelihood_with_car]
+            [s.LICENSE_NO, s.LICENSE_YES], size=num_rows,
+            p=[1 - licence_likelihood_with_car, licence_likelihood_with_car]
         )
         logger.info(f"Imputed license status for {num_rows} rows with car of {self.df.shape[0]} total rows.")
 
@@ -708,7 +727,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
                 while queue:
                     current_leg = queue.popleft()
 
-                    connected = set(self.df.loc[self.df[s.UNIQUE_LEG_ID_COL] == current_leg, s.CONNECTED_LEGS_COL].iloc[0])
+                    connected = set(
+                        self.df.loc[self.df[s.UNIQUE_LEG_ID_COL] == current_leg, s.CONNECTED_LEGS_COL].iloc[0])
                     new_connections = connected - connected_legs
                     queue.extend(new_connections)
                     connected_legs.update(new_connections)
@@ -751,7 +771,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
             connected_legs_list = getattr(row, s.CONNECTED_LEGS_COL)
 
             if not isinstance(connected_legs_list, list):
-                logger.error(f"Protagonist leg {protagonist_leg_id} has no connected legs. This shouldn't happen. Skipping...")
+                logger.error(
+                    f"Protagonist leg {protagonist_leg_id} has no connected legs. This shouldn't happen. Skipping...")
                 continue
 
             connected_legs = set(connected_legs_list)
@@ -759,7 +780,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
             # Assign the protagonist's activity to all connected legs
             self.df.loc[
-                self.df[s.UNIQUE_LEG_ID_COL].isin(connected_legs), s.TO_ACTIVITY_WITH_CONNECTED_COL] = protagonist_activity
+                self.df[s.UNIQUE_LEG_ID_COL].isin(
+                    connected_legs), s.TO_ACTIVITY_WITH_CONNECTED_COL] = protagonist_activity
 
         logger.info("Updated activity for protagonist legs.")
 
@@ -778,7 +800,8 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
         # For the first leg of each person, set 'from_activity' based on 'starts_at_home'
         self.df.loc[(self.df[s.LEG_NON_UNIQUE_ID_COL] == 1) & (
-                self.df[s.FIRST_LEG_STARTS_AT_HOME_COL] == s.FIRST_LEG_STARTS_AT_HOME), s.LEG_FROM_ACTIVITY_COL] = s.ACT_HOME
+                self.df[
+                    s.FIRST_LEG_STARTS_AT_HOME_COL] == s.FIRST_LEG_STARTS_AT_HOME), s.LEG_FROM_ACTIVITY_COL] = s.ACT_HOME
         self.df.loc[(self.df[s.LEG_NON_UNIQUE_ID_COL] == 1) & (
                 self.df[
                     s.FIRST_LEG_STARTS_AT_HOME_COL] != s.FIRST_LEG_STARTS_AT_HOME), s.LEG_FROM_ACTIVITY_COL] = s.ACT_UNSPECIFIED
@@ -869,8 +892,9 @@ class PopulationFrameProcessor(DataFrameProcessor):
             car_ids = [f"{household_id}_veh_{i + 1}" for i in range(number_of_cars)]
             self.df.at[hh.index[0], s.LIST_OF_CARS_COL] = car_ids
 
-        logger.info(f"Listed {total_cars} cars in {len(hhs)} households for {self.df[s.UNIQUE_P_ID_COL].nunique()} persons, "
-                    f"meaning {total_cars / self.df[s.UNIQUE_P_ID_COL].nunique()} cars per person on average.")
+        logger.info(
+            f"Listed {total_cars} cars in {len(hhs)} households for {self.df[s.UNIQUE_P_ID_COL].nunique()} persons, "
+            f"meaning {total_cars / self.df[s.UNIQUE_P_ID_COL].nunique()} cars per person on average.")
 
     def impute_cars_in_household(self):  # Unfinished.
         """
@@ -916,30 +940,145 @@ class PopulationFrameProcessor(DataFrameProcessor):
         same_leg_distance_condition = (self.df['next_leg_distance'] == self.df['next_next_leg_distance'])
 
         self.df[s.MIRRORS_MAIN_ACTIVITY_COL] = (
-            (person_id_condition & short_duration_condition & same_activity_condition & same_leg_distance_condition).shift(
+            (
+                        person_id_condition & short_duration_condition & same_activity_condition & same_leg_distance_condition).shift(
                 2).fillna(False)).astype(int)
 
         # Drop temporary columns
-        self.df.drop(['next_person_id', 'next_act_dur', 'next_next_activity', 'next_next_person_id', 'next_leg_distance',
-                      'next_next_leg_distance'], axis=1, inplace=True)
+        self.df.drop(
+            ['next_person_id', 'next_act_dur', 'next_next_activity', 'next_next_person_id', 'next_leg_distance',
+             'next_next_leg_distance'], axis=1, inplace=True)
 
         logger.info("Marked mirroring main mischief, my merry miscreant mate.")
 
-    def find_home_to_main_time(self):
+    # def find_home_to_main_time(self):
+    #     """
+    #     Determines the time (and distance) between home and main activity for each person in the DataFrame.
+    #     It may not look it, but this was a pain to write.
+    #     Main directly after home: Leg distance of main leg
+    #     Main directly before home: Leg distance of home leg
+    #     :return: Adds column with the distance to the DataFrame.
+    #     """
+    #
+    #     logger.info("Determining home to main activity times/distances...")
+    #
+    #     persons = self.df.groupby(s.UNIQUE_P_ID_COL)
+    #     distances = {}
+    #     times = {}
+    #     is_estimated = {}
+    #
+    #     for pid, person in persons:
+    #         # Extract the indices for main activity, mirroring main and home activities
+    #         main_activity_idx = np.where(person[s.IS_MAIN_ACTIVITY_COL])[0]  # where returns a tuple. Legs to main
+    #         mirroring_main_idx = np.where(person[s.MIRRORS_MAIN_ACTIVITY_COL])[0]  # Legs to mirrored main
+    #         home_indices = np.where(person[s.LEG_TO_ACTIVITY_COL] == s.ACT_HOME)[0]  # legs to home
+    #
+    #         if main_activity_idx.size == 0:
+    #             logger.warning(f"Person {pid} has no main activity. Skipping this person.")
+    #             continue
+    #         if main_activity_idx.size > 1:  # should not happen but still works
+    #             logger.warning(f"Person {pid} has more than one main activity. Using the first one.")
+    #
+    #         if home_indices.size == 0:
+    #             logger.debug(f"Person {pid} has no home activities. Using the first activity instead.")
+    #             closest_home_idx = -1
+    #             closest_home_row = person.index[0] - 1
+    #         else:
+    #
+    #             idx_distances_to_main = np.abs(home_indices - main_activity_idx[0])
+    #             closest_to_main = np.min(idx_distances_to_main)
+    #
+    #             # If there is a mirroring main activity, calculate the distance to that as well
+    #             if not mirroring_main_idx.size == 0:
+    #                 idx_distances_to_mirroring = np.abs(home_indices - mirroring_main_idx[0])
+    #                 closest_to_mirroring = np.min(idx_distances_to_mirroring)
+    #                 if closest_to_mirroring < closest_to_main:
+    #                     main_activity_idx = mirroring_main_idx
+    #                     idx_distances_to_main = idx_distances_to_mirroring
+    #
+    #             # Determine the closest home activity by number of legs
+    #             if (person.at[person.index[0], s.FIRST_LEG_STARTS_AT_HOME_COL] == s.FIRST_LEG_STARTS_AT_HOME and
+    #                     main_activity_idx[0] < np.min(
+    #                         idx_distances_to_main)):  # This means starting home is same or closer than any other home to main
+    #                 closest_home_idx = -1
+    #                 closest_home_row = person.index[0] - 1
+    #             else:
+    #                 closest_home_idx = home_indices[np.argmin(idx_distances_to_main)]
+    #                 closest_home_row = person.index[closest_home_idx]
+    #
+    #         main_activity_row = person.index[main_activity_idx[0]]
+    #
+    #         # Calculate the distance between home and main activity
+    #         if closest_home_idx == main_activity_idx[0] or closest_home_row == main_activity_row:
+    #             logger.error(
+    #                 f"Person {pid} has a home activity marked as main activity. This should never be the case. "
+    #                 f"time/distance cannot be determined and are arbitrarily set to 1.")
+    #             home_to_main_distance = 1
+    #             home_to_main_time = 1
+    #             time_is_estimated = 1
+    #
+    #         elif closest_home_idx - main_activity_idx[0] == 1:  # Main to home
+    #             logger.debug(f"Person {pid} has a home activity directly after main. ")
+    #             home_to_main_distance = person.at[closest_home_row, s.LEG_DISTANCE_COL]
+    #             home_to_main_time = person.at[closest_home_row, s.LEG_DURATION_MINUTES_COL]
+    #             time_is_estimated = 0
+    #         elif closest_home_idx - main_activity_idx[0] == -1:  # Home to main
+    #             logger.debug(f"Person {pid} has a home activity directly before main. ")
+    #             home_to_main_distance = person.at[main_activity_row, s.LEG_DISTANCE_COL]
+    #             home_to_main_time = person.at[main_activity_row, s.LEG_DURATION_MINUTES_COL]
+    #             time_is_estimated = 0
+    #
+    #         else:
+    #             logger.debug(f"Person {pid} has a main activity and home activity more than one leg apart. "
+    #                          f"Distance will be estimated.")
+    #             # Get all legs between home and main activity (thus exclude leg towards first activity)
+    #             if closest_home_row < main_activity_row:  # Home to main
+    #                 legs = person.loc[closest_home_row + 1:main_activity_row]
+    #
+    #                 updated_legs, level = self.sf.get_all_estimated_times_with_slack(legs)
+    #                 home_to_main_time = updated_legs[f"level_{level}"].dropna().iloc[0]
+    #                 home_to_main_distance = None  # We cannot correctly determine this without an own function (yes, really)
+    #                 # and it's not needed nor worth the effort here. Also, this serves as a marker for estimated time.
+    #                 time_is_estimated = 1
+    #
+    #             else:  # Main to home
+    #                 legs = person.loc[main_activity_row + 1:closest_home_row]
+    #
+    #                 updated_legs, level = self.sf.get_all_estimated_times_with_slack(legs)
+    #                 home_to_main_time = updated_legs[f"level_{level}"].dropna().iloc[0]
+    #                 home_to_main_distance = None
+    #                 time_is_estimated = 1
+    #
+    #         distances[pid] = home_to_main_distance
+    #         times[pid] = home_to_main_time
+    #         is_estimated[pid] = time_is_estimated
+    #
+    #     self.df[s.HOME_TO_MAIN_DIST_COL] = self.df[s.UNIQUE_P_ID_COL].map(distances)
+    #     self.df[s.HOME_TO_MAIN_TIME_COL] = self.df[s.UNIQUE_P_ID_COL].map(times)
+    #     self.df[s.HOME_TO_MAIN_TIME_ESTIMATED_COL] = self.df[s.UNIQUE_P_ID_COL].map(is_estimated)
+    #
+    #     # Set the distance to NaN for all rows except the first one for each person
+    #     # mask = self.df.groupby(UNIQUE_P_ID_COL).cumcount() == 0
+    #     # self.df['HOME_TO_MAIN_DISTANCE'] = self.df['HOME_TO_MAIN_DISTANCE'].where(mask, np.nan)
+    #
+    #     logger.info("Determining home to main activity distances/times completed.")
+
+    def find_home_to_main_time_and_distance(self):
         """
         Determines the time (and distance) between home and main activity for each person in the DataFrame.
         It may not look it, but this was a pain to write.
-        Main directly after home: Leg distance of main leg
-        Main directly before home: Leg distance of home leg
+        Main directly after home: Leg distance of to-main leg
+        Main directly before home: Leg distance of to-home leg
         :return: Adds column with the distance to the DataFrame.
         """
 
         logger.info("Determining home to main activity times/distances...")
 
         persons = self.df.groupby(s.UNIQUE_P_ID_COL)
-        distances = {}
-        times = {}
-        is_estimated = {}
+        home_to_main_distances = {}
+        home_to_main_times = {}
+        home_to_main_time_estimated = {}
+        home_to_main_distance_estimated = {}
 
         for pid, person in persons:
             # Extract the indices for main activity, mirroring main and home activities
@@ -948,17 +1087,26 @@ class PopulationFrameProcessor(DataFrameProcessor):
             home_indices = np.where(person[s.LEG_TO_ACTIVITY_COL] == s.ACT_HOME)[0]  # legs to home
 
             if main_activity_idx.size == 0:
-                logger.warning(f"Person {pid} has no main activity. Skipping this person.")
-                continue
-            if main_activity_idx.size > 1:  # should not happen but still works
-                logger.warning(f"Person {pid} has more than one main activity. Using the first one.")
+                rows = len(person)
+                if rows == 0:
+                    raise ValueError(f"Person {pid} has zero rows. This should be impossible.")
+                elif rows == 1:
+                    logger.debug(f"Person {pid} has no activities. Skipping.")
+                    continue
+                elif rows > 1:
+                    raise ValueError(f"Person {pid} has activities, but no main activity.")
+                else:
+                    raise ValueError(f"Person {pid} has {rows} rows. This should be impossible.")
 
+            if main_activity_idx.size > 1:  # should not happen (would still work but is sign of error)
+                raise ValueError(f"Person {pid} has more than one main activity. This should not happen.")
+
+            # Determine the home activity closest to the main (or mirroring main) activity
             if home_indices.size == 0:
                 logger.debug(f"Person {pid} has no home activities. Using the first activity instead.")
                 closest_home_idx = -1
                 closest_home_row = person.index[0] - 1
             else:
-
                 idx_distances_to_main = np.abs(home_indices - main_activity_idx[0])
                 closest_to_main = np.min(idx_distances_to_main)
 
@@ -984,55 +1132,52 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
             # Calculate the distance between home and main activity
             if closest_home_idx == main_activity_idx[0] or closest_home_row == main_activity_row:
-                logger.error(f"Person {pid} has a home activity marked as main activity. This should never be the case. "
-                             f"time/distance cannot be determined and are arbitrarily set to 1.")
-                home_to_main_distance = 1
-                home_to_main_time = 1
-                time_is_estimated = 1
-
+                raise ValueError(
+                    f"Person {pid} has a home activity marked as main activity. This should never be the case.")
             elif closest_home_idx - main_activity_idx[0] == 1:  # Main to home
                 logger.debug(f"Person {pid} has a home activity directly after main. ")
                 home_to_main_distance = person.at[closest_home_row, s.LEG_DISTANCE_COL]
                 home_to_main_time = person.at[closest_home_row, s.LEG_DURATION_MINUTES_COL]
                 time_is_estimated = 0
+                distance_is_estimated = 0
+
             elif closest_home_idx - main_activity_idx[0] == -1:  # Home to main
                 logger.debug(f"Person {pid} has a home activity directly before main. ")
                 home_to_main_distance = person.at[main_activity_row, s.LEG_DISTANCE_COL]
                 home_to_main_time = person.at[main_activity_row, s.LEG_DURATION_MINUTES_COL]
                 time_is_estimated = 0
+                distance_is_estimated = 0
 
             else:
                 logger.debug(f"Person {pid} has a main activity and home activity more than one leg apart. "
-                             f"Distance will be estimated.")
+                             f"Time and distance will be estimated.")
                 # Get all legs between home and main activity (thus exclude leg towards first activity)
                 if closest_home_row < main_activity_row:  # Home to main
                     legs = person.loc[closest_home_row + 1:main_activity_row]
 
-                    updated_legs, level = self.sf.get_all_estimated_times_with_slack(legs)
-                    home_to_main_time = updated_legs[f"level_{level}"].dropna().iloc[0]
-                    home_to_main_distance = None  # We cannot correctly determine this without an own function (yes, really)
-                    # and it's not needed nor worth the effort here. Also, this serves as a marker for estimated time.
-                    time_is_estimated = 1
-
                 else:  # Main to home
                     legs = person.loc[main_activity_row + 1:closest_home_row]
 
-                    updated_legs, level = self.sf.get_all_estimated_times_with_slack(legs)
-                    home_to_main_time = updated_legs[f"level_{level}"].dropna().iloc[0]
-                    home_to_main_distance = None
-                    time_is_estimated = 1
+                distances = legs[s.LEG_DISTANCE_COL].tolist()
+                dist_estimation_tree = ald.build_estimation_tree(distances)
+                home_to_main_distance = dist_estimation_tree[-1][0][2]  # highest lvl, leg 0, estimated value
 
-            distances[pid] = home_to_main_distance
-            times[pid] = home_to_main_time
-            is_estimated[pid] = time_is_estimated
+                times = legs[s.LEG_DURATION_MINUTES_COL].tolist()  # TODO: convert to secs asap
+                time_estimation_tree = ald.build_estimation_tree(times)
+                home_to_main_time = time_estimation_tree[-1][0][2]  # highest lvl, leg 0, estimated value
 
-        self.df[s.HOME_TO_MAIN_DIST_COL] = self.df[s.UNIQUE_P_ID_COL].map(distances)
-        self.df[s.HOME_TO_MAIN_TIME_COL] = self.df[s.UNIQUE_P_ID_COL].map(times)
-        self.df[s.HOME_TO_MAIN_TIME_ESTIMATED_COL] = self.df[s.UNIQUE_P_ID_COL].map(is_estimated)
+                time_is_estimated = 1
+                distance_is_estimated = 1
 
-        # Set the distance to NaN for all rows except the first one for each person
-        # mask = self.df.groupby(UNIQUE_P_ID_COL).cumcount() == 0
-        # self.df['HOME_TO_MAIN_DISTANCE'] = self.df['HOME_TO_MAIN_DISTANCE'].where(mask, np.nan)
+            home_to_main_distances[pid] = home_to_main_distance
+            home_to_main_times[pid] = home_to_main_time
+            home_to_main_time_estimated[pid] = time_is_estimated
+            home_to_main_distance_estimated[pid] = distance_is_estimated
+
+        self.df[s.HOME_TO_MAIN_DIST_COL] = self.df[s.UNIQUE_P_ID_COL].map(home_to_main_distances)
+        self.df[s.HOME_TO_MAIN_TIME_COL] = self.df[s.UNIQUE_P_ID_COL].map(home_to_main_times)
+        self.df[s.HOME_TO_MAIN_TIME_ESTIMATED_COL] = self.df[s.UNIQUE_P_ID_COL].map(home_to_main_time_estimated)
+        self.df[s.HOME_TO_MAIN_DIST_ESTIMATED_COL] = self.df[s.UNIQUE_P_ID_COL].map(home_to_main_distance_estimated)
 
         logger.info("Determining home to main activity distances/times completed.")
 
@@ -1070,13 +1215,16 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
             # Find the closest previous home activity or the start of the day. FROM_activity so the trip to home is excluded.
             home_indices = person[person[s.LEG_FROM_ACTIVITY_COL] == s.ACT_HOME].index
-            start_idx = home_indices[home_indices < main_activity_idx].max() if not home_indices.empty else person.index[0]
+            start_idx = home_indices[home_indices < main_activity_idx].max() if not home_indices.empty else \
+            person.index[0]
             if pd.isna(start_idx):
                 start_idx = person.index[0]
 
             # Calculate the total use time for each mode. Slicing is inclusive of both start and end index.
-            mode_times = person.loc[start_idx:main_activity_idx].groupby(s.LEG_MAIN_MODE_COL)[s.LEG_DURATION_MINUTES_COL].sum()
-            mode_distances = person.loc[start_idx:main_activity_idx].groupby(s.LEG_MAIN_MODE_COL)[s.LEG_DISTANCE_COL].sum()
+            mode_times = person.loc[start_idx:main_activity_idx].groupby(s.LEG_MAIN_MODE_COL)[
+                s.LEG_DURATION_MINUTES_COL].sum()
+            mode_distances = person.loc[start_idx:main_activity_idx].groupby(s.LEG_MAIN_MODE_COL)[
+                s.LEG_DISTANCE_COL].sum()
 
             main_mode_time_base = mode_times.idxmax()
             main_mode_dist_base = mode_distances.idxmax()
@@ -1179,12 +1327,14 @@ class PopulationFrameProcessor(DataFrameProcessor):
         self.df[s.P_HAS_CONNECTIONS_COL] = 0
 
         for person_id in self.df[s.PERSON_ID_COL].unique():
-            if any(self.df[self.df[s.PERSON_ID_COL] == person_id][s.CONNECTED_LEGS_COL].apply(lambda x: isinstance(x, list))):
+            if any(self.df[self.df[s.PERSON_ID_COL] == person_id][s.CONNECTED_LEGS_COL].apply(
+                    lambda x: isinstance(x, list))):
                 self.df.loc[self.df[s.PERSON_ID_COL] == person_id, s.P_HAS_CONNECTIONS_COL] = 1
                 logger.debug(f"Person {person_id} has connections.")
 
         for hh_id in self.df[s.UNIQUE_HH_ID_COL].unique():
-            if any(self.df[self.df[s.UNIQUE_HH_ID_COL] == hh_id][s.CONNECTED_LEGS_COL].apply(lambda x: isinstance(x, list))):
+            if any(self.df[self.df[s.UNIQUE_HH_ID_COL] == hh_id][s.CONNECTED_LEGS_COL].apply(
+                    lambda x: isinstance(x, list))):
                 self.df.loc[self.df[s.UNIQUE_HH_ID_COL] == hh_id, s.HH_HAS_CONNECTIONS_COL] = 1
                 logger.debug(f"Household {hh_id} has connections.")
 
@@ -1194,8 +1344,7 @@ class PopulationFrameProcessor(DataFrameProcessor):
 
         for person_id in self.df[s.PERSON_ID_COL].unique():
             person_rows = self.df[self.df[s.PERSON_ID_COL] == person_id]
-            num_connections = person_rows[s.CONNECTED_LEGS_COL].apply(lambda x: len(x) if isinstance(x, list) else 0).sum()
+            num_connections = person_rows[s.CONNECTED_LEGS_COL].apply(
+                lambda x: len(x) if isinstance(x, list) else 0).sum()
             self.df.loc[self.df[s.PERSON_ID_COL] == person_id, s.NUM_CONNECTED_LEGS_COL] = num_connections
             logger.debug(f"Person {person_id} has {num_connections} connected legs.")
-
-

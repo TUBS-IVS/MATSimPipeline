@@ -9,6 +9,8 @@ from sklearn.neighbors import KDTree
 
 import math
 
+import synthesis.location_assignment.myhoerl as myhoerl
+
 from utils import settings_values as s, helpers as h
 from utils.logger import logging
 
@@ -16,6 +18,74 @@ logger = logging.getLogger(__name__)
 
 stats_tracker = h.StatsTracker()
 
+
+class DistanceBasedMainActivityLocator:
+    """
+    DISTANCE-based localizer.
+    Normalizing the potentials according to the total main activity demand means that persons will be assigned to the activity
+    locations exactly proportional to the location potentials. This also means that secondary activities will have to make do
+    with the remaining potential.
+    :param legs_dict: Dict of persons with their legs data
+    :param target_locations: TargetLocations object that provides query_within_radius method
+    :param radius: Search radius for locating activities
+    """
+
+    def __init__(self, legs_dict: Dict[str, List[Dict[str, Any]]], target_locations, radius: float):
+        self.legs_dict = legs_dict
+        self.target_locations = target_locations  # TargetLocations object
+        self.radius = radius  # Radius for the search
+        self.located_main_activities_for_current_population = False
+
+    def locate_main_activity(self, person_id: str):
+        """
+        Locates the main activity location for each person based on Euclidean distances,
+        normalized potentials, and the desired activity type.
+        :param person_id: Identifier for the person to locate main activity for
+        :return:
+        """
+        person_legs = self.legs_dict[person_id]
+
+        if not person_legs or 'from_location' not in person_legs[0]:
+            return
+
+        home_location = person_legs[0]['from_location']
+
+        main_activity_leg = None
+        for leg in person_legs:
+            if leg['to_act_purpose'] == 'main_activity':
+                main_activity_leg = leg
+                break
+
+        if not main_activity_leg:
+            return
+
+        target_activity = main_activity_leg['to_act_purpose']
+
+        identifiers, names, coordinates, potentials, distances = self.target_locations.query_within_radius(
+            purpose=target_activity, location=home_location, radius=self.radius
+        )
+
+        if len(identifiers) == 0:
+            # If no candidates are found within the radius, assign a random location
+            all_coords = self.target_locations.data[target_activity]['coordinates']
+            main_activity_leg['to_location'] = random.choice(all_coords)
+            return
+
+        # Calculate attractiveness using the provided score_locations function
+        attractiveness = score_locations(potentials, distances)
+
+        total_weight = np.sum(attractiveness)
+        if total_weight > 0:
+            selected_index = np.random.choice(len(attractiveness), p=attractiveness / total_weight)
+        else:
+            selected_index = np.random.choice(len(attractiveness))
+
+        main_activity_leg['to_location'] = coordinates[selected_index]
+
+    def locate_activities(self):
+        for person_id in self.legs_dict.keys():
+            self.locate_main_activity(person_id)
+        return self.legs_dict
 
 def reformat_locations(locations_data: Dict[str, Dict[str, Dict[str, Any]]]) -> Dict[str, Dict[str, np.ndarray]]:
     """Reformat locations data from a nested dictionary to a dictionary of numpy arrays."""
@@ -25,19 +95,19 @@ def reformat_locations(locations_data: Dict[str, Dict[str, Dict[str, Any]]]) -> 
         identifiers = []
         names = []
         coordinates = []
-        capacities = []
+        potentials = []
 
         for location_id, location_details in locations.items():
             identifiers.append(location_id)
             names.append(location_details['name'])
             coordinates.append(location_details['coordinates'])
-            capacities.append(location_details['capacity'])
+            potentials.append(location_details['potential'])
 
         reformatted_data[purpose] = {
             'identifiers': np.array(identifiers, dtype=object),
             'names': np.array(names, dtype=str),
             'coordinates': np.array(coordinates, dtype=float),
-            'capacities': np.array(capacities, dtype=float)
+            'potentials': np.array(potentials, dtype=float)
         }
 
     return reformatted_data
@@ -64,7 +134,7 @@ class TargetLocations:
         :param purpose: The purpose category to query.
         :param location: A 1D numpy array representing the location to query (coordinates [1.5, 2.5]).
         :param num_candidates: The number of nearest candidates to return.
-        :return: A tuple containing four numpy arrays: identifiers, coordinates, distances, and remaining capacities of the nearest candidates.
+        :return: A tuple containing four numpy arrays: identifiers, coordinates, distances, and remaining potentials of the nearest candidates.
         """
         # Ensure location is a 2D array with a single location
         location = location.reshape(1, -1)
@@ -78,9 +148,9 @@ class TargetLocations:
         candidate_identifiers = np.array(self.data[purpose]["identifiers"])[indices[0]]
         candidate_names = np.array(self.data[purpose]["names"])[indices[0]]
         candidate_coordinates = np.array(self.data[purpose]["coordinates"])[indices[0]]
-        candidate_capacities = np.array(self.data[purpose]["capacities"])[indices[0]]
+        candidate_potentials = np.array(self.data[purpose]["potentials"])[indices[0]]
 
-        return candidate_identifiers, candidate_names, candidate_coordinates, candidate_capacities, candidate_distances[
+        return candidate_identifiers, candidate_names, candidate_coordinates, candidate_potentials, candidate_distances[
             0]
 
     def query_within_radius(self, purpose: str, location: np.ndarray, radius: float):
@@ -89,7 +159,7 @@ class TargetLocations:
         :param purpose: The purpose category to query.
         :param location: A 1D numpy array representing the location to query (coordinates [1.5, 2.5]).
         :param radius: The maximum distance from the location to search for candidates.
-        :return: A tuple containing four numpy arrays: identifiers, coordinates, distances, and remaining capacities of the nearest candidates.
+        :return: A tuple containing four numpy arrays: identifiers, coordinates, distances, and remaining potentials of the nearest candidates.
         """
         # Ensure location is a 2D array with a single location
         location = location.reshape(1, -1)
@@ -102,11 +172,11 @@ class TargetLocations:
         candidate_identifiers = np.array(self.data[purpose]["identifiers"])[candidate_indices[0]]
         candidate_names = np.array(self.data[purpose]["names"])[candidate_indices[0]]
         candidate_coordinates = np.array(self.data[purpose]["coordinates"])[candidate_indices[0]]
-        candidate_capacities = np.array(self.data[purpose]["capacities"])[candidate_indices[0]]
+        candidate_potentials = np.array(self.data[purpose]["potentials"])[candidate_indices[0]]
         # candidate_distances = np.linalg.norm(candidate_coordinates - location, axis=1)
         candidate_distances = None
 
-        return candidate_identifiers, candidate_names, candidate_coordinates, candidate_capacities, candidate_distances
+        return candidate_identifiers, candidate_names, candidate_coordinates, candidate_potentials, candidate_distances
 
     def query_within_ring(self, purpose: str, location: np.ndarray, radius1: float, radius2: float) -> Tuple[
         np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -116,7 +186,7 @@ class TargetLocations:
         :param location: A 1D numpy array representing the location to query (coordinates [1.5, 2.5]).
         :param radius1: Any of the two radii defining the ring.
         :param radius2: The other one.
-        :return: A tuple containing four numpy arrays: identifiers, coordinates, distances, and remaining capacities of the nearest candidates.
+        :return: A tuple containing four numpy arrays: identifiers, coordinates, distances, and remaining potentials of the nearest candidates.
         """
         # Ensure location is a 2D array with a single location
         location = location.reshape(1, -1)
@@ -143,10 +213,10 @@ class TargetLocations:
         candidate_identifiers = np.array(self.data[purpose]["identifiers"])[annulus_indices]
         candidate_names = np.array(self.data[purpose]["names"])[annulus_indices]
         candidate_coordinates = np.array(self.data[purpose]["coordinates"])[annulus_indices]
-        candidate_capacities = np.array(self.data[purpose]["capacities"])[annulus_indices]
+        candidate_potentials = np.array(self.data[purpose]["potentials"])[annulus_indices]
         candidate_distances = None
 
-        return candidate_identifiers, candidate_names, candidate_coordinates, candidate_capacities, candidate_distances
+        return candidate_identifiers, candidate_names, candidate_coordinates, candidate_potentials, candidate_distances
 
     def sample(self, purpose: str, random: rnd.Random) -> Tuple[Any, np.ndarray]:
         """
@@ -175,19 +245,19 @@ class TargetLocations:
 #     return 1 / (1 + np.exp(z))
 
 
-def score_locations(capacities: np.ndarray, distances: np.ndarray = None) -> np.ndarray:
+def score_locations(potentials: np.ndarray, distances: np.ndarray = None) -> np.ndarray:
     """
-    Evaluate the returned locations by distance and capacity and return a score.
+    Evaluate the returned locations by distance and potential and return a score.
 
     :param distances: Numpy array of distances from desired point for the returned locations.
-    :param capacities: Numpy array of remaining capacities for the returned locations.
+    :param potentials: Numpy array of remaining potentials for the returned locations.
     :return: Numpy array of scores for the returned locations.
     """
     if distances is not None:
-        base_scores = capacities / distances  # TODO: Improve scoring function
+        base_scores = potentials / distances  # TODO: Improve scoring function
 
     else:
-        base_scores = capacities
+        base_scores = potentials
 
     # Normalize the scores to ensure they sum to 1
     scores = base_scores / np.sum(base_scores)
@@ -291,20 +361,20 @@ def find_location_candidates(start_coord: np.ndarray, end_coord: np.ndarray, pur
     intersect1, intersect2 = find_circle_intersections(start_coord, distance_start_to_act, end_coord,
                                                        distance_act_to_end)
 
-    candidate_identifiers, candidate_names, candidate_coordinates, candidate_capacities, candidate_distances = MyTargetLocations.query_closest(
+    candidate_identifiers, candidate_names, candidate_coordinates, candidate_potentials, candidate_distances = MyTargetLocations.query_closest(
         purpose, intersect1, num_candidates)
 
     if intersect2 is not None:
-        candidate_identifiers2, candidate_names2, candidate_coordinates2, candidate_capacities2, candidate_distances2 = MyTargetLocations.query_closest(
+        candidate_identifiers2, candidate_names2, candidate_coordinates2, candidate_potentials2, candidate_distances2 = MyTargetLocations.query_closest(
             purpose, intersect2, num_candidates)
 
         return (
-            candidate_identifiers, candidate_names, candidate_coordinates, candidate_capacities, candidate_distances), \
-            (candidate_identifiers2, candidate_names2, candidate_coordinates2, candidate_capacities2,
+            candidate_identifiers, candidate_names, candidate_coordinates, candidate_potentials, candidate_distances), \
+            (candidate_identifiers2, candidate_names2, candidate_coordinates2, candidate_potentials2,
              candidate_distances2)
 
     return (
-        candidate_identifiers, candidate_names, candidate_coordinates, candidate_capacities, candidate_distances), None
+        candidate_identifiers, candidate_names, candidate_coordinates, candidate_potentials, candidate_distances), None
 
 
 from typing import Tuple
@@ -352,28 +422,71 @@ def monte_carlo_select_candidate(candidates, use_distance=True):
     return chosen_candidate
 
 
-def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any]]]:
+def populate_legs_dict_from_df(df: pd.DataFrame, s: Any) -> Dict[str, List[Dict[str, Any]]]:
     """Uses the MiD df to populate a nested dictionary with leg information for each person."""
-    nested_dict = defaultdict(list)
 
-    # Populate the defaultdict with data from the DataFrame
-    for row in df.itertuples(index=False):
-        identifier: str = getattr(row, s.UNIQUE_P_ID_COL)
+    # Step 1: Extract relevant information into a new DataFrame
+    legs_info_df = pd.DataFrame({
+        s.UNIQUE_P_ID_COL: df[s.UNIQUE_P_ID_COL],
+        'leg_info': list(zip(
+            df[s.UNIQUE_LEG_ID_COL],
+            df[s.LEG_TO_ACTIVITY_COL],
+            df[s.LEG_DISTANCE_COL],
+            [np.array(loc) if loc is not None else np.array([]) for loc in df['from_location']],
+            [np.array(loc) if loc is not None else np.array([]) for loc in df['to_location']],
+            df[s.LEG_MAIN_MODE_COL],
+            df[s.IS_MAIN_ACTIVITY_COL],
+            df[s.HOME_TO_MAIN_TIME_COL]  # TODO: make distance from home to main activity
+        ))
+    })
 
-        from_location: np.ndarray = np.array(row.from_location) if row.from_location is not None else np.array([])
-        to_location: np.ndarray = np.array(row.to_location) if row.to_location is not None else np.array([])
-
-        leg_info: Dict[str, Any] = {
-            'leg_id': getattr(row, s.UNIQUE_LEG_ID_COL),
-            'to_act_purpose': getattr(row, s.LEG_TO_ACTIVITY_COL),
-            'distance': getattr(row, s.LEG_DISTANCE_COL),
-            'from_location': from_location,
-            'to_location': to_location
+    # Step 2: Transform each tuple into a dictionary
+    def to_leg_dict(leg_tuple):
+        return {
+            'leg_id': leg_tuple[0],
+            'to_act_purpose': leg_tuple[1],
+            'distance': leg_tuple[2],
+            'from_location': leg_tuple[3],
+            'to_location': leg_tuple[4],
+            'mode': leg_tuple[5],
+            'is_main_activity': leg_tuple[6],
+            'home_to_main_distance': leg_tuple[7]
         }
-        nested_dict[identifier].append(leg_info)
 
-    # Convert defaultdict to dict for cleaner output and better compatibility
-    return dict(nested_dict)
+    legs_info_df['leg_info'] = legs_info_df['leg_info'].map(to_leg_dict)
+
+    # Step 3: Group by unique person identifier and aggregate leg information
+    grouped = legs_info_df.groupby(s.UNIQUE_P_ID_COL)['leg_info'].apply(list)
+
+    # Step 4: Convert the grouped Series to a dictionary
+    nested_dict = grouped.to_dict()
+
+    return nested_dict
+
+# def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any]]]:
+#     """Uses the MiD df to populate a nested dictionary with leg information for each person."""
+#     nested_dict = defaultdict(list)
+#
+#     # Populate the defaultdict with data from the DataFrame
+#     for row in df.itertuples(index=False):
+#         identifier: str = getattr(row, s.UNIQUE_P_ID_COL)
+#
+#         from_location: np.ndarray = np.array(row.from_location) if row.from_location is not None else np.array([])
+#         to_location: np.ndarray = np.array(row.to_location) if row.to_location is not None else np.array([])
+#         mode: str = getattr(row, s.LEG_MAIN_MODE_COL)
+#
+#         leg_info: Dict[str, Any] = {
+#             'leg_id': getattr(row, s.UNIQUE_LEG_ID_COL),
+#             'to_act_purpose': getattr(row, s.LEG_TO_ACTIVITY_COL),
+#             'distance': getattr(row, s.LEG_DISTANCE_COL),
+#             'from_location': from_location,
+#             'to_location': to_location,
+#             'mode': mode
+#         }
+#         nested_dict[identifier].append(leg_info)
+#
+#     # Convert defaultdict to dict for cleaner output and better compatibility
+#     return dict(nested_dict)
 
 
 def generate_random_location_within_hanover():
@@ -937,27 +1050,27 @@ def is_within_angle(point, center, direction_point, angle_range):
         return angle_to_point >= lower_bound or angle_to_point <= upper_bound
 
 
-with open('locations_data_with_capacities.pkl', 'rb') as file:
+with open('locations_data_with_potentials.pkl', 'rb') as file:
     locations_data = pickle.load(file)
-reformatted_data = reformat_locations(locations_data)
-MyTargetLocations = TargetLocations(reformatted_data)
+reformatted_locations_data = reformat_locations(locations_data)
+MyTargetLocations = TargetLocations(reformatted_locations_data)
 
 df = prepare_mid_df_for_legs_dict()
 logger.debug("df prepared.")
 dictu = populate_legs_dict_from_df(df)
 logger.debug("dict populated.")
-flattened_segmented_dict = segment_legs(dictu)
+segmented_dict = segment_legs(dictu)
 logger.debug("dict segmented.")
-logger.debug(flattened_segmented_dict)
+logger.debug(segmented_dict)
 
 # Advanced petre locator
 
 
 # Greedy petre locator
-for person_id, segments in flattened_segmented_dict.items():
-    for segment in segments:
-        segment = greedy_locate_segment(segment)
-        segment = insert_placed_distances(segment)
+# for person_id, segments in segmented_dict.items():
+#     for segment in segments:
+#          segment = greedy_locate_segment(segment)
+#         segment = insert_placed_distances(segment)
 
 # Simple locator
 # for person_id, segments in flattened_segmented_dict.items():
@@ -966,18 +1079,15 @@ for person_id, segments in flattened_segmented_dict.items():
 #         segment = insert_placed_distances(segment)
 
 # (slightly modified) Hörl locator
-# for person_id, segments in flattened_segmented_dict.items():
-#     for segment in segments:
-#         segment = hoerl_locate_segment(segment)
-#         segment = insert_placed_distances(segment)
+result = myhoerl.process(reformatted_locations_data, segmented_dict)
 
-flattened_segmented_dict = flatten_segmented_dict(flattened_segmented_dict)
-for person_id, segment in flattened_segmented_dict.items():
+segmented_dict = flatten_segmented_dict(segmented_dict)
+for person_id, segment in segmented_dict.items():
     logger.debug(f"Person ID: {person_id}")
     for leg in segment:
         logger.debug(leg)
 
-summarize_placement_results(flattened_segmented_dict)
+summarize_placement_results(segmented_dict)
 
 stats_tracker.print_stats()
 

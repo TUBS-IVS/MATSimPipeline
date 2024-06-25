@@ -5,7 +5,7 @@ import pandas as pd
 import geopandas as gpd
 
 from synthesis.location_assignment.main_activity_locator import ActivityLocator
-from utils.population_frame_processor import PopulationFrameProcessor
+from utils.population_frame_processor import MiDDataEnhancer
 from utils import matsim_pipeline_setup, helpers as h, rules
 from utils import settings_values as s
 from utils.logger import logging
@@ -30,7 +30,7 @@ def popsim_to_matsim_plans_main():
 
     # Load data from PopSim, concat different PopSim results if necessary
     # Lowest level of geography must be named the same in all input files, if there are multiple
-    population = PopulationFrameProcessor()
+    population = MiDDataEnhancer()
     for file in s.EXPANDED_HOUSEHOLDS_FILES:
         population.load_df_from_csv(file, test_col=s.HOUSEHOLD_POPSIM_ID_COL, if_df_exists="concat")
 
@@ -152,7 +152,7 @@ def popsim_to_matsim_plans_main():
     else:
         logger.info("All legs have a coord_to.")
 
-    population = PopulationFrameProcessor(located_pop_with_points)
+    population = MiDDataEnhancer(located_pop_with_points)
 
     # population.impute_cars_in_household()
     # population.list_cars_in_household()

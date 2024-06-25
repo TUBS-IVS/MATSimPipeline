@@ -488,7 +488,7 @@ class AssignmentSolver:
         best_result = None
 
         for assignment_iteration in range(self.maximum_iterations):
-            distance_result = self.distance_sampler.sample(problem)
+            distance_result = self.distance_sampler.sample(problem) # dict mit "distances", "valid", "iterations"
 
             relaxation_result = self.relaxation_solver.solve(problem, distance_result["distances"])
             discretization_result = self.discretization_solver.solve(problem, relaxation_result["locations"])

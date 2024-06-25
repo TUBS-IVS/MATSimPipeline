@@ -3,7 +3,7 @@ import time
 
 import winsound
 
-from utils.population_frame_processor import PopulationFrameProcessor
+from utils.population_frame_processor import MiDDataEnhancer
 from utils import matsim_pipeline_setup, rules
 from utils import settings_values as s
 from utils.logger import logging
@@ -32,7 +32,7 @@ def enhance_travel_survey():
     # Create unique leg ids in the leg input file if necessary
     # h.create_unique_leg_ids()
 
-    population = PopulationFrameProcessor()
+    population = MiDDataEnhancer()
 
     # Only load necessary household columns to not blow up the final file size
     # Otherwise, use_cols=None to load all columns
@@ -139,7 +139,7 @@ def enhance_travel_survey():
     population.mark_mirroring_main_activities()
 
     population.find_main_mode_to_main_act()
-    population.find_home_to_main_time()
+    population.find_home_to_main_time_and_distance()
 
     population.update_activity_for_prot_legs()
 

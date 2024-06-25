@@ -6,7 +6,7 @@ from sklearn.preprocessing import OneHotEncoder
 import numpy as np
 import os
 
-from utils.population_frame_processor import PopulationFrameProcessor
+from utils.population_frame_processor import MiDDataEnhancer
 from utils import helpers as h
 from utils import matsim_pipeline_setup as m
 from utils.logger import logging
@@ -234,7 +234,7 @@ logger.info("Loaded DataFrame")
 # Add a col that is true when all four comparisons are true
 # connections_df['all_match'] = connections_df[['mode_match', 'activity_match', 'time_match', 'dist_match']].all(axis=1)
 
-pop = PopulationFrameProcessor(enhanced_mid_df)
+pop = MiDDataEnhancer(enhanced_mid_df)
 pop.check_for_merge_suffixes()
 
 ana = DataframeAnalysis(enhanced_mid_df)

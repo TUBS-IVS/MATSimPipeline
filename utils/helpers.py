@@ -5,6 +5,7 @@ import os
 import random
 import re
 import shutil
+import yaml
 from typing import List, Dict, Union
 
 import geopandas as gpd
@@ -12,7 +13,10 @@ import numpy as np
 import pandas as pd
 from shapely import Point
 
-from utils import settings_values as s
+from synthesis.location_assignment.activity_locator_distance_based import logger, estimate_length_with_slack
+from utils.stats_tracker import stats_tracker
+from utils.pipeline_setup import OUTPUT_DIR
+from utils import settings as s
 from utils.logger import logging
 
 logger = logging.getLogger(__name__)
@@ -66,7 +70,8 @@ def create_unique_leg_ids():
         raise ValueError(f"Please specify leg_non_unique_id_column in settings.yaml.")
 
     # Create unique leg ids
-    legs_file[s.LEG_ID_COL] = legs_file[s.PERSON_ID_COL].astype(str) + "_" + legs_file[s.LEG_NON_UNIQUE_ID_COL].astype(str)
+    legs_file[s.LEG_ID_COL] = legs_file[s.PERSON_ID_COL].astype(str) + "_" + legs_file[s.LEG_NON_UNIQUE_ID_COL].astype(
+        str)
 
     # Write back to file
     legs_file.to_csv(s.MiD_TRIPS_FILE, index=False)
@@ -88,7 +93,8 @@ def read_csv(csv_path: str, test_col=None, use_cols=None):
             df = pd.read_csv(csv_path, sep=',', usecols=use_cols)
         if test_col is not None:
             test = df[test_col]
-    except (KeyError, ValueError):  # Sometimes also throws without test_col, when the file is not comma-separated. This is good.
+    except (KeyError,
+            ValueError):  # Sometimes also throws without test_col, when the file is not comma-separated. This is good.
         logger.info(f"ID column '{test_col}' not found in {csv_path}, trying to read as ';' separated file...")
         if csv_path.endswith('.gz'):
             df = pd.read_csv(gzip.open(csv_path), sep=';', usecols=use_cols)
@@ -107,11 +113,13 @@ def read_csv(csv_path: str, test_col=None, use_cols=None):
 def string_to_shapely_point(point_input):
     """
     Needed when loading a point from a csv file, because it is loaded as a string.
+    :param point_input: String input of the format 'x,y' or Shapely Point
+    :return: Shapely Point
     """
     if isinstance(point_input, Point):
         return point_input
     if not isinstance(point_input, str):
-        print ("Debug")
+        raise ValueError("Input must be a string or a Shapely Point")
 
     # Use a regular expression to extract numbers
     matches = re.findall(r"[-+]?\d*\.\d+|\d+", point_input)
@@ -176,7 +184,7 @@ def distribute_by_weights(data_to_distribute: pd.DataFrame, weighted_points_in_c
     if not data_to_distribute[external_id_column].isin(weighted_points_in_cells[external_id_column]).all():
         if cut_missing_ids:
             logger.info(f"Not all geography IDs in the population dataframe are in the weights dataframe. "
-                           f"Cutting missing IDs: {set(data_to_distribute[external_id_column]) - set(weighted_points_in_cells[external_id_column])}")
+                        f"Cutting missing IDs: {set(data_to_distribute[external_id_column]) - set(weighted_points_in_cells[external_id_column])}")
             data_to_distribute = data_to_distribute[
                 data_to_distribute[external_id_column].isin(weighted_points_in_cells[external_id_column])].copy()
         else:
@@ -390,7 +398,8 @@ class SlackFactors:
 
         return slack_factor
 
-    def calculate_expected_time_with_slack(self, time_from_start_to_via: float, time_from_via_to_end: float, activity_from: str,
+    def calculate_expected_time_with_slack(self, time_from_start_to_via: float, time_from_via_to_end: float,
+                                           activity_from: str,
                                            activity_via: str, activity_to: str) -> float:
         """
         Calculates the expected time with slack for a given activity combination. Makes sure the returned time is plausible.
@@ -414,7 +423,8 @@ class SlackFactors:
                                     self.get_slack_factor(activity_from, activity_via, activity_to))
         distance_diff = np.abs(distance_from_start_to_via - distance_from_via_to_end)
         if expected_distance < distance_diff:
-            logger.debug(f"Expected distance is too low. Returning distance difference plus half of the smaller distance.")
+            logger.debug(
+                f"Expected distance is too low. Returning distance difference plus half of the smaller distance.")
             expected_distance = distance_diff + (min(distance_from_start_to_via, distance_from_via_to_end) / 2)
         return expected_distance
 
@@ -511,18 +521,20 @@ class SlackFactors:
                     else:
                         # Get the higher leg index and its values
                         higher_leg_index = group['original_index'].iloc[-1]
-                        higher_leg_value = df.at[higher_leg_index, f'level_{level+1}']
-                        higher_leg_lower_bound = df.at[higher_leg_index, f'level_{level+1}_lower_bound']
-                        higher_leg_upper_bound = df.at[higher_leg_index, f'level_{level+1}_upper_bound']
+                        higher_leg_value = df.at[higher_leg_index, f'level_{level + 1}']
+                        higher_leg_lower_bound = df.at[higher_leg_index, f'level_{level + 1}_lower_bound']
+                        higher_leg_upper_bound = df.at[higher_leg_index, f'level_{level + 1}_upper_bound']
 
-                        if higher_leg_value < higher_leg_lower_bound: # We have strongly overshot because the REAL higher value is lower than the lower bound
+                        if higher_leg_value < higher_leg_lower_bound:  # We have strongly overshot because the REAL higher value is lower than the lower bound
                             # Make longer leg shorter, shorter leg longer
                             leg1_value = df.at[group['original_index'].iloc[0], f'level_{level}']
                             leg2_value = df.at[group['original_index'].iloc[1], f'level_{level}']
 
                             if leg1_value > leg2_value:
-                                L_bounds1 = abs(df.at[group['original_index'].iloc[0], f'level_{level}_lower_bound'] - leg1_value)
-                                L_bounds2 = abs(df.at[group['original_index'].iloc[1], f'level_{level}_upper_bound'] - leg2_value)
+                                L_bounds1 = abs(
+                                    df.at[group['original_index'].iloc[0], f'level_{level}_lower_bound'] - leg1_value)
+                                L_bounds2 = abs(
+                                    df.at[group['original_index'].iloc[1], f'level_{level}_upper_bound'] - leg2_value)
 
                                 delta_L_high = abs(higher_leg_value - higher_leg_lower_bound)
 
@@ -534,8 +546,10 @@ class SlackFactors:
                                 df.loc[group['original_index'].iloc[0], f'level_{level}'] -= delta_L1
                                 df.loc[group['original_index'].iloc[1], f'level_{level}'] += delta_L2
                             else:
-                                L_bounds1 = abs(df.at[group['original_index'].iloc[0], f'level_{level}_upper_bound'] - leg1_value)
-                                L_bounds2 = abs(df.at[group['original_index'].iloc[1], f'level_{level}_lower_bound'] - leg2_value)
+                                L_bounds1 = abs(
+                                    df.at[group['original_index'].iloc[0], f'level_{level}_upper_bound'] - leg1_value)
+                                L_bounds2 = abs(
+                                    df.at[group['original_index'].iloc[1], f'level_{level}_lower_bound'] - leg2_value)
 
                                 delta_L_high = abs(higher_leg_value - higher_leg_lower_bound)
 
@@ -547,20 +561,22 @@ class SlackFactors:
                                 df.loc[group['original_index'].iloc[0], f'level_{level}'] += delta_L1
                                 df.loc[group['original_index'].iloc[1], f'level_{level}'] -= delta_L2
 
-                        elif higher_leg_value > higher_leg_upper_bound: # We have strongly undershot because the REAL higher value is higher than the upper bound
+                        elif higher_leg_value > higher_leg_upper_bound:  # We have strongly undershot because the REAL higher value is higher than the upper bound
                             # Make both legs longer (both move to upper bound)
                             leg1_value = df.at[group['original_index'].iloc[0], f'level_{level}']
                             leg2_value = df.at[group['original_index'].iloc[1], f'level_{level}']
 
-                            L_bounds1 = abs(df.at[group['original_index'].iloc[0], f'level_{level}_upper_bound'] - leg1_value)
-                            L_bounds2 = abs(df.at[group['original_index'].iloc[1], f'level_{level}_upper_bound'] - leg2_value)
+                            L_bounds1 = abs(
+                                df.at[group['original_index'].iloc[0], f'level_{level}_upper_bound'] - leg1_value)
+                            L_bounds2 = abs(
+                                df.at[group['original_index'].iloc[1], f'level_{level}_upper_bound'] - leg2_value)
 
                             delta_L_high = abs(higher_leg_value - higher_leg_upper_bound)
 
                             delta_L1 = (L_bounds1 * delta_L_high * (leg1_value + leg2_value) ** 2) / (
-                                        higher_leg_value * (leg1_value * L_bounds1 + leg2_value * L_bounds2))
+                                    higher_leg_value * (leg1_value * L_bounds1 + leg2_value * L_bounds2))
                             delta_L2 = (L_bounds2 * delta_L_high * (leg1_value + leg2_value) ** 2) / (
-                                        higher_leg_value * (leg1_value * L_bounds1 + leg2_value * L_bounds2))
+                                    higher_leg_value * (leg1_value * L_bounds1 + leg2_value * L_bounds2))
 
                             df.loc[group['original_index'].iloc[0], f'level_{level}'] += delta_L1
                             df.loc[group['original_index'].iloc[1], f'level_{level}'] += delta_L2
@@ -603,9 +619,9 @@ class SlackFactors:
             else:
                 time = self.calculate_expected_time_with_slack(group.iloc[0][times_col],
                                                                group.iloc[1][times_col],
-                                                               group.iloc[0][s.LEG_FROM_ACTIVITY_COL],
-                                                               group.iloc[0][s.LEG_TO_ACTIVITY_COL],
-                                                               group.iloc[1][s.LEG_TO_ACTIVITY_COL])
+                                                               group.iloc[0][s.ACT_FROM_INTERNAL_COL],
+                                                               group.iloc[0][s.ACT_TO_INTERNAL_COL],
+                                                               group.iloc[1][s.ACT_TO_INTERNAL_COL])
 
                 upper_bound = (group.iloc[0][times_col] + group.iloc[1][times_col])
                 lower_bound = (abs(group.iloc[0][times_col] - group.iloc[1][times_col]))
@@ -624,7 +640,8 @@ class TTMatrices:
 
     def __init__(self, car_tt_matrices_csv_paths: List[str], pt_tt_matrices_csv_paths: List[str],
                  bike_tt_matrix_csv_path: str, walk_tt_matrix_csv_path: str):
-        self.tt_matrices: Dict[str, Union[Dict[str, pd.DataFrame], pd.DataFrame, None]] = {'car': {}, 'pt': {}, 'bike': None,
+        self.tt_matrices: Dict[str, Union[Dict[str, pd.DataFrame], pd.DataFrame, None]] = {'car': {}, 'pt': {},
+                                                                                           'bike': None,
                                                                                            'walk': None}
 
         # Read car and pt matrices for each hour
@@ -740,7 +757,8 @@ class TTMatrices:
         if not filtered_matrix.empty:
             travel_time = filtered_matrix['VALUE'].iloc[0]
         else:
-            logger.error(f"No travel time found for cells {cell_from} and {cell_to}. Using default value of 20 minutes.")
+            logger.error(
+                f"No travel time found for cells {cell_from} and {cell_to}. Using default value of 20 minutes.")
             travel_time = 20
 
         return travel_time
@@ -778,8 +796,8 @@ def sigmoid(x, beta, delta_T):
 
 
 def check_distance(leg_to_find, leg_to_compare):
-    distance_to_find = leg_to_find[s.LEG_DISTANCE_COL]
-    distance_to_compare = leg_to_compare[s.LEG_DISTANCE_COL]
+    distance_to_find = leg_to_find[s.LEG_DISTANCE_KM_COL]
+    distance_to_compare = leg_to_compare[s.LEG_DISTANCE_KM_COL]
 
     if pd.isnull(distance_to_find) or pd.isnull(distance_to_compare):
         return False
@@ -818,8 +836,8 @@ def check_mode(leg_to_find, leg_to_compare):
     :param leg_to_compare:
     :return:
     """
-    mode_to_find = leg_to_find[s.LEG_MAIN_MODE_COL]
-    mode_to_compare = leg_to_compare[s.LEG_MAIN_MODE_COL]
+    mode_to_find = leg_to_find[s.MODE_MID_COL]
+    mode_to_compare = leg_to_compare[s.MODE_MID_COL]
 
     if mode_to_find == mode_to_compare and mode_to_find != s.MODE_UNDEFINED:  # Make sure we don't pair undefined modes
         return True
@@ -844,8 +862,8 @@ def check_activity(leg_to_find, leg_to_compare):
         s.ACT_LEISURE: [s.ACT_ERRANDS, s.ACT_SHOPPING, s.ACT_MEETUP],
         s.ACT_MEETUP: [s.ACT_LEISURE]}
 
-    type_to_find = leg_to_find[s.LEG_TO_ACTIVITY_COL]
-    type_to_compare = leg_to_compare[s.LEG_TO_ACTIVITY_COL]
+    type_to_find = leg_to_find[s.ACT_TO_INTERNAL_COL]
+    type_to_compare = leg_to_compare[s.ACT_TO_INTERNAL_COL]
 
     if (type_to_find == type_to_compare or
             s.ACT_ACCOMPANY_ADULT in [type_to_find, type_to_compare] or
@@ -876,7 +894,8 @@ class Capacities:
     The result are always located point capacities with the best possible information, that can be used by the activity placer.
     """
 
-    def __init__(self, capa_cells_shp_path: str = None, capa_points_shp_path: str = None, capa_cells_csv_path: str = None,
+    def __init__(self, capa_cells_shp_path: str = None, capa_points_shp_path: str = None,
+                 capa_cells_csv_path: str = None,
                  capa_points_csv_path: str = None):  # Flexibility not implemented fully
 
         logger.info("Initializing capacities...")
@@ -1098,7 +1117,8 @@ def add_from_coord(df):
     df[s.COORD_FROM_COL] = df.groupby(s.PERSON_ID_COL)[s.COORD_TO_COL].shift(1)
 
     # For the first leg of each person, set 'from_coord' to home coord
-    df.loc[(df[s.LEG_NON_UNIQUE_ID_COL] == 1), s.COORD_FROM_COL] = df.loc[(df[s.LEG_NON_UNIQUE_ID_COL] == 1), 'home_loc']
+    df.loc[(df[s.LEG_NON_UNIQUE_ID_COL] == 1), s.COORD_FROM_COL] = df.loc[
+        (df[s.LEG_NON_UNIQUE_ID_COL] == 1), 'home_loc']
 
     logger.info("Done.")
     return df
@@ -1117,7 +1137,8 @@ def add_from_cell(df):
     df[s.CELL_FROM_COL] = df.groupby(s.PERSON_ID_COL)[s.CELL_TO_COL].shift(1)
 
     # For the first leg of each person, set 'from_cell' to home cell
-    df.loc[(df[s.LEG_NON_UNIQUE_ID_COL] == 1), s.CELL_FROM_COL] = df.loc[(df[s.LEG_NON_UNIQUE_ID_COL] == 1), s.HOME_CELL_COL]
+    df.loc[(df[s.LEG_NON_UNIQUE_ID_COL] == 1), s.CELL_FROM_COL] = df.loc[
+        (df[s.LEG_NON_UNIQUE_ID_COL] == 1), s.HOME_CELL_COL]
 
     logger.info("Done.")
     return df
@@ -1196,7 +1217,8 @@ def assign_points(df, shapefile_path, df_cell_name_column, gdf_cell_name_column,
     logger.info(f"Loaded shapefile with {len(gdf)} cells.")
     # Ensure that the cell name column exists in both DataFrame and GeoDataFrame
     if df_cell_name_column not in df.columns or gdf_cell_name_column not in gdf.columns:
-        raise ValueError(f"Column '{df_cell_name_column}' must exist in DataFrame and '{gdf_cell_name_column}' must exist in GeoDataFrame")
+        raise ValueError(
+            f"Column '{df_cell_name_column}' must exist in DataFrame and '{gdf_cell_name_column}' must exist in GeoDataFrame")
 
     # Function to generate a random point within a cell
     def random_point_in_cell(cell):
@@ -1228,35 +1250,97 @@ def assign_points(df, shapefile_path, df_cell_name_column, gdf_cell_name_column,
 
     return df
 
-class StatsTracker:
-    def __init__(self):
-        self.stats = {
 
-        }
+def translate_column(df: pd.DataFrame, source_col: str, new_col: str, value_type: str, from_key: str, to_key: str) -> pd.DataFrame:
+    """
+    Generalized method for translating columns.
+    :param df: pandas DataFrame
+    :param source_col: The name of the source column in the DataFrame
+    :param new_col: The name of the new column in the DataFrame
+    :param value_type: The type of values to translate (e.g., 'modes', 'activities')
+    :param from_key: The key in the value map to translate from (e.g., 'input_travel_survey', 'internal')
+    :param to_key: The key in the value map to translate to (e.g., 'internal', 'MATSim')
+    :return: DataFrame with a new column containing the translated values
+    """
+    translation_dict = {v[from_key]: v[to_key] for k, v in s.VALUE_MAPS[value_type].items() if v[from_key] is not None}
 
-    def increment(self, stat):
-        if stat in self.stats:
-            self.stats[stat] += 1
-            logging.debug(f"{stat} incremented to {self.stats[stat]}")
-        else:
-            logging.debug(f"Stat {stat} not found in stats, creating it.")
-            self.stats[stat] = 1
+    logger.info(f"Translating column '{source_col}' to '{new_col}' using provided dictionary.")
 
-    def log(self, stat, value):
-        if stat in self.stats:
-            self.stats[stat].append(value)
-            logging.debug(f"Value {value} added to {stat}")
-        else:
-            logging.debug(f"Stat {stat} not found in stats, creating it.")
-            self.stats[stat] = [value]
+    # Perform translation
+    df[new_col] = df[source_col].map(translation_dict)
 
-    def get_stats(self):
-        return self.stats
-    
-    def reset(self):
-        self.stats = {}
-        logging.debug("Stats reset.")
-        
-    def print_stats(self):
-        for stat, value in self.stats.items():
-            logging.info(f"{stat}: {value}")
+    # Identify values that were not found in the dictionary
+    missing_values = df[df[new_col].isna()][source_col].unique()
+    if len(missing_values) > 0:
+        stats_tracker.log("Missing_translations", missing_values)
+        logger.warning(
+            f"Missing translations for {len(missing_values)} unique values in column '{source_col}': {missing_values}")
+
+    return df
+
+
+def generate_unique_household_id(df):
+    col_name = s.UNIQUE_HH_ID_COL
+    logger.info(f"Generating unique household IDs...")
+    if col_name not in df.columns:
+        df[col_name] = df[s.HOUSEHOLD_MID_ID_COL].astype(str) + "_" + df.index.astype(str)
+        logger.info(f"Created new column {col_name}.")
+    else:
+        df[col_name] = df[s.HOUSEHOLD_MID_ID_COL].astype(str) + "_" + df.index.astype(str)
+        logger.info(f"Overwrote existing column {col_name}.")
+    return df
+
+
+def generate_unique_person_id(df):
+    col_name = s.UNIQUE_P_ID_COL
+    logger.info(f"Generating unique person IDs...")
+    if col_name not in df.columns:
+        df[col_name] = df[s.UNIQUE_HH_ID_COL] + "_" + df[s.PERSON_ID_COL].astype(str)
+        logger.info(f"Created new column {col_name}.")
+    else:
+        df[col_name] = df[s.UNIQUE_HH_ID_COL] + "_" + df[s.PERSON_ID_COL].astype(str)
+        logger.info(f"Overwrote existing column {col_name}.")
+    return df
+
+
+def generate_unique_leg_id(df):
+    col_name = s.UNIQUE_LEG_ID_COL
+    logger.info(f"Generating unique leg IDs...")
+    if col_name not in df.columns:
+        df[col_name] = df[s.UNIQUE_P_ID_COL] + "_" + df[s.LEG_NON_UNIQUE_ID_COL].astype(str)
+        logger.info(f"Created new column {col_name}.")
+    else:
+        df[col_name] = df[s.UNIQUE_P_ID_COL] + "_" + df[s.LEG_NON_UNIQUE_ID_COL].astype(str)
+        logger.info(f"Overwrote existing column {col_name}.")
+    return df
+
+def create_output_directory():
+    if not os.path.exists(OUTPUT_DIR):
+        os.makedirs(OUTPUT_DIR)
+        logger.info(f"Created output directory: {OUTPUT_DIR}")
+    return OUTPUT_DIR
+
+
+def build_estimation_tree(distances: List[float]) -> List[List[List[float]]]:  # Tree level, Leg, Lengths
+    logger.debug(f"Building estimation tree for {len(distances)} legs.")
+    tree: List[List[List[float]]] = []
+
+    while len(distances) > 1:
+        new_distances: List[float] = []
+        combined_pairs: List[List[float]] = []
+        for i in range(0, len(distances) - 1, 2):
+            combined_list: List[float] = estimate_length_with_slack(distances[i], distances[i + 1])
+            new_distances.append(combined_list[2])
+            combined_pairs.append(combined_list)
+
+        if len(distances) % 2 != 0:
+            # Carry over the estimation from the so-far built tree
+            last_pair = tree[-1][-1] if tree else [distances[-1], distances[-1], distances[-1], distances[-1],
+                                                   distances[-1]]
+            combined_pairs.append(last_pair)
+            new_distances.append(last_pair[2])  # Append only the center value for next level processing
+
+        distances = new_distances
+        tree.append(combined_pairs)
+
+    return tree

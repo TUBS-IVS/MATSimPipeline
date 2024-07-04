@@ -11,12 +11,12 @@ import math
 
 import synthesis.location_assignment.myhoerl as myhoerl
 
-from utils import settings_values as s, helpers as h
+from utils import settings as s, helpers as h
+from utils.helpers import build_estimation_tree
+from utils.stats_tracker import stats_tracker
 from utils.logger import logging
 
 logger = logging.getLogger(__name__)
-
-stats_tracker = h.StatsTracker()
 
 
 class DistanceBasedMainActivityLocator:
@@ -68,7 +68,7 @@ class DistanceBasedMainActivityLocator:
         if len(identifiers) == 0:
             # If no candidates are found within the radius, assign a random location
             all_coords = self.target_locations.data[target_activity]['coordinates']
-            main_activity_leg['to_location'] = random.choice(all_coords)
+            main_activity_leg['to_location'] = rnd.choice(all_coords)
             return
 
         # Calculate attractiveness using the provided score_locations function
@@ -430,13 +430,13 @@ def populate_legs_dict_from_df(df: pd.DataFrame, s: Any) -> Dict[str, List[Dict[
         s.UNIQUE_P_ID_COL: df[s.UNIQUE_P_ID_COL],
         'leg_info': list(zip(
             df[s.UNIQUE_LEG_ID_COL],
-            df[s.LEG_TO_ACTIVITY_COL],
-            df[s.LEG_DISTANCE_COL],
+            df[s.ACT_TO_INTERNAL_COL],
+            df[s.LEG_DISTANCE_KM_COL],
             [np.array(loc) if loc is not None else np.array([]) for loc in df['from_location']],
             [np.array(loc) if loc is not None else np.array([]) for loc in df['to_location']],
-            df[s.LEG_MAIN_MODE_COL],
+            df[s.MODE_MID_COL],
             df[s.IS_MAIN_ACTIVITY_COL],
-            df[s.HOME_TO_MAIN_TIME_COL]  # TODO: make distance from home to main activity
+            df[s.HOME_TO_MAIN_SECONDS_COL]  # TODO: make distance from home to main activity
         ))
     })
 
@@ -477,7 +477,7 @@ def populate_legs_dict_from_df(df: pd.DataFrame, s: Any) -> Dict[str, List[Dict[
 #
 #         leg_info: Dict[str, Any] = {
 #             'leg_id': getattr(row, s.UNIQUE_LEG_ID_COL),
-#             'to_act_purpose': getattr(row, s.LEG_TO_ACTIVITY_COL),
+#             'to_act_purpose': getattr(row, s.ACT_TO_INTERNAL_COL),
 #             'distance': getattr(row, s.LEG_DISTANCE_COL),
 #             'from_location': from_location,
 #             'to_location': to_location,
@@ -508,12 +508,12 @@ def prepare_mid_df_for_legs_dict(filter_max_distance=None, number_of_persons=100
 
     # Throw out rows with missing values in the distance column
     row_count_before = df.shape[0]
-    df = df.dropna(subset=[s.LEG_DISTANCE_COL])
+    df = df.dropna(subset=[s.LEG_DISTANCE_KM_COL])
     logger.debug(f"Dropped {row_count_before - df.shape[0]} rows with missing distance values.")
 
     # Identify and remove records of persons with any trip exceeding the max distance if filter_max_distance is specified
     if filter_max_distance is not None:
-        person_ids_to_exclude = df[df[s.LEG_DISTANCE_COL] > filter_max_distance][s.PERSON_ID_COL].unique()
+        person_ids_to_exclude = df[df[s.LEG_DISTANCE_KM_COL] > filter_max_distance][s.PERSON_ID_COL].unique()
         row_count_before = df.shape[0]
         df = df[~df[s.PERSON_ID_COL].isin(person_ids_to_exclude)]
         logger.debug(
@@ -534,7 +534,7 @@ def prepare_mid_df_for_legs_dict(filter_max_distance=None, number_of_persons=100
         df.at[group.index[-1], "to_location"] = home_location
 
     # In-place convert km to meters for distance column
-    df[s.LEG_DISTANCE_COL] = df[s.LEG_DISTANCE_COL] * 1000
+    df[s.LEG_DISTANCE_KM_COL] = df[s.LEG_DISTANCE_KM_COL] * 1000
 
     logger.debug(df.head())
     return df
@@ -585,31 +585,6 @@ def estimate_length_with_slack(length1, length2, slack_factor=2, min_slack_lower
         result), f"Result is NaN. Lengths: {length1}, {length2}, Slack factor: {slack_factor}, Min slack lower: {min_slack_lower}, Min slack upper: {min_slack_upper}"
 
     return [length_diff, wanted_minimum, result, wanted_maximum, length_sum]
-
-
-def build_estimation_tree(distances: List[float]) -> List[List[List[float]]]:  # Tree level, Leg, Lengths
-    logger.debug(f"Building estimation tree for {len(distances)} legs.")
-    tree: List[List[List[float]]] = []
-
-    while len(distances) > 1:
-        new_distances: List[float] = []
-        combined_pairs: List[List[float]] = []
-        for i in range(0, len(distances) - 1, 2):
-            combined_list: List[float] = estimate_length_with_slack(distances[i], distances[i + 1])
-            new_distances.append(combined_list[2])
-            combined_pairs.append(combined_list)
-
-        if len(distances) % 2 != 0:
-            # Carry over the estimation from the so-far built tree
-            last_pair = tree[-1][-1] if tree else [distances[-1], distances[-1], distances[-1], distances[-1],
-                                                   distances[-1]]
-            combined_pairs.append(last_pair)
-            new_distances.append(last_pair[2])  # Append only the center value for next level processing
-
-        distances = new_distances
-        tree.append(combined_pairs)
-
-    return tree
 
 
 def adjust_estimation_tree(tree: List[List[List[float]]], real_distance: float, strong_adjust: bool = True) -> List[

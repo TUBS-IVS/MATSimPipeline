@@ -8,30 +8,16 @@ import matsim.writers
 import numpy as np
 import pandas as pd
 
-import synthesis.location_assignment.activity_locator_distance_based as ald
+import utils.helpers
 
 from utils.data_frame_processor import DataFrameProcessor
-from utils import matsim_pipeline_setup, helpers as h, rules
-from utils import settings_values as s
+from utils import helpers as h, settings as s, pipeline_setup
 from utils.logger import logging
 
 logger = logging.getLogger(__name__)
 
 
-class MiDDataEnhancer(DataFrameProcessor):
-    """
-    A class to process population dataframes.
-    Contains methods that are specific to population dataframes and need full access to the dataframe and/or
-    are too complex to be implemented as rules.
-    """
-
-    def __init__(self, df: pd.DataFrame = None, id_column: str = None):
-        super().__init__(df, id_column)
-        self.sf = h.SlackFactors(s.SLACK_FACTORS_FILE)
-
-    def enhance(self): #TODO
-        pass
-
+class PopulationProcessor(DataFrameProcessor):
     def distribute_by_weights(self, weights_df: pd.DataFrame, cell_id_col: str, cut_missing_ids: bool = False):
         result = h.distribute_by_weights(self.df, weights_df, cell_id_col, cut_missing_ids)
         self.df = self.df.merge(result[[s.UNIQUE_HH_ID_COL, 'home_loc']], on=s.UNIQUE_HH_ID_COL, how='left')
@@ -48,7 +34,7 @@ class MiDDataEnhancer(DataFrameProcessor):
 
         self.df.reset_index(drop=True, inplace=True)
 
-        output_file = os.path.join(matsim_pipeline_setup.OUTPUT_DIR, "population.xml")
+        output_file = os.path.join(pipeline_setup.OUTPUT_DIR, "population.xml")
         with open(output_file, 'wb+') as f_write:
             writer = matsim.writers.PopulationWriter(f_write)
 
@@ -97,7 +83,7 @@ class MiDDataEnhancer(DataFrameProcessor):
 
     def write_households_to_matsim_xml(self):
         logger.info("Writing households to MATSim xml...")
-        output_file = os.path.join(matsim_pipeline_setup.OUTPUT_DIR, "households.xml")
+        output_file = os.path.join(pipeline_setup.OUTPUT_DIR, "households.xml")
         with open(output_file, 'wb+') as f_write:
             households_writer = matsim.writers.HouseholdsWriter(f_write)
             households_writer.start_households()
@@ -116,7 +102,7 @@ class MiDDataEnhancer(DataFrameProcessor):
             households_writer.end_households()
 
     def write_facilities_to_matsim_xml(self, facilities_df: pd.DataFrame):
-        with open(os.path.join(matsim_pipeline_setup.OUTPUT_DIR, "facilities.xml"), 'wb+') as f_write:
+        with open(os.path.join(pipeline_setup.OUTPUT_DIR, "facilities.xml"), 'wb+') as f_write:
             facilities_writer = matsim.writers.FacilitiesWriter(f_write)
             facilities_writer.start_facilities()
 
@@ -138,7 +124,7 @@ class MiDDataEnhancer(DataFrameProcessor):
 
     def write_vehicles_to_matsim_xml(self):
         logger.info("Writing vehicles to MATSim xml...")
-        output_file = os.path.join(matsim_pipeline_setup.OUTPUT_DIR, "vehicles.xml")
+        output_file = os.path.join(pipeline_setup.OUTPUT_DIR, "vehicles.xml")
         with open(output_file, 'wb+') as f_write:
             vehicle_writer = matsim.writers.VehiclesWriter(f_write)
             vehicle_writer.start_vehicle_definitions()
@@ -160,6 +146,8 @@ class MiDDataEnhancer(DataFrameProcessor):
 
             vehicle_writer.end_vehicle_definitions()
 
+        logger.info(f"Wrote vehicles to MATSim xml: {output_file}")
+
     def change_last_leg_activity_to_home(self) -> None:
         """
         Change the target activity of the last leg to home. Alternative to add_return_home_leg().
@@ -170,9 +158,9 @@ class MiDDataEnhancer(DataFrameProcessor):
 
         is_last_leg = self.df[s.PERSON_ID_COL].ne(self.df[s.PERSON_ID_COL].shift(-1))
 
-        number_of_rows_to_change = len(self.df[is_last_leg & (self.df[s.LEG_TO_ACTIVITY_COL] != s.ACT_HOME)])
+        number_of_rows_to_change = len(self.df[is_last_leg & (self.df[s.ACT_TO_INTERNAL_COL] != s.ACT_HOME)])
 
-        self.df.loc[is_last_leg, s.LEG_TO_ACTIVITY_COL] = s.ACT_HOME
+        self.df.loc[is_last_leg, s.ACT_TO_INTERNAL_COL] = s.ACT_HOME
         self.df.loc[is_last_leg, 'activity_translated_string'] = "home"
         # We also need to remove markers for main or mirroring main activities, because home is never main
         self.df.loc[is_last_leg, s.IS_MAIN_ACTIVITY_COL] = 0
@@ -180,13 +168,287 @@ class MiDDataEnhancer(DataFrameProcessor):
         # This means there might be some persons with no main activity. This is not a problem for the current model.
         logger.info(f"Changed last leg activity to home for {number_of_rows_to_change} of {len(self.df)} rows.")
 
+    def assign_random_location(self):
+        """
+        Assign a random location to each activity.
+        :return:
+        """
+        gdf = gpd.read_file(s.SHAPE_BOUNDARY_FILE)
+        polygon = h.find_outer_boundary(gdf)
+        self.df['random_point'] = self.df.apply(lambda row: h.random_point_in_polygon(polygon), axis=1)
+
+    def mark_protagonist_leg(self):
+        """
+        Identify the 'protagonist' leg among connected legs for each household.
+        The leg with the highest-ranked activity in each group of connected legs is considered the protagonist.
+        :return: Updates self.df with a new column indicating if each leg is a protagonist (1) or not (0)
+        """
+        household_col = s.UNIQUE_HH_ID_COL
+        connected_legs_col = s.CONNECTED_LEGS_COL
+        unique_leg_id_col = s.UNIQUE_LEG_ID_COL
+        act_to_internal_col = s.ACT_TO_INTERNAL_COL
+        activities_ranked = [
+            s.ACT_ERRANDS,
+            s.ACT_LEISURE,
+            s.ACT_MEETUP,
+            s.ACT_SHOPPING,
+            s.ACT_EDUCATION,
+            s.ACT_LESSONS,
+            s.ACT_SPORTS,
+            s.ACT_EARLY_EDUCATION,
+            s.ACT_DAYCARE,  # Likely to be dropped off/picked up
+            s.ACT_BUSINESS,  # Likely to be accompanied
+            s.ACT_HOME]  # Home must stay home
+
+        def find_protagonist(household_group):
+            prot_series = pd.Series(0, index=household_group.index)
+            if household_group[connected_legs_col].isna().all():
+                logger.debug(f"No connections exist for household {household_group[household_col].iloc[0]}.")
+                return prot_series
+            else:
+                logger.debug(f"Finding protagonist for household {household_group[household_col].iloc[0]}")
+
+            checked_legs = []
+            for idx, row in household_group.iterrows():
+                if not isinstance(row[connected_legs_col], list):
+                    continue
+                if idx in checked_legs:
+                    continue
+                connected_legs = set(row[connected_legs_col]).union({row[unique_leg_id_col]})
+                leg_data = []
+                for leg_id in connected_legs:
+                    if not all(elem in connected_legs for elem in
+                               household_group.loc[household_group[unique_leg_id_col] == leg_id, connected_legs_col].iloc[0]):
+                        logger.warning(f"Leg {leg_id} has inconsistent connections. This might lead to unexpected results.")
+
+                    checked_legs.append(household_group.loc[household_group[unique_leg_id_col] == leg_id].index[0])
+                    leg_activity = household_group.loc[household_group[unique_leg_id_col] == leg_id, act_to_internal_col].iloc[0]
+                    activity_rank = activities_ranked.index(leg_activity) if leg_activity in activities_ranked else -1
+                    leg_data.append({'leg_id': leg_id, 'activity': leg_activity, 'activity_rank': activity_rank})
+
+                connected_legs_df = pd.DataFrame(leg_data)
+                if not connected_legs_df.empty:
+                    connected_legs_df.sort_values(by='activity_rank', ascending=False, inplace=True)
+                    protagonist_leg_id = connected_legs_df.iloc[0]['leg_id']
+                    prot_series.loc[household_group[unique_leg_id_col] == protagonist_leg_id] = 1
+
+            return prot_series
+        self.df[s.IS_PROTAGONIST_COL] = self.df.groupby(household_col).apply(find_protagonist).reset_index(level=0, drop=True)
+
+    def mark_main_activity(self):
+        """
+        Check if the leg is travelling to the main activity of the day.
+        Requires calculate_activity_time() to be run first.
+        :return: Updates self.df with a new column indicating if each leg is the main activity (1) or not (0)
+        """
+        person_col = s.UNIQUE_P_ID_COL
+        act_to_internal_col = s.ACT_TO_INTERNAL_COL
+        leg_non_unique_id_col = s.LEG_NON_UNIQUE_ID_COL
+        act_dur_seconds_col = s.ACT_DUR_SECONDS_COL
+
+        def find_main_activity(person):
+            is_main_activity_series = pd.Series(0, index=person.index)  # Initialize all values to 0
+
+            # Filter out home activities (home must not be the main activity)
+            group = person[person[act_to_internal_col] != s.ACT_HOME]
+
+            if group.empty:
+                logger.debug(f"Person {person[person_col].iloc[0]} has no legs outside home. No main activity.")
+                return is_main_activity_series
+
+            if len(group) == 1:
+                # If the person has no legs, there is no main activity
+                if group[leg_non_unique_id_col].isna().all():
+                    logger.debug(f"Person {group[person_col].iloc[0]} has no legs. No main activity.")
+                    return is_main_activity_series
+
+                # If the person has only one activity outside home, it is the main activity
+                main_activity_index = group.index[0]
+                is_main_activity_series.at[main_activity_index] = 1
+                assert is_main_activity_series.sum() == 1
+                return is_main_activity_series
+
+            # If the person has more than one activity, the main activity is the first work activity
+            work_activity_rows = group[group[act_to_internal_col] == s.ACT_WORK]
+            if not work_activity_rows.empty:
+                is_main_activity_series[work_activity_rows.index[0]] = 1
+                assert is_main_activity_series.sum() == 1
+                logger.debug(f"Person {group[person_col].iloc[0]} has a work activity. Main activity is work.")
+                return is_main_activity_series
+
+            # If the person has no work activity, the main activity is the first education activity
+            education_activity_rows = group[
+                group[act_to_internal_col].isin([s.ACT_EDUCATION, s.ACT_EARLY_EDUCATION, s.ACT_DAYCARE])]
+            if not education_activity_rows.empty:
+                is_main_activity_series[education_activity_rows.index[0]] = 1
+                assert is_main_activity_series.sum() == 1
+                logger.debug(
+                    f"Person {group[person_col].iloc[0]} has an education activity. Main activity is education.")
+                return is_main_activity_series
+
+            # If the person has no work or education activity, the main activity is the longest activity
+            if group[act_dur_seconds_col].isna().all():
+                # If all activities have no duration, pick the middle one
+                is_main_activity_series.iloc[len(group) // 2] = 1  # Integer division
+                assert is_main_activity_series.sum() == 1
+                logger.debug(
+                    f"Person {group[person_col].iloc[0]} has no activities with duration. Main activity is middle.")
+                return is_main_activity_series
+            max_duration_index = group[act_dur_seconds_col].idxmax()
+            is_main_activity_series[max_duration_index] = 1
+            assert is_main_activity_series.sum() == 1
+            logger.debug(f"Person {group[person_col].iloc[0]} has no work or education activity. "
+                         f"Main activity is longest activity.")
+            return is_main_activity_series
+
+        self.df[s.IS_MAIN_ACTIVITY_COL] = self.df.groupby(person_col).apply(find_main_activity).reset_index(level=0,
+                                                                                                        drop=True)
+
+    # def translate_modes(self):
+    #     """
+    #     Translate the modes from the MiD codes to the MATSim strings.
+    #     Recommended to do this just before writing to MATSim xml.
+    #     :return:
+    #     """
+    #     logger.info(f"Translating modes...")
+    #     defined_modes = [s.MODE_CAR, s.MODE_PT, s.MODE_RIDE, s.MODE_BIKE, s.MODE_WALK, s.MODE_UNDEFINED]
+    #     count_non_matching = (~self.df[s.LEG_MAIN_MODE_COL].isin(defined_modes)).sum()
+    #     count_nan = self.df[s.LEG_MAIN_MODE_COL].isna().sum()
+    #     count_non_leg = self.df[s.LEG_ID_COL].isna().sum()
+    #     if count_non_matching > 0:
+    #         logger.warning(f"{count_non_matching} rows have a mode that is not in the defined modes."
+    #                        f"{count_nan} rows have no mode."
+    #                        f"{count_non_leg} rows have no leg.")
+    #     mode_translation = {
+    #         s.MODE_CAR: "car",
+    #         s.MODE_PT: "pt",
+    #         s.MODE_RIDE: "ride",
+    #         s.MODE_BIKE: "bike",
+    #         s.MODE_WALK: "walk",
+    #     }
+    #     self.df['mode_translated_string'] = self.df[s.LEG_MAIN_MODE_COL].map(mode_translation)
+    #     logger.info(f"Translated modes.")
+
+
+    # def translate_activities(self):
+    #     """
+    #     Translate the activities from the MiD codes to the MATSim strings.
+    #     Recommended to do this just before writing to MATSim xml.
+    #     :return:
+    #     """
+    #     logger.info(f"Translating activities...")
+    #     activity_translation = {
+    #         s.ACT_WORK: "work",
+    #         s.ACT_BUSINESS: "work",
+    #         s.ACT_EDUCATION: "education",
+    #         s.ACT_SHOPPING: "shopping",
+    #         s.ACT_ERRANDS: "leisure",
+    #         s.ACT_PICK_UP_DROP_OFF: "other",
+    #         s.ACT_LEISURE: "leisure",
+    #         s.ACT_HOME: "home",
+    #         s.ACT_RETURN_JOURNEY: "other",
+    #         s.ACT_OTHER: "other",
+    #         s.ACT_EARLY_EDUCATION: "education",
+    #         s.ACT_DAYCARE: "education",
+    #         s.ACT_ACCOMPANY_ADULT: "other",
+    #         s.ACT_SPORTS: "leisure",
+    #         s.ACT_MEETUP: "leisure",
+    #         s.ACT_LESSONS: "leisure",
+    #         s.ACT_UNSPECIFIED: "other",
+    #     }
+    #     self.df['activity_translated_string'] = self.df[s.TO_ACTIVITY_WITH_CONNECTED_COL].map(activity_translation)
+    #     logger.info(f"Translated activities.")
+
+    def vary_times_by_household(self, hh_id_col, time_cols, max_shift_minutes=15):
+        """
+        Varies times in the DataFrame by the same random amount (±max_shift_minutes) for each household.
+
+        :param hh_id_col: String, the column name for the unique hh identifier.
+        :param time_cols: List of strings, the names of the columns containing time data.
+        :param max_shift_minutes: Integer, the maximum number of minutes for the time shift.
+        :return: pandas DataFrame with varied times.
+        """
+
+        logger.info("Varying times by household...")
+
+        def apply_time_shift(group):
+            time_shift = timedelta(minutes=np.random.randint(-max_shift_minutes, max_shift_minutes + 1))
+
+            # Apply this time shift to all time columns
+            for col in time_cols:
+                group[col] = group[col].apply(lambda x: x + time_shift if pd.notnull(x) else x)
+            return group
+
+        self.df = self.df.groupby(hh_id_col).apply(apply_time_shift)
+        logger.info("Times varied by person.")
+
+    def downsample_population(self, sample_percentage):
+        """
+        Downsample the population to a given sample percentage size of the original population.
+        Recommended to sample households (e.g. at the point when only households are loaded),
+        not persons, to keep the household structure intact.
+        """
+        logger.info("Downsampling population...")
+        self.df = self.df.sample(frac=sample_percentage)
+        logger.info(f"Downsampled population to {sample_percentage * 100}% of the original population.")
+
+
+
+
+class MiDDataEnhancer(DataFrameProcessor):
+    """
+    Collects all methods that are applied directly to the unexpanded, raw MiD data.
+
+    """
+
+    def __init__(self, df: pd.DataFrame = None, id_column: str = None):
+        super().__init__(df, id_column)
+        self.sf = h.SlackFactors(s.SLACK_FACTORS_FILE)
+
+    def filter_home_to_home_legs(self):
+        """
+        Filters out 'home to home' legs from the DataFrame.
+        """
+        logger.info(f"Filtering out 'home to home' legs from {len(self.df)} rows...")
+        home_to_home_condition = (self.df[s.ACT_FROM_INTERNAL_COL] == s.ACT_HOME) & \
+                                 (self.df[s.ACT_TO_INTERNAL_COL] == s.ACT_HOME)
+        self.df = self.df[~home_to_home_condition].reset_index(drop=True)
+        logger.info(f"Filtered out 'home to home' legs. {len(self.df)} rows remaining.")
+
+    def convert_minutes_to_seconds(self, minute_col, seconds_col):
+        logger.info(f"Converting {minute_col} to seconds...")
+        if seconds_col not in self.df.columns:
+            self.df[seconds_col] = self.df[minute_col] * 60
+            logger.info(f"Created new column {seconds_col}.")
+        else:
+            self.df[seconds_col] = self.df[minute_col] * 60
+            logger.info(f"Overwrote existing column {seconds_col}.")
+
+    def convert_hours_to_seconds(self, hour_col, seconds_col):
+        logger.info(f"Converting {hour_col} to seconds...")
+        if seconds_col not in self.df.columns:
+            self.df[seconds_col] = self.df[hour_col] * 3600
+            logger.info(f"Created new column {seconds_col}.")
+        else:
+            self.df[seconds_col] = self.df[hour_col] * 3600
+            logger.info(f"Overwrote existing column {seconds_col}.")
+
+    def convert_kilometers_to_meters(self, km_col, m_col):
+        logger.info(f"Converting {km_col} to meters...")
+        if m_col not in self.df.columns:
+            self.df[m_col] = self.df[km_col] * 1000
+            logger.info(f"Created new column {m_col}.")
+        else:
+            self.df[m_col] = self.df[km_col] * 1000
+            logger.info(f"Overwrote existing column {m_col}.")
+
     def adjust_mode_based_on_age(self):
         """
         Change the mode of transportation from car to ride if age < 17.
         """
         logger.info("Adjusting mode based on age...")
-        conditions = (self.df[s.LEG_MAIN_MODE_COL] == s.MODE_CAR) & (self.df[s.PERSON_AGE_COL] < 17)
-        self.df.loc[conditions, s.LEG_MAIN_MODE_COL] = s.MODE_RIDE
+        conditions = (self.df[s.MODE_INTERNAL_COL] == s.MODE_CAR) & (self.df[s.PERSON_AGE_COL] < 17)
+        self.df.loc[conditions, s.MODE_INTERNAL_COL] = s.MODE_RIDE
         logger.info(f"Adjusted mode based on age for {conditions.sum()} of {len(self.df)} rows.")
 
     def adjust_mode_based_on_license(self):
@@ -194,8 +456,8 @@ class MiDDataEnhancer(DataFrameProcessor):
         Change the mode of transportation from car to ride if person has no license.
         """
         logger.info("Adjusting mode based on license...")
-        conditions = (self.df[s.LEG_MAIN_MODE_COL] == s.MODE_CAR) & (self.df["imputed_license"] == s.LICENSE_NO)
-        self.df.loc[conditions, s.LEG_MAIN_MODE_COL] = s.MODE_RIDE
+        conditions = (self.df[s.MODE_INTERNAL_COL] == s.MODE_CAR) & (self.df["imputed_license"] == s.LICENSE_NO)
+        self.df.loc[conditions, s.MODE_INTERNAL_COL] = s.MODE_RIDE
         logger.info(f"Adjusted mode based on license for {conditions.sum()} of {len(self.df)} rows.")
 
     def adjust_mode_based_on_connected_legs(self):
@@ -204,9 +466,9 @@ class MiDDataEnhancer(DataFrameProcessor):
         This works because connection analysis only matches undefined legs to car legs.
         """
         logger.info("Adjusting mode based on connected legs...")
-        conditions = (self.df[s.LEG_MAIN_MODE_COL] == s.MODE_UNDEFINED) & (
+        conditions = (self.df[s.MODE_INTERNAL_COL] == s.MODE_UNDEFINED) & (
             isinstance(self.df[s.CONNECTED_LEGS_COL], list))
-        self.df.loc[conditions, s.LEG_MAIN_MODE_COL] = s.MODE_RIDE
+        self.df.loc[conditions, s.MODE_INTERNAL_COL] = s.MODE_RIDE
         logger.info(f"Adjusted mode based on connected legs for {conditions.sum()} of {len(self.df)} rows.")
 
     def calculate_activity_duration(self):
@@ -231,73 +493,11 @@ class MiDDataEnhancer(DataFrameProcessor):
         self.df.loc[is_last_leg, s.ACT_DUR_SECONDS_COL] = None
         logger.info(f"Calculated activity duration in secs.")
 
-    def assign_random_location(self):
-        """
-        Assign a random location to each activity.
-        :return:
-        """
-        gdf = gpd.read_file(s.SHAPE_BOUNDARY_FILE)
-        polygon = h.find_outer_boundary(gdf)
-        self.df['random_point'] = self.df.apply(lambda row: h.random_point_in_polygon(polygon), axis=1)
-
-    def translate_modes(self):
-        """
-        Translate the modes from the MiD codes to the MATSim strings.
-        Recommended to do this just before writing to MATSim xml.
-        :return:
-        """
-        logger.info(f"Translating modes...")
-        defined_modes = [s.MODE_CAR, s.MODE_PT, s.MODE_RIDE, s.MODE_BIKE, s.MODE_WALK, s.MODE_UNDEFINED]
-        count_non_matching = (~self.df[s.LEG_MAIN_MODE_COL].isin(defined_modes)).sum()
-        count_nan = self.df[s.LEG_MAIN_MODE_COL].isna().sum()
-        count_non_leg = self.df[s.LEG_ID_COL].isna().sum()
-        if count_non_matching > 0:
-            logger.warning(f"{count_non_matching} rows have a mode that is not in the defined modes."
-                           f"{count_nan} rows have no mode."
-                           f"{count_non_leg} rows have no leg.")
-        mode_translation = {
-            s.MODE_CAR: "car",
-            s.MODE_PT: "pt",
-            s.MODE_RIDE: "ride",
-            s.MODE_BIKE: "bike",
-            s.MODE_WALK: "walk",
-        }
-        self.df['mode_translated_string'] = self.df[s.LEG_MAIN_MODE_COL].map(mode_translation)
-        logger.info(f"Translated modes.")
-
-    def translate_activities(self):
-        """
-        Translate the activities from the MiD codes to the MATSim strings.
-        :return:
-        """
-        logger.info(f"Translating activities...")
-        activity_translation = {
-            s.ACT_WORK: "work",
-            s.ACT_BUSINESS: "work",
-            s.ACT_EDUCATION: "education",
-            s.ACT_SHOPPING: "shopping",
-            s.ACT_ERRANDS: "leisure",
-            s.ACT_PICK_UP_DROP_OFF: "other",
-            s.ACT_LEISURE: "leisure",
-            s.ACT_HOME: "home",
-            s.ACT_RETURN_JOURNEY: "other",
-            s.ACT_OTHER: "other",
-            s.ACT_EARLY_EDUCATION: "education",
-            s.ACT_DAYCARE: "education",
-            s.ACT_ACCOMPANY_ADULT: "other",
-            s.ACT_SPORTS: "leisure",
-            s.ACT_MEETUP: "leisure",
-            s.ACT_LESSONS: "leisure",
-            s.ACT_UNSPECIFIED: "other",
-        }
-        self.df['activity_translated_string'] = self.df[s.TO_ACTIVITY_WITH_CONNECTED_COL].map(activity_translation)
-        logger.info(f"Translated activities.")
-
     def write_stats(self, stat_by_columns: list = None):
         logger.info(f"Exporting stats...")
 
         stat_by_columns = [col for col in s.GEO_COLUMNS if col in self.df.columns]
-        stat_by_columns.append(s.LEG_TO_ACTIVITY_COL)
+        stat_by_columns.append(s.ACT_TO_INTERNAL_COL)
         # stat_by_columns.extend(["unique_household_id", "unique_person_id"])  # Very large files
         # non_stat_by_columns = [col for col in self.df.columns if col not in stat_by_columns]
 
@@ -307,7 +507,7 @@ class MiDDataEnhancer(DataFrameProcessor):
             # Flattening MultiIndex columns
             stats_df.columns = ['_'.join(col).strip() for col in stats_df.columns]
 
-            file_path = f"{matsim_pipeline_setup.OUTPUT_DIR}/{col}_stats.csv"
+            file_path = f"{pipeline_setup.OUTPUT_DIR}/{col}_stats.csv"
             stats_df.to_csv(file_path)
             logger.info(f"Exported stats to {file_path}.")
 
@@ -316,7 +516,7 @@ class MiDDataEnhancer(DataFrameProcessor):
         Returns a pd DataFrame with the average duration and standard deviation for each activity type.
         """
         # Ignore negative and zero values
-        result = self.df[self.df[s.ACT_DUR_SECONDS_COL] > 0].groupby(s.LEG_TO_ACTIVITY_COL)[
+        result = self.df[self.df[s.ACT_DUR_SECONDS_COL] > 0].groupby(s.ACT_TO_INTERNAL_COL)[
             s.ACT_DUR_SECONDS_COL].agg(
             ['mean', 'std'])
         logger.info(f"Activity times distribution in seconds (mean and std): \n{result}")
@@ -329,7 +529,7 @@ class MiDDataEnhancer(DataFrameProcessor):
         """
         # Ignore negative values and values > 5 hours (these might be errors or error codes)
         filtered_df = self.df[(self.df[s.LEG_DURATION_MINUTES_COL] > 0) & (self.df[s.LEG_DURATION_MINUTES_COL] <= 300)]
-        result = filtered_df.groupby(s.LEG_TO_ACTIVITY_COL)[s.LEG_DURATION_MINUTES_COL].agg(['mean', 'std']) * 60
+        result = filtered_df.groupby(s.ACT_TO_INTERNAL_COL)[s.LEG_DURATION_MINUTES_COL].agg(['mean', 'std']) * 60
         logger.info(f"Leg times distribution in seconds (mean and std): \n{result}")
         return result
 
@@ -343,7 +543,7 @@ class MiDDataEnhancer(DataFrameProcessor):
         # Convert datetime to numeric (timestamp) for calculation
         first_legs['timestamp'] = first_legs['leg_start_time'].view(np.int64)
 
-        result = first_legs.groupby(s.LEG_TO_ACTIVITY_COL)['timestamp'].agg(['mean', 'std'])
+        result = first_legs.groupby(s.ACT_TO_INTERNAL_COL)['timestamp'].agg(['mean', 'std'])
 
         result['mean'] = pd.to_datetime(result['mean'])
         result['std'] = pd.to_timedelta(result['std'])
@@ -359,14 +559,14 @@ class MiDDataEnhancer(DataFrameProcessor):
         :return: DataFrame with added home legs
         """
         logger.info("Adding return home legs...")
-        self.df[s.IMPUTED_LEG_COL] = 0
+        self.df[s.IS_IMPUTED_LEG_COL] = 0
         new_rows = []
 
         for person_id, group in self.df.groupby(s.UNIQUE_P_ID_COL):
             if pd.isna(group.at[group.index[0], s.LEG_NON_UNIQUE_ID_COL]):
                 logger.debug(f"Person {person_id} has no legs. Skipping...")
                 continue
-            if group[s.LEG_TO_ACTIVITY_COL].iloc[-1] == s.ACT_HOME:
+            if group[s.ACT_TO_INTERNAL_COL].iloc[-1] == s.ACT_HOME:
                 logger.debug(f"Person {person_id} already has a home leg. Skipping...")
                 continue
             logger.debug(f"Adding return home leg for person {person_id}...")
@@ -390,7 +590,7 @@ class MiDDataEnhancer(DataFrameProcessor):
             # Estimate activity duration:
             last_leg = group.iloc[-1]
             similar_persons = self.find_similar_persons(last_leg, 100)
-            activity_time = similar_persons[similar_persons[s.LEG_TO_ACTIVITY_COL] == last_leg[s.LEG_TO_ACTIVITY_COL]][
+            activity_time = similar_persons[similar_persons[s.ACT_TO_INTERNAL_COL] == last_leg[s.ACT_TO_INTERNAL_COL]][
                 s.ACT_DUR_SECONDS_COL].mean()
             if pd.isna(activity_time):
                 logger.debug(f"Person {person_id} has no similar persons with the same last activity. ")
@@ -399,14 +599,15 @@ class MiDDataEnhancer(DataFrameProcessor):
             # Create home_leg with the calculated duration
             home_leg = last_leg.copy()
             home_leg[s.LEG_NON_UNIQUE_ID_COL] = last_leg[s.LEG_NON_UNIQUE_ID_COL] + 1
-            home_leg[s.UNIQUE_LEG_ID_COL] = rules.unique_leg_id(home_leg)
+            home_leg[s.UNIQUE_LEG_ID_COL] = f"{home_leg['unique_person_id']}_{home_leg[s.LEG_ID_COL]}"
             home_leg[s.LEG_START_TIME_COL] = last_leg[s.LEG_END_TIME_COL] + pd.Timedelta(seconds=activity_time)
             home_leg[s.LEG_END_TIME_COL] = home_leg[s.LEG_START_TIME_COL] + pd.Timedelta(minutes=home_leg_duration)
-            home_leg[s.LEG_TO_ACTIVITY_COL] = s.ACT_HOME
+            home_leg[s.ACT_TO_INTERNAL_COL] = s.ACT_HOME
             home_leg[s.LEG_DURATION_MINUTES_COL] = home_leg_duration
-            home_leg[s.LEG_DISTANCE_COL] = None  # Could also be estimated, but isn't necessary for the current use case
+            home_leg[
+                s.LEG_DISTANCE_KM_COL] = None  # Could also be estimated, but isn't necessary for the current use case
             home_leg[s.IS_MAIN_ACTIVITY_COL] = 0
-            home_leg[s.IMPUTED_LEG_COL] = 1
+            home_leg[s.IS_IMPUTED_LEG_COL] = 1
 
             new_rows.append(home_leg)
 
@@ -424,7 +625,7 @@ class MiDDataEnhancer(DataFrameProcessor):
         Estimates leg_start_time and leg_end_time if they are missing, using data from similar persons.
         The function lowers the matching criteria if insufficient similar persons are found.
         """
-        self.df[s.IMPUTED_TIME_COL] = 0
+        self.df[s.IS_IMPUTED_TIME_COL] = 0
         persons = self.df.groupby("unique_person_id")
         logger.info(f"Estimating times, where missing, for {len(persons)} persons...")
 
@@ -459,8 +660,8 @@ class MiDDataEnhancer(DataFrameProcessor):
             if person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]].isna().any().any():
                 first_index = person.index[0]
                 first_missing_time_index = \
-                person[person[s.LEG_START_TIME_COL].isna() | person[s.LEG_END_TIME_COL].isna()].index[
-                    0]
+                    person[person[s.LEG_START_TIME_COL].isna() | person[s.LEG_END_TIME_COL].isna()].index[
+                        0]
                 if first_missing_time_index == first_index:
                     logger.info(
                         f"Person {person_id} has no time information, imputation from index {first_missing_time_index}...")
@@ -504,8 +705,8 @@ class MiDDataEnhancer(DataFrameProcessor):
 
                             if idx == first_index:  # Start of the day
                                 similar_persons_same_activity = similar_persons_with_last_legs.loc[
-                                    (similar_persons_with_last_legs[s.LEG_TO_ACTIVITY_COL] == row[
-                                        s.LEG_TO_ACTIVITY_COL]) &
+                                    (similar_persons_with_last_legs[s.ACT_TO_INTERNAL_COL] == row[
+                                        s.ACT_TO_INTERNAL_COL]) &
                                     (similar_persons_with_last_legs[
                                          s.LEG_NON_UNIQUE_ID_COL] == 1), s.LEG_START_TIME_COL]
                                 if similar_persons_same_activity.empty:
@@ -523,8 +724,8 @@ class MiDDataEnhancer(DataFrameProcessor):
                             else:  # Other leg start times
                                 prev_end_time = person.at[idx - 1, s.LEG_END_TIME_COL]
                                 similar_persons_same_activity = similar_persons_no_last_legs.loc[
-                                    similar_persons_no_last_legs[s.LEG_TO_ACTIVITY_COL] == person.loc[
-                                        idx - 1, s.LEG_TO_ACTIVITY_COL],
+                                    similar_persons_no_last_legs[s.ACT_TO_INTERNAL_COL] == person.loc[
+                                        idx - 1, s.ACT_TO_INTERNAL_COL],
                                     s.ACT_DUR_SECONDS_COL]
                                 if similar_persons_same_activity.empty:
                                     logger.info(f"Person {person_id} has no similar persons with the same activity. "
@@ -537,8 +738,8 @@ class MiDDataEnhancer(DataFrameProcessor):
                             # Leg duration
                             # Utilize imputed leg duration from MiD if available
                             similar_persons_same_activity = similar_persons_with_last_legs.loc[
-                                similar_persons_with_last_legs[s.LEG_TO_ACTIVITY_COL] == row[
-                                    s.LEG_TO_ACTIVITY_COL], s.LEG_DURATION_MINUTES_COL]
+                                similar_persons_with_last_legs[s.ACT_TO_INTERNAL_COL] == row[
+                                    s.ACT_TO_INTERNAL_COL], s.LEG_DURATION_MINUTES_COL]
                             if similar_persons_same_activity.empty:
                                 logger.info(f"Person {person_id} has no similar persons with the same activity. "
                                             f"Lowering standards.")
@@ -551,7 +752,7 @@ class MiDDataEnhancer(DataFrameProcessor):
                             person.at[idx, s.LEG_END_TIME_COL] = my_start_time + pd.Timedelta(
                                 minutes=my_leg_duration)
                             person.at[idx, s.LEG_DURATION_MINUTES_COL] = my_leg_duration
-                            person.at[idx, s.IMPUTED_TIME_COL] = 1
+                            person.at[idx, s.IS_IMPUTED_TIME_COL] = 1
 
                     # Check if times are valid (for now, all tours that end before 2am are valid)
                     if person[s.LEG_END_TIME_COL].iloc[-1] < pd.Timestamp(s.BASE_DATE) + pd.Timedelta(days=1, hours=2):
@@ -560,7 +761,7 @@ class MiDDataEnhancer(DataFrameProcessor):
                     loop += 1
 
                 logger.info(
-                    f"Person {person_id} updated times: \n{person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL, s.LEG_TO_ACTIVITY_COL]]}")
+                    f"Person {person_id} updated times: \n{person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL, s.ACT_TO_INTERNAL_COL]]}")
                 if person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]].isna().any().any():
                     logger.warning(f"Person {person_id} still has missing times. "
                                    f"Check the data and try again. Skipping...")
@@ -573,39 +774,6 @@ class MiDDataEnhancer(DataFrameProcessor):
             logger.info(f"Updating original df...")
             self.df.update(updated_df)
         logger.info("Time estimation completed.")
-
-    def vary_times_by_household(self, hh_id_col, time_cols, max_shift_minutes=15):
-        """
-        Varies times in the DataFrame by the same random amount (±max_shift_minutes) for each household.
-
-        :param hh_id_col: String, the column name for the unique hh identifier.
-        :param time_cols: List of strings, the names of the columns containing time data.
-        :param max_shift_minutes: Integer, the maximum number of minutes for the time shift.
-        :return: pandas DataFrame with varied times.
-        """
-
-        logger.info("Varying times by household...")
-
-        def apply_time_shift(group):
-            time_shift = timedelta(minutes=np.random.randint(-max_shift_minutes, max_shift_minutes + 1))
-
-            # Apply this time shift to all time columns
-            for col in time_cols:
-                group[col] = group[col].apply(lambda x: x + time_shift if pd.notnull(x) else x)
-            return group
-
-        self.df = self.df.groupby(hh_id_col).apply(apply_time_shift)
-        logger.info("Times varied by person.")
-
-    def downsample_population(self, sample_percentage):
-        """
-        Downsample the population to a given sample percentage size of the original population.
-        Recommended to sample households (e.g. at the point when only households are loaded),
-        not persons, to keep the household structure intact.
-        """
-        logger.info("Downsampling population...")
-        self.df = self.df.sample(frac=sample_percentage)
-        logger.info(f"Downsampled population to {sample_percentage * 100}% of the original population.")
 
     def find_similar_persons(self, person, min_similar, attributes: list = None):
         """
@@ -660,7 +828,7 @@ class MiDDataEnhancer(DataFrameProcessor):
         # Log cases where license status was wrongly reported based on age
         self.df.loc[
             (self.df[s.HAS_LICENSE_COL] == s.LICENSE_YES) & (
-                        self.df[s.PERSON_AGE_COL] < 17), 'imputed_license'] = s.LICENSE_NO
+                    self.df[s.PERSON_AGE_COL] < 17), 'imputed_license'] = s.LICENSE_NO
         logger.info(
             f"Changed {self.df['imputed_license'].eq(s.LICENSE_NO).sum()} license status to no license based on age.")
 
@@ -759,14 +927,14 @@ class MiDDataEnhancer(DataFrameProcessor):
         logger.info("Updating activity for protagonist legs...")
 
         # Make a copy of the activity column that will be updated
-        self.df[s.TO_ACTIVITY_WITH_CONNECTED_COL] = self.df[s.LEG_TO_ACTIVITY_COL]
+        self.df[s.TO_ACTIVITY_WITH_CONNECTED_COL] = self.df[s.ACT_TO_INTERNAL_COL]
 
         # if s.IS_PROTAGONIST_COL in self.df.columns:  # Just for debugging
         #     logger.debug("Protagonist column already exists.")
         prot_legs = self.df[self.df[s.IS_PROTAGONIST_COL] == 1]
 
         for row in prot_legs.itertuples():
-            protagonist_activity = getattr(row, s.LEG_TO_ACTIVITY_COL)
+            protagonist_activity = getattr(row, s.ACT_TO_INTERNAL_COL)
             protagonist_leg_id = getattr(row, s.UNIQUE_LEG_ID_COL)
             connected_legs_list = getattr(row, s.CONNECTED_LEGS_COL)
 
@@ -796,25 +964,25 @@ class MiDDataEnhancer(DataFrameProcessor):
         self.df.sort_values(by=[s.PERSON_ID_COL, s.LEG_NON_UNIQUE_ID_COL], inplace=True)
 
         # Shift the 'to_activity' down to create 'from_activity' for each group
-        self.df[s.LEG_FROM_ACTIVITY_COL] = self.df.groupby(s.PERSON_ID_COL)[s.LEG_TO_ACTIVITY_COL].shift(1)
+        self.df[s.ACT_FROM_INTERNAL_COL] = self.df.groupby(s.PERSON_ID_COL)[s.ACT_TO_INTERNAL_COL].shift(1)
 
         # For the first leg of each person, set 'from_activity' based on 'starts_at_home'
         self.df.loc[(self.df[s.LEG_NON_UNIQUE_ID_COL] == 1) & (
                 self.df[
-                    s.FIRST_LEG_STARTS_AT_HOME_COL] == s.FIRST_LEG_STARTS_AT_HOME), s.LEG_FROM_ACTIVITY_COL] = s.ACT_HOME
+                    s.FIRST_LEG_STARTS_AT_HOME_COL] == s.FIRST_LEG_STARTS_AT_HOME), s.ACT_FROM_INTERNAL_COL] = s.ACT_HOME
         self.df.loc[(self.df[s.LEG_NON_UNIQUE_ID_COL] == 1) & (
                 self.df[
-                    s.FIRST_LEG_STARTS_AT_HOME_COL] != s.FIRST_LEG_STARTS_AT_HOME), s.LEG_FROM_ACTIVITY_COL] = s.ACT_UNSPECIFIED
+                    s.FIRST_LEG_STARTS_AT_HOME_COL] != s.FIRST_LEG_STARTS_AT_HOME), s.ACT_FROM_INTERNAL_COL] = s.ACT_UNSPECIFIED
 
         # Handle cases with no legs (NA in leg_id)
-        self.df.loc[self.df[s.LEG_NON_UNIQUE_ID_COL].isna(), s.LEG_FROM_ACTIVITY_COL] = None
+        self.df.loc[self.df[s.LEG_NON_UNIQUE_ID_COL].isna(), s.ACT_FROM_INTERNAL_COL] = None
 
         logger.info("Added from_activity column.")
 
     def calculate_slack_factors(self):
         slack_factors = []
 
-        df = self.df[self.df[s.LEG_DISTANCE_COL] < 500]
+        df = self.df[self.df[s.LEG_DISTANCE_KM_COL] < 500]
 
         for person_id, person_trips in df.groupby(s.PERSON_ID_COL):
             logger.debug(f"Searching sf at person {person_id}...")
@@ -827,7 +995,7 @@ class MiDDataEnhancer(DataFrameProcessor):
                 second_leg = person_trips.iloc[i + 1]
 
                 # This should always be true, except for missing data
-                if first_leg[s.LEG_TO_ACTIVITY_COL] == second_leg[s.LEG_FROM_ACTIVITY_COL]:
+                if first_leg[s.ACT_TO_INTERNAL_COL] == second_leg[s.ACT_FROM_INTERNAL_COL]:
 
                     direct_trip = self.df[
                         (self.df[s.PERSON_ID_COL] == person_id) &
@@ -835,25 +1003,25 @@ class MiDDataEnhancer(DataFrameProcessor):
                         (self.df[s.LEG_NON_UNIQUE_ID_COL] != first_leg[s.LEG_NON_UNIQUE_ID_COL]) &
                         (self.df[s.LEG_NON_UNIQUE_ID_COL] != second_leg[s.LEG_NON_UNIQUE_ID_COL]) &
                         # Find direct trip in both directions
-                        ((self.df[s.LEG_FROM_ACTIVITY_COL] == first_leg[s.LEG_FROM_ACTIVITY_COL]) &
-                         (self.df[s.LEG_TO_ACTIVITY_COL] == second_leg[s.LEG_TO_ACTIVITY_COL]) |
-                         (self.df[s.LEG_FROM_ACTIVITY_COL] == second_leg[s.LEG_TO_ACTIVITY_COL]) &
-                         (self.df[s.LEG_TO_ACTIVITY_COL] == first_leg[s.LEG_FROM_ACTIVITY_COL]))
+                        ((self.df[s.ACT_FROM_INTERNAL_COL] == first_leg[s.ACT_FROM_INTERNAL_COL]) &
+                         (self.df[s.ACT_TO_INTERNAL_COL] == second_leg[s.ACT_TO_INTERNAL_COL]) |
+                         (self.df[s.ACT_FROM_INTERNAL_COL] == second_leg[s.ACT_TO_INTERNAL_COL]) &
+                         (self.df[s.ACT_TO_INTERNAL_COL] == first_leg[s.ACT_FROM_INTERNAL_COL]))
                         ]
 
                     if not direct_trip.empty:
-                        direct_distance = direct_trip.iloc[0][s.LEG_DISTANCE_COL]
-                        indirect_distance = first_leg[s.LEG_DISTANCE_COL] + second_leg[s.LEG_DISTANCE_COL]
+                        direct_distance = direct_trip.iloc[0][s.LEG_DISTANCE_KM_COL]
+                        indirect_distance = first_leg[s.LEG_DISTANCE_KM_COL] + second_leg[s.LEG_DISTANCE_KM_COL]
                         slack_factor = indirect_distance / direct_distance
                         slack_factors.append((person_id,
                                               first_leg[s.H_REGION_TYPE_COL],
                                               first_leg[s.PERSON_AGE_COL],
-                                              first_leg[s.LEG_FROM_ACTIVITY_COL],
-                                              first_leg[s.LEG_TO_ACTIVITY_COL],
-                                              second_leg[s.LEG_TO_ACTIVITY_COL],
-                                              first_leg[s.LEG_MAIN_MODE_COL],
-                                              second_leg[s.LEG_MAIN_MODE_COL],
-                                              direct_trip.iloc[0][s.LEG_MAIN_MODE_COL],
+                                              first_leg[s.ACT_FROM_INTERNAL_COL],
+                                              first_leg[s.ACT_TO_INTERNAL_COL],
+                                              second_leg[s.ACT_TO_INTERNAL_COL],
+                                              first_leg[s.MODE_INTERNAL_COL],
+                                              second_leg[s.MODE_INTERNAL_COL],
+                                              direct_trip.iloc[0][s.MODE_INTERNAL_COL],
                                               slack_factor))
                         logger.debug(f"Found a slack factor of {slack_factor} for person {person_id} ")
 
@@ -896,7 +1064,7 @@ class MiDDataEnhancer(DataFrameProcessor):
             f"Listed {total_cars} cars in {len(hhs)} households for {self.df[s.UNIQUE_P_ID_COL].nunique()} persons, "
             f"meaning {total_cars / self.df[s.UNIQUE_P_ID_COL].nunique()} cars per person on average.")
 
-    def impute_cars_in_household(self):  # Unfinished.
+    def impute_cars_in_household(self):  # TODO Unfinished.
         """
         Impute the number of cars in a household if unknown, based on the number of cars in similar households.
         """
@@ -920,10 +1088,10 @@ class MiDDataEnhancer(DataFrameProcessor):
         # Create shifted columns for comparison
         self.df['next_person_id'] = self.df[s.UNIQUE_P_ID_COL].shift(-1)
         self.df['next_act_dur'] = self.df[s.ACT_DUR_SECONDS_COL].shift(-1)
-        self.df['next_next_activity'] = self.df[s.LEG_TO_ACTIVITY_COL].shift(-2)
+        self.df['next_next_activity'] = self.df[s.ACT_TO_INTERNAL_COL].shift(-2)
         self.df['next_next_person_id'] = self.df[s.UNIQUE_P_ID_COL].shift(-2)
-        self.df['next_leg_distance'] = self.df[s.LEG_DISTANCE_COL].shift(-1)
-        self.df['next_next_leg_distance'] = self.df[s.LEG_DISTANCE_COL].shift(-2)
+        self.df['next_leg_distance'] = self.df[s.LEG_DISTANCE_KM_COL].shift(-1)
+        self.df['next_next_leg_distance'] = self.df[s.LEG_DISTANCE_KM_COL].shift(-2)
 
         # Make sure we are checking the same person, and based on main activity
         person_id_condition = (self.df['next_person_id'] == self.df[s.UNIQUE_P_ID_COL]) & \
@@ -934,14 +1102,14 @@ class MiDDataEnhancer(DataFrameProcessor):
         short_duration_condition = (self.df['next_act_dur'] < duration_threshold_seconds)
 
         # Candidate activity must be the same as the main activity
-        same_activity_condition = (self.df['next_next_activity'] == self.df[s.LEG_TO_ACTIVITY_COL])
+        same_activity_condition = (self.df['next_next_activity'] == self.df[s.ACT_TO_INTERNAL_COL])
 
         # Leg distance to the in-between activity and from it to the candidate activity must be the same
         same_leg_distance_condition = (self.df['next_leg_distance'] == self.df['next_next_leg_distance'])
 
         self.df[s.MIRRORS_MAIN_ACTIVITY_COL] = (
             (
-                        person_id_condition & short_duration_condition & same_activity_condition & same_leg_distance_condition).shift(
+                    person_id_condition & short_duration_condition & same_activity_condition & same_leg_distance_condition).shift(
                 2).fillna(False)).astype(int)
 
         # Drop temporary columns
@@ -971,7 +1139,7 @@ class MiDDataEnhancer(DataFrameProcessor):
     #         # Extract the indices for main activity, mirroring main and home activities
     #         main_activity_idx = np.where(person[s.IS_MAIN_ACTIVITY_COL])[0]  # where returns a tuple. Legs to main
     #         mirroring_main_idx = np.where(person[s.MIRRORS_MAIN_ACTIVITY_COL])[0]  # Legs to mirrored main
-    #         home_indices = np.where(person[s.LEG_TO_ACTIVITY_COL] == s.ACT_HOME)[0]  # legs to home
+    #         home_indices = np.where(person[s.ACT_TO_INTERNAL_COL] == s.ACT_HOME)[0]  # legs to home
     #
     #         if main_activity_idx.size == 0:
     #             logger.warning(f"Person {pid} has no main activity. Skipping this person.")
@@ -1084,7 +1252,7 @@ class MiDDataEnhancer(DataFrameProcessor):
             # Extract the indices for main activity, mirroring main and home activities
             main_activity_idx = np.where(person[s.IS_MAIN_ACTIVITY_COL])[0]  # where returns a tuple. Legs to main
             mirroring_main_idx = np.where(person[s.MIRRORS_MAIN_ACTIVITY_COL])[0]  # Legs to mirrored main
-            home_indices = np.where(person[s.LEG_TO_ACTIVITY_COL] == s.ACT_HOME)[0]  # legs to home
+            home_indices = np.where(person[s.ACT_TO_INTERNAL_COL] == s.ACT_HOME)[0]  # legs to home
 
             if main_activity_idx.size == 0:
                 rows = len(person)
@@ -1136,14 +1304,14 @@ class MiDDataEnhancer(DataFrameProcessor):
                     f"Person {pid} has a home activity marked as main activity. This should never be the case.")
             elif closest_home_idx - main_activity_idx[0] == 1:  # Main to home
                 logger.debug(f"Person {pid} has a home activity directly after main. ")
-                home_to_main_distance = person.at[closest_home_row, s.LEG_DISTANCE_COL]
+                home_to_main_distance = person.at[closest_home_row, s.LEG_DISTANCE_KM_COL]
                 home_to_main_time = person.at[closest_home_row, s.LEG_DURATION_MINUTES_COL]
                 time_is_estimated = 0
                 distance_is_estimated = 0
 
             elif closest_home_idx - main_activity_idx[0] == -1:  # Home to main
                 logger.debug(f"Person {pid} has a home activity directly before main. ")
-                home_to_main_distance = person.at[main_activity_row, s.LEG_DISTANCE_COL]
+                home_to_main_distance = person.at[main_activity_row, s.LEG_DISTANCE_KM_COL]
                 home_to_main_time = person.at[main_activity_row, s.LEG_DURATION_MINUTES_COL]
                 time_is_estimated = 0
                 distance_is_estimated = 0
@@ -1158,12 +1326,12 @@ class MiDDataEnhancer(DataFrameProcessor):
                 else:  # Main to home
                     legs = person.loc[main_activity_row + 1:closest_home_row]
 
-                distances = legs[s.LEG_DISTANCE_COL].tolist()
-                dist_estimation_tree = ald.build_estimation_tree(distances)
+                distances = legs[s.LEG_DISTANCE_KM_COL].tolist()
+                dist_estimation_tree = utils.helpers.build_estimation_tree(distances)
                 home_to_main_distance = dist_estimation_tree[-1][0][2]  # highest lvl, leg 0, estimated value
 
                 times = legs[s.LEG_DURATION_MINUTES_COL].tolist()  # TODO: convert to secs asap
-                time_estimation_tree = ald.build_estimation_tree(times)
+                time_estimation_tree = utils.helpers.build_estimation_tree(times)
                 home_to_main_time = time_estimation_tree[-1][0][2]  # highest lvl, leg 0, estimated value
 
                 time_is_estimated = 1
@@ -1174,10 +1342,10 @@ class MiDDataEnhancer(DataFrameProcessor):
             home_to_main_time_estimated[pid] = time_is_estimated
             home_to_main_distance_estimated[pid] = distance_is_estimated
 
-        self.df[s.HOME_TO_MAIN_DIST_COL] = self.df[s.UNIQUE_P_ID_COL].map(home_to_main_distances)
-        self.df[s.HOME_TO_MAIN_TIME_COL] = self.df[s.UNIQUE_P_ID_COL].map(home_to_main_times)
-        self.df[s.HOME_TO_MAIN_TIME_ESTIMATED_COL] = self.df[s.UNIQUE_P_ID_COL].map(home_to_main_time_estimated)
-        self.df[s.HOME_TO_MAIN_DIST_ESTIMATED_COL] = self.df[s.UNIQUE_P_ID_COL].map(home_to_main_distance_estimated)
+        self.df[s.HOME_TO_MAIN_KM_COL] = self.df[s.UNIQUE_P_ID_COL].map(home_to_main_distances)
+        self.df[s.HOME_TO_MAIN_SECONDS_COL] = self.df[s.UNIQUE_P_ID_COL].map(home_to_main_times)
+        self.df[s.HOME_TO_MAIN_TIME_IS_ESTIMATED_COL] = self.df[s.UNIQUE_P_ID_COL].map(home_to_main_time_estimated)
+        self.df[s.HOME_TO_MAIN_DIST_IS_ESTIMATED_COL] = self.df[s.UNIQUE_P_ID_COL].map(home_to_main_distance_estimated)
 
         logger.info("Determining home to main activity distances/times completed.")
 
@@ -1201,7 +1369,7 @@ class MiDDataEnhancer(DataFrameProcessor):
                     # If the person has no legs, there is no main activity
                     logger.debug(f"Person {pid} has no legs. Skipping...")
                     continue
-                if person[s.LEG_TO_ACTIVITY_COL].iloc[0] == s.ACT_HOME:
+                if person[s.ACT_TO_INTERNAL_COL].iloc[0] == s.ACT_HOME:
                     # If the person has only one leg, and it's home, there is no main activity
                     logger.debug(f"Person {pid} has only one leg and it's home. Skipping...")
                     continue
@@ -1214,17 +1382,17 @@ class MiDDataEnhancer(DataFrameProcessor):
                 continue
 
             # Find the closest previous home activity or the start of the day. FROM_activity so the trip to home is excluded.
-            home_indices = person[person[s.LEG_FROM_ACTIVITY_COL] == s.ACT_HOME].index
+            home_indices = person[person[s.ACT_FROM_INTERNAL_COL] == s.ACT_HOME].index
             start_idx = home_indices[home_indices < main_activity_idx].max() if not home_indices.empty else \
-            person.index[0]
+                person.index[0]
             if pd.isna(start_idx):
                 start_idx = person.index[0]
 
             # Calculate the total use time for each mode. Slicing is inclusive of both start and end index.
-            mode_times = person.loc[start_idx:main_activity_idx].groupby(s.LEG_MAIN_MODE_COL)[
+            mode_times = person.loc[start_idx:main_activity_idx].groupby(s.MODE_INTERNAL_COL)[
                 s.LEG_DURATION_MINUTES_COL].sum()
-            mode_distances = person.loc[start_idx:main_activity_idx].groupby(s.LEG_MAIN_MODE_COL)[
-                s.LEG_DISTANCE_COL].sum()
+            mode_distances = person.loc[start_idx:main_activity_idx].groupby(s.MODE_INTERNAL_COL)[
+                s.LEG_DISTANCE_KM_COL].sum()
 
             main_mode_time_base = mode_times.idxmax()
             main_mode_dist_base = mode_distances.idxmax()
@@ -1237,16 +1405,6 @@ class MiDDataEnhancer(DataFrameProcessor):
         self.df[s.MAIN_MODE_TO_MAIN_ACT_TIMEBASED_COL] = self.df[s.UNIQUE_P_ID_COL].map(main_modes_time)
         self.df[s.MAIN_MODE_TO_MAIN_ACT_DISTBASED_COL] = self.df[s.UNIQUE_P_ID_COL].map(main_modes_dist)
         logger.info("Determined main mode to main activity.")
-
-    def filter_home_to_home_legs(self):
-        """
-        Filters out 'home to home' legs from the DataFrame.
-        """
-        logger.info(f"Filtering out 'home to home' legs from {len(self.df)} rows...")
-        home_to_home_condition = (self.df[s.LEG_FROM_ACTIVITY_COL] == s.ACT_HOME) & \
-                                 (self.df[s.LEG_TO_ACTIVITY_COL] == s.ACT_HOME)
-        self.df = self.df[~home_to_home_condition].reset_index(drop=True)
-        logger.info(f"Filtered out 'home to home' legs. {len(self.df)} rows remaining.")
 
     def update_number_of_legs(self, col_to_write_to=s.NUMBER_OF_LEGS_COL):
         """
@@ -1315,7 +1473,7 @@ class MiDDataEnhancer(DataFrameProcessor):
 
         # Save checks_df to a CSV file
         checks_df = pd.DataFrame(checks_data)
-        file_loc = os.path.join(matsim_pipeline_setup.OUTPUT_DIR, 'leg_connections_logs.csv')
+        file_loc = os.path.join(pipeline_setup.OUTPUT_DIR, 'leg_connections_logs.csv')
         checks_df.to_csv(file_loc, index=False)
 
         # Add connections as a new column to self.df

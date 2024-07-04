@@ -2,7 +2,7 @@
 
 from utils.logger import logging
 from pyproj import Transformer
-from utils import settings_values as s
+from utils import settings as s
 
 logger = logging.getLogger(__name__)
 import requests

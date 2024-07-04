@@ -2,12 +2,18 @@
 Load settings from settings.yaml file and define constants for use in the pipelines.
 """
 
-import os
+import yaml
+import utils.pipeline_setup as mps
+from utils.logger import logging
+logger = logging.getLogger(__name__)
 
-import utils.matsim_pipeline_setup
+def load_yaml_config(file_path):
+    with open(file_path, 'r') as file:
+        config = yaml.safe_load(file)
+        logger.info(f"Loaded config from {file_path}")
+    return config
 
-os.chdir(utils.matsim_pipeline_setup.PROJECT_ROOT)
-settings = utils.matsim_pipeline_setup.load_yaml_config('settings.yaml')
+settings = load_yaml_config(mps.PROJECT_ROOT + '/settings.yaml')
 
 # Files
 INPUT_FILES = settings['input_files']
@@ -57,12 +63,12 @@ NUMBER_OF_LEGS_COL = P_COLUMNS['number_of_legs']
 # Leg-related columns
 LEG_ID_COL = ID_COLUMNS['leg_id_column']
 LEG_NON_UNIQUE_ID_COL = ID_COLUMNS['leg_non_unique_id_column']
-LEG_TO_ACTIVITY_COL = L_COLUMNS['leg_target_activity']
-LEG_MAIN_MODE_COL = L_COLUMNS['leg_main_mode']
 LEG_START_TIME_COL = L_COLUMNS['leg_start_time']
 LEG_END_TIME_COL = L_COLUMNS['leg_end_time']
 LEG_DURATION_MINUTES_COL = L_COLUMNS['leg_duration_minutes']
-LEG_DISTANCE_COL = L_COLUMNS['leg_distance']
+LEG_DURATION_SECONDS_COL = 'leg_duration_seconds'
+LEG_DISTANCE_KM_COL = L_COLUMNS['leg_distance_km']
+LEG_DISTANCE_METERS_COL = 'leg_distance_meters'
 FIRST_LEG_STARTS_AT_HOME_COL = L_COLUMNS['first_leg_starts_at_home']
 
 # Geography-related columns
@@ -71,23 +77,39 @@ TT_MATRIX_CELL_ID_COL = ID_COLUMNS['tt_matrix_cell_id_column']
 # Value maps
 VALUE_MAPS = settings['value_maps']
 
-ACT_WORK = VALUE_MAPS['activities']['work']
-ACT_BUSINESS = VALUE_MAPS['activities']['business']
-ACT_EDUCATION = VALUE_MAPS['activities']['education']
-ACT_SHOPPING = VALUE_MAPS['activities']['shopping']
-ACT_ERRANDS = VALUE_MAPS['activities']['errands']
-ACT_PICK_UP_DROP_OFF = VALUE_MAPS['activities']['pick_up_drop_off']
-ACT_LEISURE = VALUE_MAPS['activities']['leisure']
-ACT_HOME = VALUE_MAPS['activities']['home']
-ACT_RETURN_JOURNEY = VALUE_MAPS['activities']['return_journey']
-ACT_OTHER = VALUE_MAPS['activities']['other']
-ACT_EARLY_EDUCATION = VALUE_MAPS['activities']['early_education']
-ACT_DAYCARE = VALUE_MAPS['activities']['daycare']
-ACT_ACCOMPANY_ADULT = VALUE_MAPS['activities']['accompany_adult']
-ACT_SPORTS = VALUE_MAPS['activities']['sports']
-ACT_MEETUP = VALUE_MAPS['activities']['meetup']
-ACT_LESSONS = VALUE_MAPS['activities']['lessons']
-ACT_UNSPECIFIED = VALUE_MAPS['activities']['unspecified']
+MODE_CAR = VALUE_MAPS['modes']['car']['internal']
+MODE_PT = VALUE_MAPS['modes']['pt']['internal']
+MODE_RIDE = VALUE_MAPS['modes']['ride']['internal']
+MODE_BIKE = VALUE_MAPS['modes']['bike']['internal']
+MODE_WALK = VALUE_MAPS['modes']['walk']['internal']
+MODE_UNDEFINED = VALUE_MAPS['modes']['undefined']['internal']
+
+ACT_WORK = VALUE_MAPS['activities']['work']['internal']
+ACT_BUSINESS = VALUE_MAPS['activities']['business']['internal']
+ACT_EDUCATION = VALUE_MAPS['activities']['education']['internal']
+ACT_SHOPPING = VALUE_MAPS['activities']['shopping']['internal']
+ACT_ERRANDS = VALUE_MAPS['activities']['errands']['internal']
+ACT_PICK_UP_DROP_OFF = VALUE_MAPS['activities']['pick_up_drop_off']['internal']
+ACT_LEISURE = VALUE_MAPS['activities']['leisure']['internal']
+ACT_HOME = VALUE_MAPS['activities']['home']['internal']
+ACT_RETURN_JOURNEY = VALUE_MAPS['activities']['return_journey']['internal']
+ACT_OTHER = VALUE_MAPS['activities']['other']['internal']
+ACT_EARLY_EDUCATION = VALUE_MAPS['activities']['early_education']['internal']
+ACT_DAYCARE = VALUE_MAPS['activities']['daycare']['internal']
+ACT_ACCOMPANY_ADULT = VALUE_MAPS['activities']['accompany_adult']['internal']
+ACT_SPORTS = VALUE_MAPS['activities']['sports']['internal']
+ACT_MEETUP = VALUE_MAPS['activities']['meetup']['internal']
+ACT_LESSONS = VALUE_MAPS['activities']['lessons']['internal']
+ACT_UNSPECIFIED = VALUE_MAPS['activities']['unspecified']['internal']
+
+MODE_INTERNAL_COL = "mode_internal"
+MODE_MID_COL = L_COLUMNS['leg_main_mode']
+MODE_MATSIM_COL = "mode_matsim"
+
+ACT_TO_INTERNAL_COL = "activity_to_internal"
+ACT_FROM_INTERNAL_COL = "activity_from_internal"
+ACT_MID_COL = L_COLUMNS['leg_target_activity']
+ACT_MATSIM_COL = "activity_matsim"
 
 CAR_NEVER = VALUE_MAPS['car_availability']['never']
 
@@ -99,13 +121,6 @@ LICENSE_NO = VALUE_MAPS['license']['no']
 LICENSE_UNKNOWN = VALUE_MAPS['license']['unknown']
 ADULT_OVER_16_PROXY = VALUE_MAPS['license']['adult_over_16_proxy']
 PERSON_UNDER_16 = VALUE_MAPS['license']['person_under_16']
-
-MODE_CAR = VALUE_MAPS['modes']['car']
-MODE_PT = VALUE_MAPS['modes']['pt']
-MODE_RIDE = VALUE_MAPS['modes']['ride']
-MODE_BIKE = VALUE_MAPS['modes']['bike']
-MODE_WALK = VALUE_MAPS['modes']['walk']
-MODE_UNDEFINED = VALUE_MAPS['modes']['undefined']
 
 FIRST_LEG_STARTS_AT_HOME = VALUE_MAPS['misc']['first_leg_starts_at_home']
 
@@ -119,15 +134,8 @@ SAMPLE_SIZE = settings['sample_size']
 N_CLOSEST_CELLS = settings['n_closest_cells']
 DEFAULT_SLACK_FACTOR = settings['default_slack_factor']
 
-# Columns that are created by the enhancement pipeline
-ENHANCEMENT_COLUMNS = settings['enhancement_columns']
-RANDOM_LOCATION_COL = ENHANCEMENT_COLUMNS['random_location']
-ACT_DUR_SECONDS_COL = ENHANCEMENT_COLUMNS['activity_duration_seconds']
-NUMBER_OF_LEGS_INCL_IMPUTED_COL = ENHANCEMENT_COLUMNS['number_of_legs_incl_imputed']
-IMPUTED_TIME_COL = ENHANCEMENT_COLUMNS['imputed_time']
-IMPUTED_LEG_COL = ENHANCEMENT_COLUMNS['imputed_leg']
-LIST_OF_CARS_COL = ENHANCEMENT_COLUMNS['list_of_cars']
-LEG_FROM_ACTIVITY_COL = ENHANCEMENT_COLUMNS['leg_from_activity']
+SIGMOID_BETA = settings['sigmoid_beta']
+SIGMOID_DELTA_T = settings['sigmoid_delta_t']
 
 # Column names that are set at runtime
 PROCESSING_COLUMNS = settings['processing_columns']
@@ -142,24 +150,6 @@ FACILITY_X_COL = "facility_x"
 FACILITY_Y_COL = "facility_y"
 FACILITY_ACTIVITIES_COL = "facility_activities"
 
-TO_ACTIVITY_WITH_CONNECTED_COL = "to_activity_with_connected"  # Leg_to_activity with activity overwritten by connected_legs
-
-IS_PROTAGONIST_COL = "is_protagonist"
-IS_MAIN_ACTIVITY_COL = "is_main_activity"
-
-CONNECTED_LEGS_COL = "connected_legs"
-
-HOME_TO_MAIN_DIST_COL = "home_to_main_distance"  # Same distance type as leg distances
-HOME_TO_MAIN_TIME_COL = "home_to_main_time"  # Same time type as leg times (here:minutes)
-HOME_TO_MAIN_TIME_ESTIMATED_COL = "home_to_main_time_is_estimated"
-HOME_TO_MAIN_DIST_ESTIMATED_COL = "home_to_main_distance_is_estimated"
-
-MAIN_MODE_TO_MAIN_ACT_TIMEBASED_COL = "main_mode_to_main_act_timebased"
-MAIN_MODE_TO_MAIN_ACT_DISTBASED_COL = "main_mode_to_main_act_distbased"
-
-SIGMOID_BETA = settings['sigmoid_beta']
-SIGMOID_DELTA_T = settings['sigmoid_delta_t']
-
 MIRRORS_MAIN_ACTIVITY_COL = "mirrors_main_activity"
 
 HH_HAS_CONNECTIONS_COL = "hh_has_connections"
@@ -173,6 +163,29 @@ COORD_FROM_COL = "coord_from"
 COORD_TO_COL = "coord_to"
 
 HOME_CELL_COL = "home_cell"
+HOME_LOC_COL = "home_location"
 
-MODE_TRANSLATED_COL = "mode_translated_string"
+# MODE_TRANSLATED_COL = "mode_translated_string"
 
+# Columns added by the MiD enhancer
+RANDOM_LOCATION_COL = 'random_location'
+ACT_DUR_SECONDS_COL = 'activity_duration_seconds'
+NUMBER_OF_LEGS_INCL_IMPUTED_COL = 'number_of_legs_incl_imputed'
+IS_IMPUTED_TIME_COL = 'imputed_time'
+IS_IMPUTED_LEG_COL = 'imputed_leg'
+LIST_OF_CARS_COL = 'list_of_cars'
+
+TO_ACTIVITY_WITH_CONNECTED_COL = "to_activity_with_connected"  # Leg_to_activity with activity overwritten by connected_legs
+
+IS_PROTAGONIST_COL = "is_protagonist"
+IS_MAIN_ACTIVITY_COL = "is_main_activity"
+
+CONNECTED_LEGS_COL = "connected_legs"
+
+HOME_TO_MAIN_KM_COL = "home_to_main_km"  # Same distance type as leg distances
+HOME_TO_MAIN_SECONDS_COL = "home_to_main_seconds"  # Same time type as leg times (here:minutes)
+HOME_TO_MAIN_TIME_IS_ESTIMATED_COL = "home_to_main_time_is_estimated"
+HOME_TO_MAIN_DIST_IS_ESTIMATED_COL = "home_to_main_distance_is_estimated"
+
+MAIN_MODE_TO_MAIN_ACT_TIMEBASED_COL = "main_mode_to_main_act_timebased"
+MAIN_MODE_TO_MAIN_ACT_DISTBASED_COL = "main_mode_to_main_act_distbased"

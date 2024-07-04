@@ -71,7 +71,7 @@ class ActivityLocator:
         legs_to_place = person.loc[:main_activity_index]
         # legs_to_place = person.iloc[0:main_activity_index + 1]
         target_activity = legs_to_place.iloc[-1][s.TO_ACTIVITY_WITH_CONNECTED_COL]
-        target_time = legs_to_place.iloc[0][s.HOME_TO_MAIN_TIME_COL] * 60  # in seconds
+        target_time = legs_to_place.iloc[0][s.HOME_TO_MAIN_SECONDS_COL] * 60  # in seconds
 
         # Debugging
         # if person[s.UNIQUE_P_ID_COL].iloc[0] == "88628810_5859_88628812.0":
@@ -165,7 +165,7 @@ class ActivityLocator:
         """
         Get the total counts for each activity type and store them in a dictionary.
         """
-        activity_counts = self.persons_df[s.LEG_TO_ACTIVITY_COL].value_counts()
+        activity_counts = self.persons_df[s.ACT_TO_INTERNAL_COL].value_counts()
 
         activity_counts_dict = activity_counts.to_dict()
 
@@ -446,7 +446,7 @@ class ActivityLocator:
             logger.error("Could not get hour. Using 8.")  # Never had this happen, but to be sure (e.g. if conversion failed)
             hour = 8
 
-        if legs_to_locate[s.LEG_MAIN_MODE_COL].nunique() == 1:
+        if legs_to_locate[s.MODE_MID_COL].nunique() == 1:
 
             direct_time = self.tt.get_travel_time(legs_to_locate.iloc[0][s.CELL_FROM_COL],
                                                   legs_to_locate.iloc[-1][s.CELL_TO_COL],

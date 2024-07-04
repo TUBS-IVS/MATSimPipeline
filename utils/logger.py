@@ -1,11 +1,14 @@
 import logging.config
 import os
+from utils.pipeline_setup import OUTPUT_DIR
 
-output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'output')
-if not os.path.exists(output_dir):
-    os.makedirs(output_dir)
+# output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'output')
+# if not os.path.exists(output_dir):
+#     os.makedirs(output_dir)
 
-LOG_FILE_PATH = os.path.join(output_dir, 'pipeline.log')
+LOG_FILE_PATH = os.path.join(OUTPUT_DIR, 'pipeline.log')
+if not os.path.exists(OUTPUT_DIR):
+    os.makedirs(OUTPUT_DIR)
 
 LOGGING_CONFIG = {
     'version': 1,

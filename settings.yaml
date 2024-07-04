@@ -122,7 +122,7 @@ leg_columns:
   leg_start_time: "W_SZ"
   leg_end_time: "W_AZ"
   leg_duration_minutes: "wegmin_imp2"  # Legs without rbW
-  leg_distance: "wegkm_imp"
+  leg_distance_km: "wegkm_imp"
   first_leg_starts_at_home: "W_SO1"
 
 enhancement_columns: # Columns created by the enhancement module
@@ -139,26 +139,123 @@ processing_columns: # Used by several pipelines. Cols aren't in the outputs, but
   unique_household_id: "unique_household_id"
   unique_person_id: "unique_person_id"
 
+main_activities: # These activities are considered main activities. They must be present in the value map.
+  - work
+  - education
 
-value_maps: # Values may usually be left empty if they don't exist in the data
+value_maps: # Maps values from the input data to internal values.
   activities:
-    work: 1
-    business: 2
-    education: 3
-    shopping: 4
-    errands: 5
-    pick_up_drop_off: 6
-    leisure: 7
-    home: 8
-    return_journey: 9
-    other: 10
-    early_education: 11 # Preschool, Grundschule
-    daycare: 12 #Kiga, Kita
-    accompany_adult: 13
-    sports: 14
-    meetup: 15 # Visit friends
-    lessons: 16 # Music, dance, etc., not school
-    unspecified: 99
+    work:
+      mid: 1
+      input_locations:
+      internal: work
+      MATSim: work
+    business:
+      mid: 2
+      input_locations:
+      internal: business
+      MATSim: work
+    education:
+      mid: 3
+      input_locations:
+      internal: education
+      MATSim: education
+    shopping:
+      mid: 4
+      input_locations:
+      internal: shopping
+      MATSim: shopping
+    errands:
+      mid: 5
+      input_locations:
+      internal: errands
+      MATSim: leisure
+    pick_up_drop_off:
+      mid: 6
+      input_locations:
+      internal: pick_up_drop_off
+      MATSim: other
+    leisure:
+      mid: 7
+      input_locations:
+      internal: leisure
+      MATSim: leisure
+    home:
+      mid: 8
+      input_locations:
+      internal: home
+      MATSim: home
+    return_journey:
+      mid: 9
+      input_locations:
+      internal: return_journey
+      MATSim: other
+    other:
+      mid: 10
+      input_locations:
+      internal: other
+      MATSim: other
+    early_education:
+      mid: 11
+      input_locations:
+      internal: early_education
+      MATSim: education
+    daycare:
+      mid: 12
+      input_locations:
+      internal: daycare
+      MATSim: education
+    accompany_adult:
+      mid: 13
+      input_locations:
+      internal: accompany_adult
+      MATSim: other
+    sports:
+      mid: 14
+      input_locations:
+      internal: sports
+      MATSim: leisure
+    meetup:
+      mid: 15
+      input_locations:
+      internal: meetup
+      MATSim: leisure
+    lessons:
+      mid: 16
+      input_locations:
+      internal: lessons
+      MATSim: leisure
+    unspecified:
+      mid: 99
+      input_locations:
+      internal: unspecified
+      MATSim: other
+  modes:
+    car:
+      mid: 4
+      internal: car
+      MATSim: car
+    bike:
+      mid: 2
+      internal: bike
+      MATSim: bike
+    walk:
+      mid: 1
+      internal: walk
+      MATSim: walk
+    pt:
+      mid: 5
+      internal: pt
+      MATSim: pt
+    ride:
+      mid: 3
+      internal: ride
+      MATSim: ride
+    undefined:
+      mid: undefined
+      internal: undefined
+      MATSim: undefined
+
   car_availability:
     never: 3
   car_in_hh:
@@ -170,14 +267,6 @@ value_maps: # Values may usually be left empty if they don't exist in the data
     unknown: 9
     adult_over_16_proxy: 206
     person_under_16: 403
-  modes:
-    car: 4
-    bike: 2
-    walk: 1
-    pt: 5
-    ride: 3
-    other:
-    undefined:
   misc:
     first_leg_starts_at_home: 1
 

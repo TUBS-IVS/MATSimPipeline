@@ -5,7 +5,7 @@ import os
 import random
 import re
 import shutil
-import yaml
+import glob
 from typing import List, Dict, Union
 
 import geopandas as gpd
@@ -13,7 +13,6 @@ import numpy as np
 import pandas as pd
 from shapely import Point
 
-from synthesis.location_assignment.activity_locator_distance_based import logger, estimate_length_with_slack
 from utils.stats_tracker import stats_tracker
 from utils.pipeline_setup import OUTPUT_DIR
 from utils import settings as s
@@ -1251,7 +1250,8 @@ def assign_points(df, shapefile_path, df_cell_name_column, gdf_cell_name_column,
     return df
 
 
-def translate_column(df: pd.DataFrame, source_col: str, new_col: str, value_type: str, from_key: str, to_key: str) -> pd.DataFrame:
+def translate_column(df: pd.DataFrame, source_col: str, new_col: str, value_type: str, from_key: str,
+                     to_key: str) -> pd.DataFrame:
     """
     Generalized method for translating columns.
     :param df: pandas DataFrame
@@ -1314,6 +1314,7 @@ def generate_unique_leg_id(df):
         logger.info(f"Overwrote existing column {col_name}.")
     return df
 
+
 def create_output_directory():
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
@@ -1344,3 +1345,51 @@ def build_estimation_tree(distances: List[float]) -> List[List[List[float]]]:  #
         tree.append(combined_pairs)
 
     return tree
+
+
+def estimate_length_with_slack(length1, length2, slack_factor=2, min_slack_lower=0.2, min_slack_upper=0.2) -> List[
+    float]:
+    """min_slacks must be between 0 and 0.49"""
+
+    length_sum = length1 + length2  # is also real maximum length
+    length_diff = abs(length1 - length2)  # is also real minimum length
+    shorter_leg = min(length1, length2)
+
+    result = length_sum / slack_factor
+
+    wanted_minimum = length_diff + shorter_leg * min_slack_lower
+    wanted_maximum = length_sum - shorter_leg * min_slack_upper
+
+    if result <= wanted_minimum:
+        result = wanted_minimum
+    elif result > wanted_maximum:
+        result = wanted_maximum
+
+    # assert result is a number
+    assert not np.isnan(
+        result), f"Result is NaN. Lengths: {length1}, {length2}, Slack factor: {slack_factor}, Min slack lower: {min_slack_lower}, Min slack upper: {min_slack_upper}"
+
+    return [length_diff, wanted_minimum, result, wanted_maximum, length_sum]
+
+
+def get_files(folder_path: str, get_all: bool = False) -> Union[str, List[str]]:
+    # Get all files in the folder
+    files = glob.glob(os.path.join(folder_path, '*'))
+
+    if not files:
+        raise FileNotFoundError(f'No files found in the folder: {folder_path}')
+
+    if get_all:
+        return files
+    elif len(files) == 1:
+        return files[0]
+    else:
+        # Exclude files starting with 'X' or 'x'
+        filtered_files = [f for f in files if not os.path.basename(f).startswith(('X', 'x'))]
+
+        if not filtered_files:
+            raise FileNotFoundError(f'No suitable files found in the folder: {folder_path}')
+
+        # Get the newest file among the remaining files
+        newest_file = max(filtered_files, key=os.path.getctime)
+        return newest_file

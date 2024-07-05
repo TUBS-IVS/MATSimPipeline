@@ -562,29 +562,7 @@ def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List
     return dict(segmented_dict)
 
 
-def estimate_length_with_slack(length1, length2, slack_factor=2, min_slack_lower=0.2, min_slack_upper=0.2) -> List[
-    float]:
-    """min_slacks must be between 0 and 0.49"""
 
-    length_sum = length1 + length2  # is also real maximum length
-    length_diff = abs(length1 - length2)  # is also real minimum length
-    shorter_leg = min(length1, length2)
-
-    result = length_sum / slack_factor
-
-    wanted_minimum = length_diff + shorter_leg * min_slack_lower
-    wanted_maximum = length_sum - shorter_leg * min_slack_upper
-
-    if result <= wanted_minimum:
-        result = wanted_minimum
-    elif result > wanted_maximum:
-        result = wanted_maximum
-
-    # assert result is a number
-    assert not np.isnan(
-        result), f"Result is NaN. Lengths: {length1}, {length2}, Slack factor: {slack_factor}, Min slack lower: {min_slack_lower}, Min slack upper: {min_slack_upper}"
-
-    return [length_diff, wanted_minimum, result, wanted_maximum, length_sum]
 
 
 def adjust_estimation_tree(tree: List[List[List[float]]], real_distance: float, strong_adjust: bool = True) -> List[

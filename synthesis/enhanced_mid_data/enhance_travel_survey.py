@@ -6,14 +6,12 @@ import winsound
 from utils.population_frame_processor import MiDDataEnhancer
 from utils import pipeline_setup, settings as s, helpers as h
 from utils.logger import logging
+from utils.stats_tracker import stats_tracker
 
 logger = logging.getLogger(__name__)
 
 # Set working dir
 os.chdir(pipeline_setup.PROJECT_ROOT)
-write_to_file = True if s.POPULATION_ANALYSIS_OUTPUT_FILE else False
-
-add_all_columns = True
 
 
 def enhance_travel_survey():
@@ -32,73 +30,46 @@ def enhance_travel_survey():
     # h.create_unique_leg_ids()
 
     population = MiDDataEnhancer()
-
-    # Only load necessary household columns to not blow up the final file size
-    # Otherwise, use_cols=None to load all columns
-    if add_all_columns:
-        household_cols_to_load = None
-    else:
-        household_cols_to_load = list(s.HH_COLUMNS.values())
-        if s.HOUSEHOLD_MID_ID_COL not in household_cols_to_load:
-            household_cols_to_load.append(s.HOUSEHOLD_MID_ID_COL)
-
-    population.load_df_from_csv(s.MiD_HH_FILE, test_col=s.HOUSEHOLD_MID_ID_COL, use_cols=household_cols_to_load)
+    population.load_df_from_csv(h.get_files(s.MiD_HH_FOLDER), test_col=s.HOUSEHOLD_MID_ID_COL)
 
     logger.info(f"Population df after adding HH attributes: \n{population.df.head()}")
     population.check_for_merge_suffixes()
 
-    # Add/edit household-specific rule-based attributes
-    # apply_me = [rules.unique_household_id]
-    # population.apply_row_wise_rules(apply_me)
-    # logger.info(f"Population df after applying HH rules: \n{population.df.head()}")
     population.df = h.generate_unique_household_id(population.df)
 
     # Add persons to households (increases the number of rows)
-    population.add_csv_data_on_id(s.MiD_PERSONS_FILE, [s.PERSON_ID_COL], id_column=s.HOUSEHOLD_MID_ID_COL,
+    population.add_csv_data_on_id(h.get_files(s.MiD_PERSONS_FOLDER), [s.PERSON_ID_COL], id_column=s.HOUSEHOLD_MID_ID_COL,
                                   drop_duplicates_from_source=False)
     logger.info(f"Population df after adding persons: \n{population.df.head()}")
     population.check_for_merge_suffixes()
 
-    # Add person attributes
-    if add_all_columns:
-        person_cols_to_load = None
-    else:
-        person_cols_to_load = list(s.P_COLUMNS.values())
-    if s.P_COLUMNS:
-        population.add_csv_data_on_id(s.MiD_PERSONS_FILE, columns_to_add=person_cols_to_load, id_column=s.PERSON_ID_COL,
-                                      drop_duplicates_from_source=True, delete_later=True)
+    # Add person attributes from MiD
+    population.add_csv_data_on_id(h.get_files(s.MiD_PERSONS_FOLDER), id_column=s.PERSON_ID_COL,
+                                  drop_duplicates_from_source=True, delete_later=True)
     logger.info(f"Population df after adding P attributes: \n{population.df.head()}")
     population.check_for_merge_suffixes()
 
-    # Add/edit person-specific rule-based attributes
-    # apply_me = [rules.unique_person_id]  # rules.has_license_imputed
-    # population.apply_row_wise_rules(apply_me)
-    # logger.info(f"Population df after applying P row rules: \n{population.df.head()}")
     population.df = h.generate_unique_person_id(population.df)
     population.impute_license_status()
 
     # Add MiD-trips to people (increases the number of rows)
-    population.add_csv_data_on_id(s.MiD_TRIPS_FILE, [s.LEG_ID_COL], id_column=s.PERSON_ID_COL,
+    population.add_csv_data_on_id(h.get_files(s.MiD_TRIPS_FOLDER), [s.LEG_ID_COL], id_column=s.PERSON_ID_COL,
                                   drop_duplicates_from_source=False)
     logger.info(f"Population df after adding trips: \n{population.df.head()}")
     population.check_for_merge_suffixes()
 
     # Add trip attributes from MiD
-    if add_all_columns:
-        list_L_COLUMNS = None
-    else:
-        list_L_COLUMNS = list(s.L_COLUMNS.values())
-        list_L_COLUMNS.append(s.LEG_NON_UNIQUE_ID_COL)
-    population.add_csv_data_on_id(s.MiD_TRIPS_FILE, list_L_COLUMNS, id_column=s.LEG_ID_COL,
-                                      drop_duplicates_from_source=True)
+    population.add_csv_data_on_id(h.get_files(s.MiD_TRIPS_FOLDER), id_column=s.LEG_ID_COL,
+                                  drop_duplicates_from_source=True)
     logger.info(f"Population df after adding L attributes: \n{population.df.head()}")
     population.check_for_merge_suffixes()
 
     # Remove legs that are "regelmäßiger beruflicher Weg" (duration is marked as 70701)
-    population.filter_out_rows(s.LEG_DURATION_MINUTES_COL, [70701])
+    population.filter_out_rows(s.LEG_IS_RBW_COL, 1)
 
     # Translate MiD activities and modes to internal ones (only internal ones are to be used in processing)
-    population.df = h.translate_column(population.df, s.ACT_MID_COL, s.ACT_TO_INTERNAL_COL, "activities", "mid", "internal")
+    population.df = h.translate_column(population.df, s.ACT_MID_COL, s.ACT_TO_INTERNAL_COL, "activities", "mid",
+                                       "internal")
     population.df = h.translate_column(population.df, s.MODE_MID_COL, s.MODE_INTERNAL_COL, "modes", "mid", "internal")
 
     # Convert time columns to datetime
@@ -114,9 +85,13 @@ def enhance_travel_survey():
     population.filter_home_to_home_legs()  # should be early (but after adding from activity)
     population.update_number_of_legs()
 
+    population.convert_minutes_to_seconds(s.LEG_DURATION_MINUTES_COL, s.LEG_DURATION_SECONDS_COL)
+    population.convert_kilometers_to_meters(s.LEG_DISTANCE_KM_COL, s.LEG_DISTANCE_METERS_COL)
+
     population.calculate_activity_duration()
-    population.activity_times_distribution_seconds()
-    population.leg_duration_distribution_seconds()
+    # population.activity_times_distribution_seconds()
+    # population.leg_duration_distribution_seconds()
+    population.write_short_overview()
     population.estimate_leg_times()
     # Recalculate after estimating leg times
     population.calculate_activity_duration()
@@ -143,30 +118,26 @@ def enhance_travel_survey():
     population.find_home_to_main_time_and_distance()
 
     population.update_activity_for_prot_legs()
-    #
-    # population.translate_modes()
-    #
-    # population.df = h.translate_column(population.df,
-    # population.translate_activities()
 
-    # Translate modes from internal to MiD (in case some MiD values are missing after processing)
+    # Translate modes from internal to MiD (because modes may have been updated)
     population.df = h.translate_column(population.df, s.MODE_INTERNAL_COL, s.MODE_MID_COL, "modes", "internal", "mid")
-    population.df = h.translate_column(population.df, s.ACT_TO_INTERNAL_COL, s.ACT_MID_COL, "activities", "internal", "mid")
+    population.df = h.translate_column(population.df, s.ACT_TO_INTERNAL_COL, s.ACT_MID_COL, "activities", "internal",
+                                       "mid")
 
     logger.info(f"Final population df: \n{population.df.head()}")
 
-    # Write stats
-    # population.write_stats()
+    # population.write_overview()
 
     population.df.to_csv(os.path.join(pipeline_setup.OUTPUT_DIR, s.ENHANCED_MID_FILE), index=False)
     logger.info(f"Wrote population output file.")
+
+    stats_tracker.write_stats_to_file(os.path.join(pipeline_setup.OUTPUT_DIR, s.STATS_FILE))
 
     logger.info(f"Finished enhance_travel_survey pipeline")
     return
 
 
 if __name__ == '__main__':
-    output_dir = pipeline_setup.OUTPUT_DIR
     try:
 
         enhance_travel_survey()

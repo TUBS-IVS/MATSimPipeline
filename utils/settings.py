@@ -20,16 +20,11 @@ INPUT_FILES = settings['input_files']
 SHAPE_BOUNDARY_FILE = INPUT_FILES['shape_boundary_file']
 REGION_WITHOUT_CITY_GPKG_FILE = INPUT_FILES['region_without_city_gpkg_file']
 EXPANDED_HOUSEHOLDS_FILES: list = INPUT_FILES['expanded_households_files']
-MiD_HH_FILE = INPUT_FILES['mid_hh_file']
-MiD_PERSONS_FILE = INPUT_FILES['mid_persons_file']
-MiD_TRIPS_FILE = INPUT_FILES['mid_trips_file']
+MiD_HH_FOLDER = INPUT_FILES['mid_hh_folder']
+MiD_PERSONS_FOLDER = INPUT_FILES['mid_persons_folder']
+MiD_TRIPS_FOLDER = INPUT_FILES['mid_trips_folder']
 BUILDINGS_IN_LOWEST_GEOGRAPHY_WITH_WEIGHTS_FILE = INPUT_FILES['buildings_in_lowest_geography_with_weights_file']
-ENHANCED_MID_FILE = INPUT_FILES['enhanced_mid_file']
-
-TT_MATRIX_CAR_FILES: list = INPUT_FILES['tt_matrix_car_files']
-TT_MATRIX_PT_FILES: list = INPUT_FILES['tt_matrix_pt_files']
-TT_MATRIX_WALK_FILE = INPUT_FILES['tt_matrix_walk_file']
-TT_MATRIX_BIKE_FILE = INPUT_FILES['tt_matrix_bike_file']
+ENHANCED_MID_FOLDER = INPUT_FILES['enhanced_mid_folder']
 
 CAPA_CELLS_CSV_PATH = INPUT_FILES['capa_cells_csv_path']
 CAPA_CELLS_SHP_PATH = INPUT_FILES['capa_cells_shp_path']
@@ -38,6 +33,8 @@ SLACK_FACTORS_FILE = INPUT_FILES['slack_factors_file']
 
 OUTPUT_FILES = settings['output_files']
 POPULATION_ANALYSIS_OUTPUT_FILE = OUTPUT_FILES['population_analysis_output_file']
+STATS_FILE = OUTPUT_FILES['stats_file']
+ENHANCED_MID_FILE = OUTPUT_FILES['enhanced_mid_file']
 
 # Columns
 ID_COLUMNS: dict = settings['id_columns']
@@ -70,6 +67,7 @@ LEG_DURATION_SECONDS_COL = 'leg_duration_seconds'
 LEG_DISTANCE_KM_COL = L_COLUMNS['leg_distance_km']
 LEG_DISTANCE_METERS_COL = 'leg_distance_meters'
 FIRST_LEG_STARTS_AT_HOME_COL = L_COLUMNS['first_leg_starts_at_home']
+LEG_IS_RBW_COL = L_COLUMNS['leg_is_rbw']
 
 # Geography-related columns
 TT_MATRIX_CELL_ID_COL = ID_COLUMNS['tt_matrix_cell_id_column']

@@ -2,6 +2,7 @@ import itertools
 import os.path
 from collections import deque
 from datetime import timedelta
+from tqdm import tqdm
 
 import geopandas as gpd
 import matsim.writers
@@ -12,6 +13,7 @@ import utils.helpers
 
 from utils.data_frame_processor import DataFrameProcessor
 from utils import helpers as h, settings as s, pipeline_setup
+from utils.stats_tracker import stats_tracker
 from utils.logger import logging
 
 logger = logging.getLogger(__name__)
@@ -218,11 +220,14 @@ class PopulationProcessor(DataFrameProcessor):
                 leg_data = []
                 for leg_id in connected_legs:
                     if not all(elem in connected_legs for elem in
-                               household_group.loc[household_group[unique_leg_id_col] == leg_id, connected_legs_col].iloc[0]):
-                        logger.warning(f"Leg {leg_id} has inconsistent connections. This might lead to unexpected results.")
+                               household_group.loc[
+                                   household_group[unique_leg_id_col] == leg_id, connected_legs_col].iloc[0]):
+                        logger.warning(
+                            f"Leg {leg_id} has inconsistent connections. This might lead to unexpected results.")
 
                     checked_legs.append(household_group.loc[household_group[unique_leg_id_col] == leg_id].index[0])
-                    leg_activity = household_group.loc[household_group[unique_leg_id_col] == leg_id, act_to_internal_col].iloc[0]
+                    leg_activity = \
+                    household_group.loc[household_group[unique_leg_id_col] == leg_id, act_to_internal_col].iloc[0]
                     activity_rank = activities_ranked.index(leg_activity) if leg_activity in activities_ranked else -1
                     leg_data.append({'leg_id': leg_id, 'activity': leg_activity, 'activity_rank': activity_rank})
 
@@ -233,7 +238,9 @@ class PopulationProcessor(DataFrameProcessor):
                     prot_series.loc[household_group[unique_leg_id_col] == protagonist_leg_id] = 1
 
             return prot_series
-        self.df[s.IS_PROTAGONIST_COL] = self.df.groupby(household_col).apply(find_protagonist).reset_index(level=0, drop=True)
+
+        self.df[s.IS_PROTAGONIST_COL] = self.df.groupby(household_col).apply(find_protagonist).reset_index(level=0,
+                                                                                                           drop=True)
 
     def mark_main_activity(self):
         """
@@ -302,7 +309,7 @@ class PopulationProcessor(DataFrameProcessor):
             return is_main_activity_series
 
         self.df[s.IS_MAIN_ACTIVITY_COL] = self.df.groupby(person_col).apply(find_main_activity).reset_index(level=0,
-                                                                                                        drop=True)
+                                                                                                            drop=True)
 
     # def translate_modes(self):
     #     """
@@ -328,7 +335,6 @@ class PopulationProcessor(DataFrameProcessor):
     #     }
     #     self.df['mode_translated_string'] = self.df[s.LEG_MAIN_MODE_COL].map(mode_translation)
     #     logger.info(f"Translated modes.")
-
 
     # def translate_activities(self):
     #     """
@@ -390,20 +396,18 @@ class PopulationProcessor(DataFrameProcessor):
         """
         logger.info("Downsampling population...")
         self.df = self.df.sample(frac=sample_percentage)
+        stats_tracker.log("downsampled_population", sample_percentage)
         logger.info(f"Downsampled population to {sample_percentage * 100}% of the original population.")
-
-
 
 
 class MiDDataEnhancer(DataFrameProcessor):
     """
-    Collects all methods that are applied directly to the unexpanded, raw MiD data.
-
+    Collects all methods that are applied only, directly, to the unexpanded, raw MiD data.
     """
 
     def __init__(self, df: pd.DataFrame = None, id_column: str = None):
         super().__init__(df, id_column)
-        self.sf = h.SlackFactors(s.SLACK_FACTORS_FILE)
+        # self.sf = h.SlackFactors(s.SLACK_FACTORS_FILE)
 
     def filter_home_to_home_legs(self):
         """
@@ -474,6 +478,7 @@ class MiDDataEnhancer(DataFrameProcessor):
     def calculate_activity_duration(self):
         """
         Calculate the time between the end of one leg and the start of the next leg seconds.
+        Writes to a separate column different to the given MiD duration.
         :return:
         """
         logger.info("Calculating activity duration...")
@@ -481,19 +486,43 @@ class MiDDataEnhancer(DataFrameProcessor):
                             ignore_index=True)
 
         # Group by person and calculate the time difference within each group
-        self.df[s.ACT_DUR_SECONDS_COL] = self.df.groupby(s.PERSON_ID_COL)[s.LEG_START_TIME_COL].shift(-1) - self.df[
-            s.LEG_END_TIME_COL]
+        self.df[s.ACT_DUR_SECONDS_COL] = self.df.groupby(s.PERSON_ID_COL)[s.LEG_START_TIME_COL].shift(-1) - \
+                                                    self.df[
+                                                        s.LEG_END_TIME_COL]
 
         self.df[s.ACT_DUR_SECONDS_COL] = self.df[s.ACT_DUR_SECONDS_COL].dt.total_seconds()
-        self.df[s.ACT_DUR_SECONDS_COL] = pd.to_numeric(self.df[s.ACT_DUR_SECONDS_COL], downcast='integer',
-                                                       errors='coerce')
+        self.df[s.ACT_DUR_SECONDS_COL] = pd.to_numeric(self.df[s.ACT_DUR_SECONDS_COL],
+                                                                  downcast='integer',
+                                                                  errors='coerce')
 
         # Set the activity time of the last leg to None
         is_last_leg = self.df["unique_person_id"] != self.df["unique_person_id"].shift(-1)
         self.df.loc[is_last_leg, s.ACT_DUR_SECONDS_COL] = None
         logger.info(f"Calculated activity duration in secs.")
 
-    def write_stats(self, stat_by_columns: list = None):
+    def write_short_overview(self):
+        """
+        Generates summary statistics before estimating leg times.
+        """
+        # Group by unique person ID
+        persons = self.df.groupby("unique_person_id")
+
+        num_persons = len(persons)
+        num_legs = self.df[s.LEG_NON_UNIQUE_ID_COL].notna().sum()
+        num_persons_one_leg = sum(
+            len(person) == 1 and pd.notna(person[s.LEG_NON_UNIQUE_ID_COL]).any() for _, person in persons)
+        num_persons_no_leg = sum(pd.isna(person[s.LEG_NON_UNIQUE_ID_COL]).all() for _, person in persons)
+
+        logger.info(f"Number of persons: {num_persons}")
+        logger.info(f"Number of legs: {num_legs}")
+        logger.info(f"Number of persons with one leg: {num_persons_one_leg}")
+        logger.info(f"Number of persons with no leg: {num_persons_no_leg}")
+        stats_tracker.log("num_persons", num_persons)
+        stats_tracker.log("num_legs", num_legs)
+        stats_tracker.log("num_persons_one_leg", num_persons_one_leg)
+        stats_tracker.log("num_persons_no_leg", num_persons_no_leg)
+
+    def write_overview(self):
         logger.info(f"Exporting stats...")
 
         stat_by_columns = [col for col in s.GEO_COLUMNS if col in self.df.columns]
@@ -620,55 +649,201 @@ class MiDDataEnhancer(DataFrameProcessor):
             drop=True)
         logger.info(f"Added return home legs.")
 
-    def estimate_leg_times(self):
+    # def estimate_leg_times(self):
+    #     """
+    #     Estimates leg_start_time and leg_end_time if they are missing, using data from similar persons.
+    #     The function lowers the matching criteria if insufficient similar persons are found.
+    #     """
+    #     self.df[s.IS_IMPUTED_TIME_COL] = 0
+    #     persons = self.df.groupby("unique_person_id")
+    #     logger.info(f"Estimating times, where missing, for {len(persons)} persons...")
+    #
+    #     updated_persons = []  # For storing updates
+    #
+    #     for person_id, person in persons:
+    #         person = person.copy()  # Avoid SettingWithCopyWarning
+    #
+    #         if len(person) == 1:
+    #             if pd.isna(person.at[person.index[0], s.LEG_NON_UNIQUE_ID_COL]):
+    #                 # logger.debug(f"Person {person_id} has no legs. Skipping...")
+    #                 continue
+    #             # Persons with one leg might be problematic, but impute times for them anyway
+    #             # logger.debug(f"Person {person_id} has only one leg.")
+    #
+    #         # Check for negative activity times
+    #         if (person[s.ACT_DUR_SECONDS_COL] < 0).any():
+    #             first_bad_time_index = person[person[s.ACT_DUR_SECONDS_COL] < 0].index[0]
+    #             logger.debug(
+    #                 f"Person {person_id} has negative activity times. Removing all times after the first bad time.")
+    #             for col in [s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]:
+    #                 person.loc[first_bad_time_index:, col] = None
+    #
+    #         # Check for bad leg times (MiD-codes)
+    #         if (person[s.LEG_DURATION_MINUTES_COL] > 1000).any():
+    #             first_bad_time_index = person[person[s.LEG_DURATION_MINUTES_COL] > 1000].index[0]
+    #             logger.debug(f"Person {person_id} has bad leg times. Removing all times after the first bad time.")
+    #             for col in [s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]:
+    #                 person.loc[first_bad_time_index:, col] = None
+    #
+    #         # Process each person
+    #         if person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]].isna().any().any():
+    #             first_index = person.index[0]
+    #             first_missing_time_index = \
+    #                 person[person[s.LEG_START_TIME_COL].isna() | person[s.LEG_END_TIME_COL].isna()].index[
+    #                     0]
+    #             if first_missing_time_index == first_index:
+    #                 logger.info(
+    #                     f"Person {person_id} has no time information, imputation from index {first_missing_time_index}...")
+    #             else:
+    #                 logger.info(
+    #                     f"Person {person_id} has some time information, imputation from index {first_missing_time_index}...")
+    #
+    #             # Find similar persons
+    #             orig_min_similar = 400
+    #             for min_similar in range(orig_min_similar, 10000,
+    #                                      1000):  # Find more similar persons if there are too few with good data
+    #                 similar_persons: pd.DataFrame = self.find_similar_persons(person, min_similar)
+    #
+    #                 # Filter similar persons for valid data
+    #                 similar_persons_with_last_legs = similar_persons[
+    #                     similar_persons[s.LEG_NON_UNIQUE_ID_COL].notna() &
+    #                     similar_persons[s.LEG_START_TIME_COL].notna() &
+    #                     (similar_persons[s.LEG_DURATION_MINUTES_COL] > 0) &
+    #                     (similar_persons[s.LEG_DURATION_MINUTES_COL] <= 300)]
+    #                 # Removing rows with na activity durs removes the last leg, so we need a separate df to keep quality
+    #                 similar_persons_no_last_legs = similar_persons_with_last_legs[
+    #                     (similar_persons_with_last_legs[s.ACT_DUR_SECONDS_COL].notna()) &
+    #                     (similar_persons_with_last_legs[s.ACT_DUR_SECONDS_COL] > 0)]
+    #
+    #                 if len(similar_persons_no_last_legs) > orig_min_similar / 2:
+    #                     break
+    #                 else:
+    #                     logger.info(f"Person {person_id} has too few similar persons. Lowering standards.")
+    #             else:  # No break
+    #                 logger.warning(f"Person {person_id} misses times and has no even slightly similar persons. "
+    #                                f"Removing the person to avoid errors.")
+    #                 self.df.drop(person.index, inplace=True)
+    #                 continue
+    #
+    #             # Impute times
+    #             loops_max = 5
+    #             loop = 0
+    #             while loop < loops_max:  # Loop until imputed times pass checks
+    #                 for idx, row in person.iterrows():
+    #                     if idx >= first_missing_time_index:
+    #
+    #                         if idx == first_index:  # Start of the day
+    #                             similar_persons_same_activity = similar_persons_with_last_legs.loc[
+    #                                 (similar_persons_with_last_legs[s.ACT_TO_INTERNAL_COL] == row[
+    #                                     s.ACT_TO_INTERNAL_COL]) &
+    #                                 (similar_persons_with_last_legs[
+    #                                      s.LEG_NON_UNIQUE_ID_COL] == 1), s.LEG_START_TIME_COL]
+    #                             if similar_persons_same_activity.empty:
+    #                                 logger.info(
+    #                                     f"Person {person_id} has no similar persons with the same first activity."
+    #                                     f"Lowering standards.")
+    #                                 similar_persons_same_activity = similar_persons_with_last_legs.loc[
+    #                                     (similar_persons_with_last_legs[
+    #                                          s.LEG_NON_UNIQUE_ID_COL] == 1), s.LEG_START_TIME_COL]
+    #
+    #                             typical_day_start = similar_persons_same_activity.sample(1).iloc[0]
+    #                             my_start_time = typical_day_start if pd.isna(person.at[idx, s.LEG_START_TIME_COL]) else \
+    #                                 person.at[idx, s.LEG_START_TIME_COL]
+    #
+    #                         else:  # Other leg start times
+    #                             prev_end_time = person.at[idx - 1, s.LEG_END_TIME_COL]
+    #                             similar_persons_same_activity = similar_persons_no_last_legs.loc[
+    #                                 similar_persons_no_last_legs[s.ACT_TO_INTERNAL_COL] == person.loc[
+    #                                     idx - 1, s.ACT_TO_INTERNAL_COL],
+    #                                 s.ACT_DUR_SECONDS_COL]
+    #                             if similar_persons_same_activity.empty:
+    #                                 logger.info(f"Person {person_id} has no similar persons with the same activity. "
+    #                                             f"Lowering standards.")
+    #                                 similar_persons_same_activity = similar_persons_no_last_legs[s.ACT_DUR_SECONDS_COL]
+    #                             my_start_time = prev_end_time + pd.Timedelta(
+    #                                 # Sample an activity duration from a similar person with the same activity
+    #                                 seconds=similar_persons_same_activity.sample(1).iloc[0])
+    #
+    #                         # Leg duration
+    #                         # Utilize imputed leg duration from MiD if available
+    #                         similar_persons_same_activity = similar_persons_with_last_legs.loc[
+    #                             similar_persons_with_last_legs[s.ACT_TO_INTERNAL_COL] == row[
+    #                                 s.ACT_TO_INTERNAL_COL], s.LEG_DURATION_MINUTES_COL]
+    #                         if similar_persons_same_activity.empty:
+    #                             logger.info(f"Person {person_id} has no similar persons with the same activity. "
+    #                                         f"Lowering standards.")
+    #                             similar_persons_same_activity = similar_persons_with_last_legs[
+    #                                 s.LEG_DURATION_MINUTES_COL]
+    #                         my_leg_duration = similar_persons_same_activity.sample(1).iloc[0]
+    #
+    #                         # Assign times
+    #                         person.at[idx, s.LEG_START_TIME_COL] = my_start_time
+    #                         person.at[idx, s.LEG_END_TIME_COL] = my_start_time + pd.Timedelta(
+    #                             minutes=my_leg_duration)
+    #                         person.at[idx, s.LEG_DURATION_MINUTES_COL] = my_leg_duration
+    #                         person.at[idx, s.IS_IMPUTED_TIME_COL] = 1
+    #
+    #                 # Check if times are valid (for now, all tours that end before 2am are valid)
+    #                 if person[s.LEG_END_TIME_COL].iloc[-1] < pd.Timestamp(s.BASE_DATE) + pd.Timedelta(days=1, hours=2):
+    #                     break
+    #                 logger.info(f"Person {person_id} imputed invalid times. Trying again...")
+    #                 loop += 1
+    #
+    #             logger.info(
+    #                 f"Person {person_id} updated times: \n{person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL, s.ACT_TO_INTERNAL_COL]]}")
+    #             if person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]].isna().any().any():
+    #                 logger.warning(f"Person {person_id} still has missing times. "
+    #                                f"Check the data and try again. Skipping...")
+    #                 continue
+    #             updated_persons.append(person)
+    #
+    #     if updated_persons:
+    #         logger.info(f"Concatenating {len(updated_persons)} updated persons...")
+    #         updated_df = pd.concat(updated_persons)
+    #         logger.info(f"Updating original df...")
+    #         self.df.update(updated_df)
+    #     logger.info("Time estimation completed.")
+
+    def estimate_leg_times(self): #TODO!! (rbw nicht berücksichtigen)
         """
-        Estimates leg_start_time and leg_end_time if they are missing, using data from similar persons.
-        The function lowers the matching criteria if insufficient similar persons are found.
+        Estimates leg_start_time and leg_end_time if they are missing or invalid, using the imputed leg duration and
+        activity duration from similar persons. For rbW trips, activity duration is set to 0, as otherwise they get
+        extremely long, and they are not otherwise inferrable.
+        The function imputes only the times that are identified as bad or missing and adjusts subsequent times accordingly.
         """
         self.df[s.IS_IMPUTED_TIME_COL] = 0
         persons = self.df.groupby("unique_person_id")
-        logger.info(f"Estimating times, where missing, for {len(persons)} persons...")
+        logger.info(f"Estimating times, where missing or invalid, for {len(persons)} persons...")
 
         updated_persons = []  # For storing updates
 
-        for person_id, person in persons:
+        for person_id, person in tqdm(persons, desc="Estimating leg times", total=len(persons)):
             person = person.copy()  # Avoid SettingWithCopyWarning
 
             if len(person) == 1:
                 if pd.isna(person.at[person.index[0], s.LEG_NON_UNIQUE_ID_COL]):
-                    logger.debug(f"Person {person_id} has no legs. Skipping...")
                     continue
-                # Persons with one leg might be problematic, but impute times for them anyway
-                logger.debug(f"Person {person_id} has only one leg.")
 
-            # Check for negative activity times
-            if (person[s.ACT_DUR_SECONDS_COL] < 0).any():
-                first_bad_time_index = person[person[s.ACT_DUR_SECONDS_COL] < 0].index[0]
-                logger.debug(
-                    f"Person {person_id} has negative activity times. Removing all times after the first bad time.")
-                for col in [s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]:
-                    person.loc[first_bad_time_index:, col] = None
+            # Check for invalid leg times and negative activity duration
+            invalid_times_mask_start_time = (
+                (person[s.LEG_START_TIME_COL].isna())
+            )
 
-            # Check for bad leg times (MiD-codes)
-            if (person[s.LEG_DURATION_MINUTES_COL] > 1000).any():
-                first_bad_time_index = person[person[s.LEG_DURATION_MINUTES_COL] > 1000].index[0]
-                logger.debug(f"Person {person_id} has bad leg times. Removing all times after the first bad time.")
-                for col in [s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]:
-                    person.loc[first_bad_time_index:, col] = None
+            invalid_times_mask_end_time = (
+                    (person[s.LEG_END_TIME_COL].isna()) |
+                    (person[s.LEG_END_TIME_COL] <= person[
+                        s.LEG_START_TIME_COL]) |  # End time should be after start time
+                    (person[s.ACT_DUR_SECONDS_COL] < 0)  # Activity duration should not be negative
+            )
 
-            # Process each person
-            if person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]].isna().any().any():
-                first_index = person.index[0]
-                first_missing_time_index = \
-                    person[person[s.LEG_START_TIME_COL].isna() | person[s.LEG_END_TIME_COL].isna()].index[
-                        0]
-                if first_missing_time_index == first_index:
-                    logger.info(
-                        f"Person {person_id} has no time information, imputation from index {first_missing_time_index}...")
-                else:
-                    logger.info(
-                        f"Person {person_id} has some time information, imputation from index {first_missing_time_index}...")
+            invalid_times_mask = invalid_times_mask_start_time | invalid_times_mask_end_time
 
+            # If no invalid times, skip this person
+            if not invalid_times_mask.any():
+                continue
+
+            # We only need to find similar persons for activities, so when start time is bad and not rbw
+            if (invalid_times_mask_start_time & (person[s.LEG_IS_RBW_COL] == 0)).any():
                 # Find similar persons
                 orig_min_similar = 400
                 for min_similar in range(orig_min_similar, 10000,
@@ -679,94 +854,230 @@ class MiDDataEnhancer(DataFrameProcessor):
                     similar_persons_with_last_legs = similar_persons[
                         similar_persons[s.LEG_NON_UNIQUE_ID_COL].notna() &
                         similar_persons[s.LEG_START_TIME_COL].notna() &
-                        (similar_persons[s.LEG_DURATION_MINUTES_COL] > 0) &
-                        (similar_persons[s.LEG_DURATION_MINUTES_COL] <= 300)]
+                        (similar_persons[s.LEG_DURATION_SECONDS_COL] > 0) &
+                        (similar_persons[s.LEG_DURATION_SECONDS_COL] <= 18000)
+                        # we don't want super-long or invalid legs
+                        ]
                     # Removing rows with na activity durs removes the last leg, so we need a separate df to keep quality
                     similar_persons_no_last_legs = similar_persons_with_last_legs[
                         (similar_persons_with_last_legs[s.ACT_DUR_SECONDS_COL].notna()) &
-                        (similar_persons_with_last_legs[s.ACT_DUR_SECONDS_COL] > 0)]
+                        (similar_persons_with_last_legs[s.ACT_DUR_SECONDS_COL] > 0)
+                        ]
 
                     if len(similar_persons_no_last_legs) > orig_min_similar / 2:
                         break
                     else:
                         logger.info(f"Person {person_id} has too few similar persons. Lowering standards.")
-                else:  # No break
+                else:
                     logger.warning(f"Person {person_id} misses times and has no even slightly similar persons. "
                                    f"Removing the person to avoid errors.")
                     self.df.drop(person.index, inplace=True)
                     continue
 
-                # Impute times
-                loops_max = 5
-                loop = 0
-                while loop < loops_max:  # Loop until imputed times pass checks
-                    for idx, row in person.iterrows():
-                        if idx >= first_missing_time_index:
+            # Impute times
+            for idx in person.index:
+                if idx == person.index[0]:  # Start of the day
+                    similar_persons_same_activity = similar_persons_with_last_legs.loc[
+                        (similar_persons_with_last_legs[s.ACT_TO_INTERNAL_COL] == person.at[
+                            idx, s.ACT_TO_INTERNAL_COL]) &
+                        (similar_persons_with_last_legs[s.LEG_NON_UNIQUE_ID_COL] == 1), s.LEG_START_TIME_COL
+                    ]
+                    if similar_persons_same_activity.empty:
+                        similar_persons_same_activity = similar_persons_with_last_legs.loc[
+                            (similar_persons_with_last_legs[s.LEG_NON_UNIQUE_ID_COL] == 1), s.LEG_START_TIME_COL
+                        ]
 
-                            if idx == first_index:  # Start of the day
-                                similar_persons_same_activity = similar_persons_with_last_legs.loc[
-                                    (similar_persons_with_last_legs[s.ACT_TO_INTERNAL_COL] == row[
-                                        s.ACT_TO_INTERNAL_COL]) &
-                                    (similar_persons_with_last_legs[
-                                         s.LEG_NON_UNIQUE_ID_COL] == 1), s.LEG_START_TIME_COL]
-                                if similar_persons_same_activity.empty:
-                                    logger.info(
-                                        f"Person {person_id} has no similar persons with the same first activity."
-                                        f"Lowering standards.")
-                                    similar_persons_same_activity = similar_persons_with_last_legs.loc[
-                                        (similar_persons_with_last_legs[
-                                             s.LEG_NON_UNIQUE_ID_COL] == 1), s.LEG_START_TIME_COL]
+                    typical_day_start = similar_persons_same_activity.sample(1).iloc[0]
+                    person.at[idx, s.LEG_START_TIME_COL] = typical_day_start
 
-                                typical_day_start = similar_persons_same_activity.sample(1).iloc[0]
-                                my_start_time = typical_day_start if pd.isna(person.at[idx, s.LEG_START_TIME_COL]) else \
-                                    person.at[idx, s.LEG_START_TIME_COL]
-
-                            else:  # Other leg start times
-                                prev_end_time = person.at[idx - 1, s.LEG_END_TIME_COL]
-                                similar_persons_same_activity = similar_persons_no_last_legs.loc[
-                                    similar_persons_no_last_legs[s.ACT_TO_INTERNAL_COL] == person.loc[
-                                        idx - 1, s.ACT_TO_INTERNAL_COL],
-                                    s.ACT_DUR_SECONDS_COL]
-                                if similar_persons_same_activity.empty:
-                                    logger.info(f"Person {person_id} has no similar persons with the same activity. "
-                                                f"Lowering standards.")
-                                    similar_persons_same_activity = similar_persons_no_last_legs[s.ACT_DUR_SECONDS_COL]
-                                my_start_time = prev_end_time + pd.Timedelta(
-                                    # Sample an activity duration from a similar person with the same activity
-                                    seconds=similar_persons_same_activity.sample(1).iloc[0])
-
-                            # Leg duration
-                            # Utilize imputed leg duration from MiD if available
-                            similar_persons_same_activity = similar_persons_with_last_legs.loc[
-                                similar_persons_with_last_legs[s.ACT_TO_INTERNAL_COL] == row[
-                                    s.ACT_TO_INTERNAL_COL], s.LEG_DURATION_MINUTES_COL]
+                else:  # Other leg start times
+                    if invalid_times_mask_start_time[idx]:
+                        prev_end_time = person.at[idx - 1, s.LEG_END_TIME_COL]
+                        if person.at[idx - 1, s.LEG_IS_RBW_COL] == 1:
+                            activity_duration_between_legs = 0
+                        else:
+                            similar_persons_same_activity = similar_persons_no_last_legs.loc[
+                                (similar_persons_no_last_legs[s.ACT_TO_INTERNAL_COL] == person.at[
+                                    idx - 1, s.ACT_TO_INTERNAL_COL]),
+                                s.ACT_DUR_SECONDS_COL
+                            ]
                             if similar_persons_same_activity.empty:
-                                logger.info(f"Person {person_id} has no similar persons with the same activity. "
-                                            f"Lowering standards.")
-                                similar_persons_same_activity = similar_persons_with_last_legs[
-                                    s.LEG_DURATION_MINUTES_COL]
-                            my_leg_duration = similar_persons_same_activity.sample(1).iloc[0]
+                                similar_persons_same_activity = similar_persons_no_last_legs[s.ACT_DUR_SECONDS_COL]
 
-                            # Assign times
-                            person.at[idx, s.LEG_START_TIME_COL] = my_start_time
-                            person.at[idx, s.LEG_END_TIME_COL] = my_start_time + pd.Timedelta(
-                                minutes=my_leg_duration)
-                            person.at[idx, s.LEG_DURATION_MINUTES_COL] = my_leg_duration
-                            person.at[idx, s.IS_IMPUTED_TIME_COL] = 1
+                            activity_duration_between_legs = similar_persons_same_activity.sample(1).iloc[0]
 
-                    # Check if times are valid (for now, all tours that end before 2am are valid)
-                    if person[s.LEG_END_TIME_COL].iloc[-1] < pd.Timestamp(s.BASE_DATE) + pd.Timedelta(days=1, hours=2):
-                        break
-                    logger.info(f"Person {person_id} imputed invalid times. Trying again...")
-                    loop += 1
+                        person.at[idx, s.LEG_START_TIME_COL] = prev_end_time + pd.Timedelta(
+                            seconds=activity_duration_between_legs)
 
-                logger.info(
-                    f"Person {person_id} updated times: \n{person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL, s.ACT_TO_INTERNAL_COL]]}")
-                if person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]].isna().any().any():
-                    logger.warning(f"Person {person_id} still has missing times. "
-                                   f"Check the data and try again. Skipping...")
+                if invalid_times_mask_start_time[idx] or invalid_times_mask_end_time[idx]:
+                    # Adjust end time based on known leg duration
+                    my_start_time = person.at[idx, s.LEG_START_TIME_COL]
+                    my_leg_duration = person.at[idx, s.LEG_DURATION_SECONDS_COL]
+
+                    person.at[idx, s.LEG_END_TIME_COL] = my_start_time + pd.Timedelta(seconds=my_leg_duration)
+                    person.at[idx, s.IS_IMPUTED_TIME_COL] = 1
+
+                    # Adjust subsequent times starting from the current index
+                    for i in range(idx + 1, len(person)):
+                        prev_end_time = person.at[i - 1, s.LEG_END_TIME_COL]
+
+                        activity_duration_between_legs = person.at[i - 1, s.ACT_DUR_SECONDS_COL]
+
+                        person.at[i, s.LEG_START_TIME_COL] = prev_end_time + pd.Timedelta(
+                            seconds=activity_duration_between_legs)
+                        person.at[i, s.LEG_END_TIME_COL] = person.at[i, s.LEG_START_TIME_COL] + pd.Timedelta(
+                            seconds=person.at[i, s.LEG_DURATION_SECONDS_COL])
+
+            logger.debug(
+                f"Person {person_id} updated times: \n{person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL,
+                                                               s.ACT_TO_INTERNAL_COL, s.LEG_IS_RBW_COL]]}")
+            if person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]].isna().any().any():
+                logger.warning(f"Person {person_id} still has missing times. Check the data and try again. Skipping...")
+                continue
+            updated_persons.append(person)
+
+        if updated_persons:
+            logger.info(f"Concatenating {len(updated_persons)} updated persons...")
+            updated_df = pd.concat(updated_persons)
+            logger.info(f"Updating original df...")
+            self.df.update(updated_df)
+        logger.info("Time estimation completed.")
+
+    def estimate_leg_times_old(self):
+        """
+        Estimates leg_start_time and leg_end_time if they are missing or invalid, using data from similar persons.
+        The function imputes only the times that are identified as bad or missing and adjusts subsequent times accordingly.
+        """
+        self.df[s.IS_IMPUTED_TIME_COL] = 0
+        persons = self.df.groupby("unique_person_id")
+        logger.info(f"Estimating times, where missing or invalid, for {len(persons)} persons...")
+
+        updated_persons = []  # For storing updates
+
+        for person_id, person in tqdm(persons, desc="Estimating leg times", total=len(persons)):
+            person = person.copy()  # Avoid SettingWithCopyWarning
+
+            if len(person) == 1:
+                if pd.isna(person.at[person.index[0], s.LEG_NON_UNIQUE_ID_COL]):
+                    stats_tracker.increment("estimate_leg_times: person_with_no_legs")
                     continue
-                updated_persons.append(person)
+                stats_tracker.increment("estimate_leg_times: person_with_one_leg")
+
+            # Check for negative activity times and invalid leg times
+            invalid_times_mask = (
+                    (person[s.ACT_DUR_SECONDS_COL] < 0) |
+                    (person[s.LEG_DURATION_SECONDS_COL] > 72000) |  # Leg taking over 20h or MiD invalid codes
+                    (person[s.LEG_START_TIME_COL].isna()) |
+                    (person[s.LEG_END_TIME_COL].isna()) |
+                    (person[s.LEG_END_TIME_COL] <= person[s.LEG_START_TIME_COL])  # End time should be after start time
+            )
+
+            # If no invalid times, skip this person
+            if not invalid_times_mask.any():
+                continue
+
+            stats_tracker.increment("estimate_leg_times: person_with_invalid_times")
+
+            # Find similar persons
+            orig_min_similar = 400
+            for min_similar in range(orig_min_similar, 10000,
+                                     1000):  # Find more similar persons if there are too few with good data
+                similar_persons: pd.DataFrame = self.find_similar_persons(person, min_similar)
+
+                # Filter similar persons for valid data
+                similar_persons_with_last_legs = similar_persons[
+                    similar_persons[s.LEG_NON_UNIQUE_ID_COL].notna() &
+                    similar_persons[s.LEG_START_TIME_COL].notna() &
+                    (similar_persons[s.LEG_DURATION_SECONDS_COL] > 0) &
+                    (similar_persons[s.LEG_DURATION_SECONDS_COL] <= 18000)  # we don't want super-long or invalid legs
+                    ]
+                # Removing rows with na activity durs removes the last leg, so we need a separate df to keep quality
+                similar_persons_no_last_legs = similar_persons_with_last_legs[
+                    (similar_persons_with_last_legs[s.ACT_DUR_SECONDS_COL].notna()) &
+                    (similar_persons_with_last_legs[s.ACT_DUR_SECONDS_COL] > 0)
+                    ]
+
+                if len(similar_persons_no_last_legs) > orig_min_similar / 2:
+                    break
+                else:
+                    logger.info(f"Person {person_id} has too few similar persons. Lowering standards.")
+                    stats_tracker.increment("estimate_leg_times: persons_with_few_similar")
+            else:  # No break
+                logger.warning(f"Person {person_id} misses times and has no even slightly similar persons. "
+                               f"Removing the person to avoid errors.")
+                stats_tracker.increment("estimate_leg_times: persons_with_no_similar")
+                self.df.drop(person.index, inplace=True)
+                continue
+
+            # Impute times
+            loops_max = 5
+            loop = 0
+            while loop < loops_max:  # Loop until imputed times pass checks
+                for idx in person[invalid_times_mask].index:
+                    if idx == person.index[0]:  # Start of the day
+                        similar_persons_same_activity = similar_persons_with_last_legs.loc[
+                            (similar_persons_with_last_legs[s.ACT_TO_INTERNAL_COL] == person.at[
+                                idx, s.ACT_TO_INTERNAL_COL]) &
+                            (similar_persons_with_last_legs[s.LEG_NON_UNIQUE_ID_COL] == 1), s.LEG_START_TIME_COL
+                        ]
+                        if similar_persons_same_activity.empty:
+                            similar_persons_same_activity = similar_persons_with_last_legs.loc[
+                                (similar_persons_with_last_legs[s.LEG_NON_UNIQUE_ID_COL] == 1), s.LEG_START_TIME_COL
+                            ]
+
+                        typical_day_start = similar_persons_same_activity.sample(1).iloc[0]
+                        my_start_time = typical_day_start if pd.isna(person.at[idx, s.LEG_START_TIME_COL]) else \
+                            person.at[idx, s.LEG_START_TIME_COL]
+                    else:  # Other leg start times
+                        prev_end_time = person.at[idx - 1, s.LEG_END_TIME_COL]
+                        similar_persons_same_activity = similar_persons_no_last_legs.loc[
+                            (similar_persons_no_last_legs[s.ACT_TO_INTERNAL_COL] == person.at[
+                                idx - 1, s.ACT_TO_INTERNAL_COL]),
+                            s.ACT_DUR_SECONDS_COL
+                        ]
+                        if similar_persons_same_activity.empty:
+                            similar_persons_same_activity = similar_persons_no_last_legs[s.ACT_DUR_SECONDS_COL]
+
+                        my_start_time = prev_end_time + pd.Timedelta(
+                            seconds=similar_persons_same_activity.sample(1).iloc[0])
+
+                    # Leg duration
+                    similar_persons_same_activity = similar_persons_with_last_legs.loc[
+                        (similar_persons_with_last_legs[s.ACT_TO_INTERNAL_COL] == person.at[
+                            idx, s.ACT_TO_INTERNAL_COL]),
+                        s.LEG_DURATION_SECONDS_COL
+                    ]
+                    if similar_persons_same_activity.empty:
+                        similar_persons_same_activity = similar_persons_with_last_legs[s.LEG_DURATION_SECONDS_COL]
+                    my_leg_duration = similar_persons_same_activity.sample(1).iloc[0]
+
+                    # Assign times
+                    person.at[idx, s.LEG_START_TIME_COL] = my_start_time
+                    person.at[idx, s.LEG_END_TIME_COL] = my_start_time + pd.Timedelta(seconds=my_leg_duration)
+                    person.at[idx, s.LEG_DURATION_SECONDS_COL] = my_leg_duration
+                    person.at[idx, s.IS_IMPUTED_TIME_COL] = 1
+
+                    # Adjust subsequent times
+                    for i in range(idx + 1, len(person)):
+                        if i < len(person):
+                            prev_end_time = person.at[i - 1, s.LEG_END_TIME_COL]
+                            if pd.notna(prev_end_time):
+                                person.at[i, s.LEG_START_TIME_COL] = prev_end_time
+                                person.at[i, s.LEG_END_TIME_COL] = prev_end_time + pd.Timedelta(
+                                    seconds=person.at[i, s.LEG_DURATION_SECONDS_COL])
+
+                # Check if times are valid (for now, all tours that end before 2am are valid)
+                if person[s.LEG_END_TIME_COL].iloc[-1] < pd.Timestamp(s.BASE_DATE) + pd.Timedelta(days=1, hours=2):
+                    break
+                logger.info(f"Person {person_id} imputed invalid times. Trying again...")
+                stats_tracker.increment("estimate_leg_times: person_with_invalid_times_retries")
+                loop += 1
+
+            logger.info(
+                f"Person {person_id} updated times: \n{person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL, s.ACT_TO_INTERNAL_COL]]}")
+            if person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]].isna().any().any():
+                raise ValueError(f"Person {person_id} still has missing times. ")
+            updated_persons.append(person)
 
         if updated_persons:
             logger.info(f"Concatenating {len(updated_persons)} updated persons...")

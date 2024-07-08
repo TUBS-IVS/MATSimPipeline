@@ -5,15 +5,15 @@ import pandas as pd
 import geopandas as gpd
 
 from synthesis.location_assignment.main_activity_locator import ActivityLocator
-from utils.population_frame_processor import PopulationProcessor
-from utils import matsim_pipeline_setup, helpers as h, rules
-from utils import settings_values as s
+from synthesis.location_assignment.population_frame_processor import PopulationProcessor
+from utils import pipeline_setup, helpers as h
+from utils import settings as s
 from utils.logger import logging
 
 logger = logging.getLogger(__name__)
 
 # Set working dir
-os.chdir(matsim_pipeline_setup.PROJECT_ROOT)
+os.chdir(pipeline_setup.PROJECT_ROOT)
 write_to_file = True if s.POPULATION_ANALYSIS_OUTPUT_FILE else False
 
 
@@ -183,7 +183,7 @@ def popsim_to_matsim_plans_main():
 
     # Write dataframe to csv file if desired
     if write_to_file:
-        population.df.to_csv(os.path.join(matsim_pipeline_setup.OUTPUT_DIR, s.POPULATION_ANALYSIS_OUTPUT_FILE), index=False)
+        population.df.to_csv(os.path.join(pipeline_setup.OUTPUT_DIR, s.POPULATION_ANALYSIS_OUTPUT_FILE), index=False)
         logger.info(f"Wrote population analysis output file to {s.POPULATION_ANALYSIS_OUTPUT_FILE}")
 
     logger.info(f"Finished popsim_to_matsim_plans pipeline")
@@ -221,8 +221,8 @@ def parallel_locate_activities(df, num_processes=None):
 
 
 if __name__ == '__main__':
-    output_dir = matsim_pipeline_setup.create_output_directory()
+    output_dir = pipeline_setup.create_output_directory()
     popsim_to_matsim_plans_main()
 
 else:
-    output_dir = matsim_pipeline_setup.OUTPUT_DIR
+    output_dir = pipeline_setup.OUTPUT_DIR

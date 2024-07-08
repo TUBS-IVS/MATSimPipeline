@@ -6,7 +6,7 @@ from sklearn.preprocessing import OneHotEncoder
 import numpy as np
 import os
 
-from utils.population_frame_processor import MiDDataEnhancer
+from synthesis.enhanced_mid_data.mid_data_enhancer import MiDDataEnhancer
 from utils import helpers as h
 from utils import matsim_pipeline_setup as m
 from utils.logger import logging

@@ -4,7 +4,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 
-from utils import settings_values as s, helpers as h
+from utils import settings as s, helpers as h
 from utils.logger import logging
 
 logger = logging.getLogger(__name__)

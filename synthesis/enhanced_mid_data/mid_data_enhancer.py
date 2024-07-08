@@ -1,403 +1,17 @@
 import itertools
-import os.path
 from collections import deque
-from datetime import timedelta
-from tqdm import tqdm
 
-import geopandas as gpd
-import matsim.writers
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
+from os import path
 
-import utils.helpers
-
+from utils import settings as s, pipeline_setup, helpers as h
 from utils.data_frame_processor import DataFrameProcessor
-from utils import helpers as h, settings as s, pipeline_setup
 from utils.stats_tracker import stats_tracker
 from utils.logger import logging
 
 logger = logging.getLogger(__name__)
-
-
-class PopulationProcessor(DataFrameProcessor):
-    def distribute_by_weights(self, weights_df: pd.DataFrame, cell_id_col: str, cut_missing_ids: bool = False):
-        result = h.distribute_by_weights(self.df, weights_df, cell_id_col, cut_missing_ids)
-        self.df = self.df.merge(result[[s.UNIQUE_HH_ID_COL, 'home_loc']], on=s.UNIQUE_HH_ID_COL, how='left')
-
-    def write_plans_to_matsim_xml(self):
-        """
-        Write to MATSim xml.gz directly from the dataframe.
-        The design of this method decides which data from the population frame is written and which is not.
-        All trips are assumed to start at home.
-        All trips should end at home. If not, we warn the user but use the given activity.
-        """
-        logger.info("Writing plans to MATSim xml...")
-        logger.info("All trips are assumed to start at home.")
-
-        self.df.reset_index(drop=True, inplace=True)
-
-        output_file = os.path.join(pipeline_setup.OUTPUT_DIR, "population.xml")
-        with open(output_file, 'wb+') as f_write:
-            writer = matsim.writers.PopulationWriter(f_write)
-
-            writer.start_population()  # attributes={"coordinateReferenceSystem": "UTM-32N"}
-
-            for _, group in self.df.groupby([s.UNIQUE_P_ID_COL]):
-                writer.start_person(group[s.UNIQUE_P_ID_COL].iloc[0])
-                writer.start_plan(selected=True)
-
-                # Add home activity
-                writer.add_activity(
-                    type="home",
-                    x=group['home_loc'].iloc[0].x, y=group['home_loc'].iloc[0].y,
-                    end_time=abs(h.seconds_from_datetime(group[s.LEG_START_TIME_COL].iloc[0])))
-                # One row in the df contains the leg and the following activity
-                for idx, row in group.iterrows():
-                    writer.add_leg(mode=row['mode_translated_string'])
-                    if not pd.isna(row[s.ACT_DUR_SECONDS_COL]):
-                        # Create an own activity type for each duration (for correct matsim scoring)
-                        # Rounding must fit the matsim config
-                        max_dur: int = round(row[s.ACT_DUR_SECONDS_COL] / 600) * 600
-                        writer.add_activity(
-                            type=f"{row['activity_translated_string']}_{max_dur}",
-                            x=row[s.COORD_TO_COL].x, y=row[s.COORD_TO_COL].y,
-                            # The writer expects seconds. Also, we mean max_dur here, but the writer doesn't have that yet.
-                            start_time=max_dur)
-                    elif idx == group.index[-1]:
-                        # No time for the last activity
-                        writer.add_activity(
-                            type=row['activity_translated_string'],
-                            x=row[s.COORD_TO_COL].x, y=row[s.COORD_TO_COL].y)
-                    else:
-                        # If for some reason we have no time
-                        max_dur: int = round(3600 / 600) * 600
-                        writer.add_activity(
-                            type=f"{row['activity_translated_string']}_{max_dur}",
-                            x=row[s.COORD_TO_COL].x, y=row[s.COORD_TO_COL].y,
-                            # The writer expects seconds. Also, we mean max_dur here, but the writer doesn't have that yet.
-                            start_time=max_dur)
-                writer.end_plan()
-                writer.end_person()
-
-            writer.end_population()
-        logger.info(f"Wrote plans to MATSim xml: {output_file}")
-        return output_file
-
-    def write_households_to_matsim_xml(self):
-        logger.info("Writing households to MATSim xml...")
-        output_file = os.path.join(pipeline_setup.OUTPUT_DIR, "households.xml")
-        with open(output_file, 'wb+') as f_write:
-            households_writer = matsim.writers.HouseholdsWriter(f_write)
-            households_writer.start_households()
-
-            for _, hh in self.df.groupby([s.UNIQUE_HH_ID_COL]):
-                household_id = hh[s.UNIQUE_HH_ID_COL].iloc[0]
-                person_ids = hh[s.UNIQUE_P_ID_COL].unique().tolist()
-                vehicle_ids = hh[s.LIST_OF_CARS_COL].iloc[0]
-
-                households_writer.start_household(household_id)
-                households_writer.add_members(person_ids)
-                # if vehicle_ids:
-                #     households_writer.add_vehicles(vehicle_ids)
-                households_writer.end_household()
-
-            households_writer.end_households()
-
-    def write_facilities_to_matsim_xml(self, facilities_df: pd.DataFrame):
-        with open(os.path.join(pipeline_setup.OUTPUT_DIR, "facilities.xml"), 'wb+') as f_write:
-            facilities_writer = matsim.writers.FacilitiesWriter(f_write)
-            facilities_writer.start_facilities()
-
-            for row in facilities_df.itertuples():
-                # Using itertuples() with getattr() is much faster than iterrows(), even if it's a bit uglier
-                facility_id = getattr(row, s.FACILITY_ID_COL)
-                x = getattr(row, s.FACILITY_X_COL)
-                y = getattr(row, s.FACILITY_Y_COL)
-                activities = list(getattr(row, s.FACILITY_ACTIVITIES_COL))
-
-                facilities_writer.start_facility(facility_id, x, y)
-
-                for activity in activities:
-                    facilities_writer.add_activity(activity)
-
-                facilities_writer.end_facility()
-
-            facilities_writer.end_facilities()
-
-    def write_vehicles_to_matsim_xml(self):
-        logger.info("Writing vehicles to MATSim xml...")
-        output_file = os.path.join(pipeline_setup.OUTPUT_DIR, "vehicles.xml")
-        with open(output_file, 'wb+') as f_write:
-            vehicle_writer = matsim.writers.VehiclesWriter(f_write)
-            vehicle_writer.start_vehicle_definitions()
-
-            vehicle_id = "car"
-            length = 7.5
-            width = 1.0
-            pce = 1.0
-            network_mode = "car"
-
-            vehicle_writer.add_vehicle_type(vehicle_id=vehicle_id, length=length, width=width, pce=pce,
-                                            network_mode=network_mode)
-
-            for _, hh in self.df.groupby([s.UNIQUE_HH_ID_COL]):
-                vehicle_ids: list = hh[s.LIST_OF_CARS_COL].iloc[0]
-                if vehicle_ids:
-                    for vehicle_id in vehicle_ids:
-                        vehicle_writer.add_vehicle(vehicle_id=vehicle_id, vehicle_type="car")
-
-            vehicle_writer.end_vehicle_definitions()
-
-        logger.info(f"Wrote vehicles to MATSim xml: {output_file}")
-
-    def change_last_leg_activity_to_home(self) -> None:
-        """
-        Change the target activity of the last leg to home. Alternative to add_return_home_leg().
-        Assumes LEG_ID is ascending in order of legs (which it is in MiD and should be in other datasets).
-        """
-        logger.info("Changing last leg activity to home...")
-        self.df = self.df.sort_values(by=[s.UNIQUE_LEG_ID_COL])
-
-        is_last_leg = self.df[s.PERSON_ID_COL].ne(self.df[s.PERSON_ID_COL].shift(-1))
-
-        number_of_rows_to_change = len(self.df[is_last_leg & (self.df[s.ACT_TO_INTERNAL_COL] != s.ACT_HOME)])
-
-        self.df.loc[is_last_leg, s.ACT_TO_INTERNAL_COL] = s.ACT_HOME
-        self.df.loc[is_last_leg, 'activity_translated_string'] = "home"
-        # We also need to remove markers for main or mirroring main activities, because home is never main
-        self.df.loc[is_last_leg, s.IS_MAIN_ACTIVITY_COL] = 0
-        self.df.loc[is_last_leg, s.MIRRORS_MAIN_ACTIVITY_COL] = 0
-        # This means there might be some persons with no main activity. This is not a problem for the current model.
-        logger.info(f"Changed last leg activity to home for {number_of_rows_to_change} of {len(self.df)} rows.")
-
-    def assign_random_location(self):
-        """
-        Assign a random location to each activity.
-        :return:
-        """
-        gdf = gpd.read_file(s.SHAPE_BOUNDARY_FILE)
-        polygon = h.find_outer_boundary(gdf)
-        self.df['random_point'] = self.df.apply(lambda row: h.random_point_in_polygon(polygon), axis=1)
-
-    def mark_protagonist_leg(self):
-        """
-        Identify the 'protagonist' leg among connected legs for each household.
-        The leg with the highest-ranked activity in each group of connected legs is considered the protagonist.
-        :return: Updates self.df with a new column indicating if each leg is a protagonist (1) or not (0)
-        """
-        household_col = s.UNIQUE_HH_ID_COL
-        connected_legs_col = s.CONNECTED_LEGS_COL
-        unique_leg_id_col = s.UNIQUE_LEG_ID_COL
-        act_to_internal_col = s.ACT_TO_INTERNAL_COL
-        activities_ranked = [
-            s.ACT_ERRANDS,
-            s.ACT_LEISURE,
-            s.ACT_MEETUP,
-            s.ACT_SHOPPING,
-            s.ACT_EDUCATION,
-            s.ACT_LESSONS,
-            s.ACT_SPORTS,
-            s.ACT_EARLY_EDUCATION,
-            s.ACT_DAYCARE,  # Likely to be dropped off/picked up
-            s.ACT_BUSINESS,  # Likely to be accompanied
-            s.ACT_HOME]  # Home must stay home
-
-        def find_protagonist(household_group):
-            prot_series = pd.Series(0, index=household_group.index)
-            if household_group[connected_legs_col].isna().all():
-                logger.debug(f"No connections exist for household {household_group[household_col].iloc[0]}.")
-                return prot_series
-            else:
-                logger.debug(f"Finding protagonist for household {household_group[household_col].iloc[0]}")
-
-            checked_legs = []
-            for idx, row in household_group.iterrows():
-                if not isinstance(row[connected_legs_col], list):
-                    continue
-                if idx in checked_legs:
-                    continue
-                connected_legs = set(row[connected_legs_col]).union({row[unique_leg_id_col]})
-                leg_data = []
-                for leg_id in connected_legs:
-                    if not all(elem in connected_legs for elem in
-                               household_group.loc[
-                                   household_group[unique_leg_id_col] == leg_id, connected_legs_col].iloc[0]):
-                        logger.warning(
-                            f"Leg {leg_id} has inconsistent connections. This might lead to unexpected results.")
-
-                    checked_legs.append(household_group.loc[household_group[unique_leg_id_col] == leg_id].index[0])
-                    leg_activity = \
-                    household_group.loc[household_group[unique_leg_id_col] == leg_id, act_to_internal_col].iloc[0]
-                    activity_rank = activities_ranked.index(leg_activity) if leg_activity in activities_ranked else -1
-                    leg_data.append({'leg_id': leg_id, 'activity': leg_activity, 'activity_rank': activity_rank})
-
-                connected_legs_df = pd.DataFrame(leg_data)
-                if not connected_legs_df.empty:
-                    connected_legs_df.sort_values(by='activity_rank', ascending=False, inplace=True)
-                    protagonist_leg_id = connected_legs_df.iloc[0]['leg_id']
-                    prot_series.loc[household_group[unique_leg_id_col] == protagonist_leg_id] = 1
-
-            return prot_series
-
-        self.df[s.IS_PROTAGONIST_COL] = self.df.groupby(household_col).apply(find_protagonist).reset_index(level=0,
-                                                                                                           drop=True)
-
-    def mark_main_activity(self):
-        """
-        Check if the leg is travelling to the main activity of the day.
-        Requires calculate_activity_time() to be run first.
-        :return: Updates self.df with a new column indicating if each leg is the main activity (1) or not (0)
-        """
-        person_col = s.UNIQUE_P_ID_COL
-        act_to_internal_col = s.ACT_TO_INTERNAL_COL
-        leg_non_unique_id_col = s.LEG_NON_UNIQUE_ID_COL
-        act_dur_seconds_col = s.ACT_DUR_SECONDS_COL
-
-        def find_main_activity(person):
-            is_main_activity_series = pd.Series(0, index=person.index)  # Initialize all values to 0
-
-            # Filter out home activities (home must not be the main activity)
-            group = person[person[act_to_internal_col] != s.ACT_HOME]
-
-            if group.empty:
-                logger.debug(f"Person {person[person_col].iloc[0]} has no legs outside home. No main activity.")
-                return is_main_activity_series
-
-            if len(group) == 1:
-                # If the person has no legs, there is no main activity
-                if group[leg_non_unique_id_col].isna().all():
-                    logger.debug(f"Person {group[person_col].iloc[0]} has no legs. No main activity.")
-                    return is_main_activity_series
-
-                # If the person has only one activity outside home, it is the main activity
-                main_activity_index = group.index[0]
-                is_main_activity_series.at[main_activity_index] = 1
-                assert is_main_activity_series.sum() == 1
-                return is_main_activity_series
-
-            # If the person has more than one activity, the main activity is the first work activity
-            work_activity_rows = group[group[act_to_internal_col] == s.ACT_WORK]
-            if not work_activity_rows.empty:
-                is_main_activity_series[work_activity_rows.index[0]] = 1
-                assert is_main_activity_series.sum() == 1
-                logger.debug(f"Person {group[person_col].iloc[0]} has a work activity. Main activity is work.")
-                return is_main_activity_series
-
-            # If the person has no work activity, the main activity is the first education activity
-            education_activity_rows = group[
-                group[act_to_internal_col].isin([s.ACT_EDUCATION, s.ACT_EARLY_EDUCATION, s.ACT_DAYCARE])]
-            if not education_activity_rows.empty:
-                is_main_activity_series[education_activity_rows.index[0]] = 1
-                assert is_main_activity_series.sum() == 1
-                logger.debug(
-                    f"Person {group[person_col].iloc[0]} has an education activity. Main activity is education.")
-                return is_main_activity_series
-
-            # If the person has no work or education activity, the main activity is the longest activity
-            if group[act_dur_seconds_col].isna().all():
-                # If all activities have no duration, pick the middle one
-                is_main_activity_series.iloc[len(group) // 2] = 1  # Integer division
-                assert is_main_activity_series.sum() == 1
-                logger.debug(
-                    f"Person {group[person_col].iloc[0]} has no activities with duration. Main activity is middle.")
-                return is_main_activity_series
-            max_duration_index = group[act_dur_seconds_col].idxmax()
-            is_main_activity_series[max_duration_index] = 1
-            assert is_main_activity_series.sum() == 1
-            logger.debug(f"Person {group[person_col].iloc[0]} has no work or education activity. "
-                         f"Main activity is longest activity.")
-            return is_main_activity_series
-
-        self.df[s.IS_MAIN_ACTIVITY_COL] = self.df.groupby(person_col).apply(find_main_activity).reset_index(level=0,
-                                                                                                            drop=True)
-
-    # def translate_modes(self):
-    #     """
-    #     Translate the modes from the MiD codes to the MATSim strings.
-    #     Recommended to do this just before writing to MATSim xml.
-    #     :return:
-    #     """
-    #     logger.info(f"Translating modes...")
-    #     defined_modes = [s.MODE_CAR, s.MODE_PT, s.MODE_RIDE, s.MODE_BIKE, s.MODE_WALK, s.MODE_UNDEFINED]
-    #     count_non_matching = (~self.df[s.LEG_MAIN_MODE_COL].isin(defined_modes)).sum()
-    #     count_nan = self.df[s.LEG_MAIN_MODE_COL].isna().sum()
-    #     count_non_leg = self.df[s.LEG_ID_COL].isna().sum()
-    #     if count_non_matching > 0:
-    #         logger.warning(f"{count_non_matching} rows have a mode that is not in the defined modes."
-    #                        f"{count_nan} rows have no mode."
-    #                        f"{count_non_leg} rows have no leg.")
-    #     mode_translation = {
-    #         s.MODE_CAR: "car",
-    #         s.MODE_PT: "pt",
-    #         s.MODE_RIDE: "ride",
-    #         s.MODE_BIKE: "bike",
-    #         s.MODE_WALK: "walk",
-    #     }
-    #     self.df['mode_translated_string'] = self.df[s.LEG_MAIN_MODE_COL].map(mode_translation)
-    #     logger.info(f"Translated modes.")
-
-    # def translate_activities(self):
-    #     """
-    #     Translate the activities from the MiD codes to the MATSim strings.
-    #     Recommended to do this just before writing to MATSim xml.
-    #     :return:
-    #     """
-    #     logger.info(f"Translating activities...")
-    #     activity_translation = {
-    #         s.ACT_WORK: "work",
-    #         s.ACT_BUSINESS: "work",
-    #         s.ACT_EDUCATION: "education",
-    #         s.ACT_SHOPPING: "shopping",
-    #         s.ACT_ERRANDS: "leisure",
-    #         s.ACT_PICK_UP_DROP_OFF: "other",
-    #         s.ACT_LEISURE: "leisure",
-    #         s.ACT_HOME: "home",
-    #         s.ACT_RETURN_JOURNEY: "other",
-    #         s.ACT_OTHER: "other",
-    #         s.ACT_EARLY_EDUCATION: "education",
-    #         s.ACT_DAYCARE: "education",
-    #         s.ACT_ACCOMPANY_ADULT: "other",
-    #         s.ACT_SPORTS: "leisure",
-    #         s.ACT_MEETUP: "leisure",
-    #         s.ACT_LESSONS: "leisure",
-    #         s.ACT_UNSPECIFIED: "other",
-    #     }
-    #     self.df['activity_translated_string'] = self.df[s.TO_ACTIVITY_WITH_CONNECTED_COL].map(activity_translation)
-    #     logger.info(f"Translated activities.")
-
-    def vary_times_by_household(self, hh_id_col, time_cols, max_shift_minutes=15):
-        """
-        Varies times in the DataFrame by the same random amount (±max_shift_minutes) for each household.
-
-        :param hh_id_col: String, the column name for the unique hh identifier.
-        :param time_cols: List of strings, the names of the columns containing time data.
-        :param max_shift_minutes: Integer, the maximum number of minutes for the time shift.
-        :return: pandas DataFrame with varied times.
-        """
-
-        logger.info("Varying times by household...")
-
-        def apply_time_shift(group):
-            time_shift = timedelta(minutes=np.random.randint(-max_shift_minutes, max_shift_minutes + 1))
-
-            # Apply this time shift to all time columns
-            for col in time_cols:
-                group[col] = group[col].apply(lambda x: x + time_shift if pd.notnull(x) else x)
-            return group
-
-        self.df = self.df.groupby(hh_id_col).apply(apply_time_shift)
-        logger.info("Times varied by person.")
-
-    def downsample_population(self, sample_percentage):
-        """
-        Downsample the population to a given sample percentage size of the original population.
-        Recommended to sample households (e.g. at the point when only households are loaded),
-        not persons, to keep the household structure intact.
-        """
-        logger.info("Downsampling population...")
-        self.df = self.df.sample(frac=sample_percentage)
-        stats_tracker.log("downsampled_population", sample_percentage)
-        logger.info(f"Downsampled population to {sample_percentage * 100}% of the original population.")
 
 
 class MiDDataEnhancer(DataFrameProcessor):
@@ -487,13 +101,13 @@ class MiDDataEnhancer(DataFrameProcessor):
 
         # Group by person and calculate the time difference within each group
         self.df[s.ACT_DUR_SECONDS_COL] = self.df.groupby(s.PERSON_ID_COL)[s.LEG_START_TIME_COL].shift(-1) - \
-                                                    self.df[
-                                                        s.LEG_END_TIME_COL]
+                                         self.df[
+                                             s.LEG_END_TIME_COL]
 
         self.df[s.ACT_DUR_SECONDS_COL] = self.df[s.ACT_DUR_SECONDS_COL].dt.total_seconds()
         self.df[s.ACT_DUR_SECONDS_COL] = pd.to_numeric(self.df[s.ACT_DUR_SECONDS_COL],
-                                                                  downcast='integer',
-                                                                  errors='coerce')
+                                                       downcast='integer',
+                                                       errors='coerce')
 
         # Set the activity time of the last leg to None
         is_last_leg = self.df["unique_person_id"] != self.df["unique_person_id"].shift(-1)
@@ -804,7 +418,7 @@ class MiDDataEnhancer(DataFrameProcessor):
     #         self.df.update(updated_df)
     #     logger.info("Time estimation completed.")
 
-    def estimate_leg_times(self): #TODO!! (rbw nicht berücksichtigen)
+    def estimate_leg_times(self):  # TODO!! (rbw nicht berücksichtigen)
         """
         Estimates leg_start_time and leg_end_time if they are missing or invalid, using the imputed leg duration and
         activity duration from similar persons. For rbW trips, activity duration is set to 0, as otherwise they get
@@ -929,8 +543,7 @@ class MiDDataEnhancer(DataFrameProcessor):
                             seconds=person.at[i, s.LEG_DURATION_SECONDS_COL])
 
             logger.debug(
-                f"Person {person_id} updated times: \n{person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL,
-                                                               s.ACT_TO_INTERNAL_COL, s.LEG_IS_RBW_COL]]}")
+                f"Person {person_id} updated times: \n{person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL, s.ACT_TO_INTERNAL_COL, s.LEG_IS_RBW_COL]]}")
             if person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]].isna().any().any():
                 logger.warning(f"Person {person_id} still has missing times. Check the data and try again. Skipping...")
                 continue
@@ -943,148 +556,129 @@ class MiDDataEnhancer(DataFrameProcessor):
             self.df.update(updated_df)
         logger.info("Time estimation completed.")
 
-    def estimate_leg_times_old(self):
+    def mark_bad_times_as_nan(self):
         """
-        Estimates leg_start_time and leg_end_time if they are missing or invalid, using data from similar persons.
-        The function imputes only the times that are identified as bad or missing and adjusts subsequent times accordingly.
+        Identifies and marks bad times in the dataframe for each person's legs as NaN.
         """
-        self.df[s.IS_IMPUTED_TIME_COL] = 0
-        persons = self.df.groupby("unique_person_id")
-        logger.info(f"Estimating times, where missing or invalid, for {len(persons)} persons...")
+        # Check for bad start times
+        bad_start_time_indices = self.df[self.df[s.LEG_START_TIME_COL].isna()].index
+        # Check for bad end times
+        bad_end_time_indices = self.df[self.df[s.LEG_END_TIME_COL].isna()].index
+        # Check for bad duration times
+        bad_duration_indices = self.df[(self.df[s.ACT_DUR_SECONDS_COL].isna()) |
+                                       (self.df[s.ACT_DUR_SECONDS_COL] < 0)].index
 
-        updated_persons = []  # For storing updates
+        # Mark bad times as NaN
+        self.df.loc[bad_start_time_indices, s.LEG_START_TIME_COL] = pd.NA
+        self.df.loc[bad_end_time_indices, s.LEG_END_TIME_COL] = pd.NA
+        self.df.loc[bad_duration_indices, s.ACT_DUR_SECONDS_COL] = pd.NA
 
-        for person_id, person in tqdm(persons, desc="Estimating leg times", total=len(persons)):
-            person = person.copy()  # Avoid SettingWithCopyWarning
+        # Log information about bad times marked as NaN
+        if len(bad_start_time_indices) > 0 or len(bad_end_time_indices) > 0 or len(bad_duration_indices) > 0:
+            logger.info(f"Marked bad times as NaN at indices: "
+                        f"start_time: {bad_start_time_indices.tolist()}, "
+                        f"end_time: {bad_end_time_indices.tolist()}, "
+                        f"duration: {bad_duration_indices.tolist()}")
 
-            if len(person) == 1:
-                if pd.isna(person.at[person.index[0], s.LEG_NON_UNIQUE_ID_COL]):
-                    stats_tracker.increment("estimate_leg_times: person_with_no_legs")
-                    continue
-                stats_tracker.increment("estimate_leg_times: person_with_one_leg")
+    def correct_times(self):
+        """
+        Corrects the times in the dataframe for each person's legs.
+        Identifies and fixes any '999999' placeholder times by finding similar persons' activities.
+        """
 
-            # Check for negative activity times and invalid leg times
-            invalid_times_mask = (
-                    (person[s.ACT_DUR_SECONDS_COL] < 0) |
-                    (person[s.LEG_DURATION_SECONDS_COL] > 72000) |  # Leg taking over 20h or MiD invalid codes
-                    (person[s.LEG_START_TIME_COL].isna()) |
-                    (person[s.LEG_END_TIME_COL].isna()) |
-                    (person[s.LEG_END_TIME_COL] <= person[s.LEG_START_TIME_COL])  # End time should be after start time
-            )
+        for person in self.df[s.UNIQUE_P_ID_COL].unique():
+            person_legs = self.df[self.df[s.UNIQUE_P_ID_COL] == person]
 
-            # If no invalid times, skip this person
-            if not invalid_times_mask.any():
+            bad_time_indices = person_legs[
+                (person_legs[s.LEG_START_TIME_COL].isna()) |
+                (person_legs[s.LEG_END_TIME_COL].isna()) |
+                (person_legs[s.ACT_DUR_SECONDS_COL].isna())
+                ].index
+
+            if len(bad_time_indices) == 0:
                 continue
 
-            stats_tracker.increment("estimate_leg_times: person_with_invalid_times")
+            if (person_legs[s.ACT_DUR_SECONDS_COL].isna()).any() or (
+                    person_legs[s.LEG_START_TIME_COL].isna()).any():
+                similar_persons = self.find_similar_persons_with_activities(
+                    person_legs.iloc[0], person_legs[s.ACT_TO_INTERNAL_COL].tolist()
+                )
 
-            # Find similar persons
-            orig_min_similar = 400
-            for min_similar in range(orig_min_similar, 10000,
-                                     1000):  # Find more similar persons if there are too few with good data
-                similar_persons: pd.DataFrame = self.find_similar_persons(person, min_similar)
+            start_index = person_legs.index.get_loc(bad_time_indices[0])
+            logger.debug(f"Processing person_id {person} starting at leg index {start_index}")
+            logger.debug(
+                f"Old times: {person_legs[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL, s.ACT_DUR_SECONDS_COL, s.ACT_TO_INTERNAL_COL]]}")
 
-                # Filter similar persons for valid data
-                similar_persons_with_last_legs = similar_persons[
-                    similar_persons[s.LEG_NON_UNIQUE_ID_COL].notna() &
-                    similar_persons[s.LEG_START_TIME_COL].notna() &
-                    (similar_persons[s.LEG_DURATION_SECONDS_COL] > 0) &
-                    (similar_persons[s.LEG_DURATION_SECONDS_COL] <= 18000)  # we don't want super-long or invalid legs
-                    ]
-                # Removing rows with na activity durs removes the last leg, so we need a separate df to keep quality
-                similar_persons_no_last_legs = similar_persons_with_last_legs[
-                    (similar_persons_with_last_legs[s.ACT_DUR_SECONDS_COL].notna()) &
-                    (similar_persons_with_last_legs[s.ACT_DUR_SECONDS_COL] > 0)
-                    ]
+            for i in range(start_index, len(person_legs)):
+                current_leg_index = person_legs.index[i]
+                current_leg = person_legs.loc[current_leg_index]
 
-                if len(similar_persons_no_last_legs) > orig_min_similar / 2:
-                    break
+                if i == 0:
+                    if current_leg[s.LEG_START_TIME_COL].isna():
+                        matching_similar_persons = [sp for sp in similar_persons if
+                                                    self.df[self.df[s.UNIQUE_P_ID_COL] == sp].iloc[0][
+                                                        s.ACT_TO_INTERNAL_COL] ==
+                                                    current_leg[s.ACT_TO_INTERNAL_COL]]
+                        if matching_similar_persons:
+                            similar_person = matching_similar_persons[0]
+                        else:
+                            similar_person = similar_persons[0]
+
+                        similar_person_legs = self.df[self.df[s.UNIQUE_P_ID_COL] == similar_person]
+                        self.df.loc[current_leg_index, s.LEG_START_TIME_COL] = similar_person_legs.iloc[0][
+                            s.LEG_START_TIME_COL]
+
+                    self.df.loc[current_leg_index, s.LEG_END_TIME_COL] = self.df.loc[
+                                                                             current_leg_index, s.LEG_START_TIME_COL] + \
+                                                                         pd.Timedelta(
+                                                                             seconds=current_leg[s.LEG_DURATION_SECONDS_COL])
                 else:
-                    logger.info(f"Person {person_id} has too few similar persons. Lowering standards.")
-                    stats_tracker.increment("estimate_leg_times: persons_with_few_similar")
-            else:  # No break
-                logger.warning(f"Person {person_id} misses times and has no even slightly similar persons. "
-                               f"Removing the person to avoid errors.")
-                stats_tracker.increment("estimate_leg_times: persons_with_no_similar")
-                self.df.drop(person.index, inplace=True)
-                continue
+                    previous_leg_index = person_legs.index[i - 1]
+                    previous_end_time = self.df.loc[previous_leg_index, s.LEG_END_TIME_COL]
+                    previous_activity_time = self.df.loc[previous_leg_index, s.ACT_DUR_SECONDS_COL]
+                    previous_activity_type = self.df.loc[previous_leg_index, s.ACT_TO_INTERNAL_COL]
 
-            # Impute times
-            loops_max = 5
-            loop = 0
-            while loop < loops_max:  # Loop until imputed times pass checks
-                for idx in person[invalid_times_mask].index:
-                    if idx == person.index[0]:  # Start of the day
-                        similar_persons_same_activity = similar_persons_with_last_legs.loc[
-                            (similar_persons_with_last_legs[s.ACT_TO_INTERNAL_COL] == person.at[
-                                idx, s.ACT_TO_INTERNAL_COL]) &
-                            (similar_persons_with_last_legs[s.LEG_NON_UNIQUE_ID_COL] == 1), s.LEG_START_TIME_COL
-                        ]
-                        if similar_persons_same_activity.empty:
-                            similar_persons_same_activity = similar_persons_with_last_legs.loc[
-                                (similar_persons_with_last_legs[s.LEG_NON_UNIQUE_ID_COL] == 1), s.LEG_START_TIME_COL
-                            ]
+                    if previous_activity_time == 999999:
+                        previous_activity_time = \
+                        similar_persons[similar_persons[s.ACT_TO_INTERNAL_COL] == previous_activity_type][
+                            s.ACT_DUR_SECONDS_COL].mean()
 
-                        typical_day_start = similar_persons_same_activity.sample(1).iloc[0]
-                        my_start_time = typical_day_start if pd.isna(person.at[idx, s.LEG_START_TIME_COL]) else \
-                            person.at[idx, s.LEG_START_TIME_COL]
-                    else:  # Other leg start times
-                        prev_end_time = person.at[idx - 1, s.LEG_END_TIME_COL]
-                        similar_persons_same_activity = similar_persons_no_last_legs.loc[
-                            (similar_persons_no_last_legs[s.ACT_TO_INTERNAL_COL] == person.at[
-                                idx - 1, s.ACT_TO_INTERNAL_COL]),
-                            s.ACT_DUR_SECONDS_COL
-                        ]
-                        if similar_persons_same_activity.empty:
-                            similar_persons_same_activity = similar_persons_no_last_legs[s.ACT_DUR_SECONDS_COL]
+                    self.df.loc[current_leg_index, s.LEG_START_TIME_COL] = previous_end_time + pd.Timedelta(
+                        seconds=previous_activity_time)
+                    self.df.loc[current_leg_index, s.LEG_END_TIME_COL] = self.df.loc[
+                                                                             current_leg_index, s.LEG_START_TIME_COL] + \
+                                                                         pd.Timedelta(
+                                                                             seconds=current_leg[s.LEG_DURATION_SECONDS_COL])
+            logger.debug(
+                f"New times: {person_legs[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL, s.ACT_DUR_SECONDS_COL, s.ACT_TO_INTERNAL_COL]]}")
 
-                        my_start_time = prev_end_time + pd.Timedelta(
-                            seconds=similar_persons_same_activity.sample(1).iloc[0])
+    def find_similar_persons_with_activities(self, person, activity_types: list, attributes: list = None):
+        """
+        Find similar persons (or other entries) based on a dynamic number of matching attributes.
+        Ensure there is at least one person with the specified activity types.
 
-                    # Leg duration
-                    similar_persons_same_activity = similar_persons_with_last_legs.loc[
-                        (similar_persons_with_last_legs[s.ACT_TO_INTERNAL_COL] == person.at[
-                            idx, s.ACT_TO_INTERNAL_COL]),
-                        s.LEG_DURATION_SECONDS_COL
-                    ]
-                    if similar_persons_same_activity.empty:
-                        similar_persons_same_activity = similar_persons_with_last_legs[s.LEG_DURATION_SECONDS_COL]
-                    my_leg_duration = similar_persons_same_activity.sample(1).iloc[0]
+        :param person: DataFrame or Series, the person to find similar persons for.
+        :param activity_types: List of strings, the required activity types.
+        :param attributes: List of strings, the attributes to match on. If None, uses default attributes.
+        """
+        if isinstance(person, pd.DataFrame):
+            person = person.iloc[0]
+        if attributes is None:
+            attributes = [s.H_REGION_TYPE_COL, s.NUMBER_OF_LEGS_COL, s.HAS_LICENSE_COL, s.H_CAR_IN_HH_COL]
 
-                    # Assign times
-                    person.at[idx, s.LEG_START_TIME_COL] = my_start_time
-                    person.at[idx, s.LEG_END_TIME_COL] = my_start_time + pd.Timedelta(seconds=my_leg_duration)
-                    person.at[idx, s.LEG_DURATION_SECONDS_COL] = my_leg_duration
-                    person.at[idx, s.IS_IMPUTED_TIME_COL] = 1
+        logger.debug(f"Finding similar persons for {person[s.UNIQUE_P_ID_COL]} with activities {activity_types}...")
+        for min_matches in range(len(attributes), 0, -1):  # Decrease criteria to a minimum of 1 attribute
+            attribute_combinations = itertools.combinations(attributes, min_matches)
+            for combination in attribute_combinations:
+                condition = (self.df[list(combination)] == person[list(combination)]).all(axis=1)
+                similar_persons = self.df[condition]
 
-                    # Adjust subsequent times
-                    for i in range(idx + 1, len(person)):
-                        if i < len(person):
-                            prev_end_time = person.at[i - 1, s.LEG_END_TIME_COL]
-                            if pd.notna(prev_end_time):
-                                person.at[i, s.LEG_START_TIME_COL] = prev_end_time
-                                person.at[i, s.LEG_END_TIME_COL] = prev_end_time + pd.Timedelta(
-                                    seconds=person.at[i, s.LEG_DURATION_SECONDS_COL])
+                # Check if similar persons have at least one person with each required activity type
+                if all(any(similar_persons[s.ACT_TO_INTERNAL_COL] == activity_type) for activity_type in activity_types):
+                    logger.debug(f"Found similar persons for {person[s.UNIQUE_P_ID_COL]} based on {combination}.")
+                    return similar_persons[similar_persons[s.UNIQUE_P_ID_COL] != person[s.UNIQUE_P_ID_COL]]
 
-                # Check if times are valid (for now, all tours that end before 2am are valid)
-                if person[s.LEG_END_TIME_COL].iloc[-1] < pd.Timestamp(s.BASE_DATE) + pd.Timedelta(days=1, hours=2):
-                    break
-                logger.info(f"Person {person_id} imputed invalid times. Trying again...")
-                stats_tracker.increment("estimate_leg_times: person_with_invalid_times_retries")
-                loop += 1
-
-            logger.info(
-                f"Person {person_id} updated times: \n{person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL, s.ACT_TO_INTERNAL_COL]]}")
-            if person[[s.LEG_START_TIME_COL, s.LEG_END_TIME_COL]].isna().any().any():
-                raise ValueError(f"Person {person_id} still has missing times. ")
-            updated_persons.append(person)
-
-        if updated_persons:
-            logger.info(f"Concatenating {len(updated_persons)} updated persons...")
-            updated_df = pd.concat(updated_persons)
-            logger.info(f"Updating original df...")
-            self.df.update(updated_df)
-        logger.info("Time estimation completed.")
+        return pd.DataFrame()  # Return an empty DataFrame if no similar persons found with required activity types
 
     def find_similar_persons(self, person, min_similar, attributes: list = None):
         """
@@ -1638,11 +1232,11 @@ class MiDDataEnhancer(DataFrameProcessor):
                     legs = person.loc[main_activity_row + 1:closest_home_row]
 
                 distances = legs[s.LEG_DISTANCE_KM_COL].tolist()
-                dist_estimation_tree = utils.helpers.build_estimation_tree(distances)
+                dist_estimation_tree = h.build_estimation_tree(distances)
                 home_to_main_distance = dist_estimation_tree[-1][0][2]  # highest lvl, leg 0, estimated value
 
                 times = legs[s.LEG_DURATION_MINUTES_COL].tolist()  # TODO: convert to secs asap
-                time_estimation_tree = utils.helpers.build_estimation_tree(times)
+                time_estimation_tree = h.build_estimation_tree(times)
                 home_to_main_time = time_estimation_tree[-1][0][2]  # highest lvl, leg 0, estimated value
 
                 time_is_estimated = 1
@@ -1784,7 +1378,7 @@ class MiDDataEnhancer(DataFrameProcessor):
 
         # Save checks_df to a CSV file
         checks_df = pd.DataFrame(checks_data)
-        file_loc = os.path.join(pipeline_setup.OUTPUT_DIR, 'leg_connections_logs.csv')
+        file_loc = path.join(pipeline_setup.OUTPUT_DIR, 'leg_connections_logs.csv')
         checks_df.to_csv(file_loc, index=False)
 
         # Add connections as a new column to self.df
@@ -1817,3 +1411,135 @@ class MiDDataEnhancer(DataFrameProcessor):
                 lambda x: len(x) if isinstance(x, list) else 0).sum()
             self.df.loc[self.df[s.PERSON_ID_COL] == person_id, s.NUM_CONNECTED_LEGS_COL] = num_connections
             logger.debug(f"Person {person_id} has {num_connections} connected legs.")
+
+    def mark_main_activity(self):
+        """
+        Check if the leg is travelling to the main activity of the day.
+        Requires calculate_activity_time() to be run first.
+        :return: Updates self.df with a new column indicating if each leg is the main activity (1) or not (0)
+        """
+        person_col = s.UNIQUE_P_ID_COL
+        act_to_internal_col = s.ACT_TO_INTERNAL_COL
+        leg_non_unique_id_col = s.LEG_NON_UNIQUE_ID_COL
+        act_dur_seconds_col = s.ACT_DUR_SECONDS_COL
+
+        def find_main_activity(person):
+            is_main_activity_series = pd.Series(0, index=person.index)  # Initialize all values to 0
+
+            # Filter out home activities (home must not be the main activity)
+            group = person[person[act_to_internal_col] != s.ACT_HOME]
+
+            if group.empty:
+                logger.debug(f"Person {person[person_col].iloc[0]} has no legs outside home. No main activity.")
+                return is_main_activity_series
+
+            if len(group) == 1:
+                # If the person has no legs, there is no main activity
+                if group[leg_non_unique_id_col].isna().all():
+                    logger.debug(f"Person {group[person_col].iloc[0]} has no legs. No main activity.")
+                    return is_main_activity_series
+
+                # If the person has only one activity outside home, it is the main activity
+                main_activity_index = group.index[0]
+                is_main_activity_series.at[main_activity_index] = 1
+                assert is_main_activity_series.sum() == 1
+                return is_main_activity_series
+
+            # If the person has more than one activity, the main activity is the first work activity
+            work_activity_rows = group[group[act_to_internal_col] == s.ACT_WORK]
+            if not work_activity_rows.empty:
+                is_main_activity_series[work_activity_rows.index[0]] = 1
+                assert is_main_activity_series.sum() == 1
+                logger.debug(f"Person {group[person_col].iloc[0]} has a work activity. Main activity is work.")
+                return is_main_activity_series
+
+            # If the person has no work activity, the main activity is the first education activity
+            education_activity_rows = group[
+                group[act_to_internal_col].isin([s.ACT_EDUCATION, s.ACT_EARLY_EDUCATION, s.ACT_DAYCARE])]
+            if not education_activity_rows.empty:
+                is_main_activity_series[education_activity_rows.index[0]] = 1
+                assert is_main_activity_series.sum() == 1
+                logger.debug(
+                    f"Person {group[person_col].iloc[0]} has an education activity. Main activity is education.")
+                return is_main_activity_series
+
+            # If the person has no work or education activity, the main activity is the longest activity
+            if group[act_dur_seconds_col].isna().all():
+                # If all activities have no duration, pick the middle one
+                is_main_activity_series.iloc[len(group) // 2] = 1  # Integer division
+                assert is_main_activity_series.sum() == 1
+                logger.debug(
+                    f"Person {group[person_col].iloc[0]} has no activities with duration. Main activity is middle.")
+                return is_main_activity_series
+            max_duration_index = group[act_dur_seconds_col].idxmax()
+            is_main_activity_series[max_duration_index] = 1
+            assert is_main_activity_series.sum() == 1
+            logger.debug(f"Person {group[person_col].iloc[0]} has no work or education activity. "
+                         f"Main activity is longest activity.")
+            return is_main_activity_series
+
+        self.df[s.IS_MAIN_ACTIVITY_COL] = self.df.groupby(person_col).apply(find_main_activity).reset_index(level=0,
+                                                                                                            drop=True)
+
+    def mark_protagonist_leg(self):
+        """
+        Identify the 'protagonist' leg among connected legs for each household.
+        The leg with the highest-ranked activity in each group of connected legs is considered the protagonist.
+        :return: Updates self.df with a new column indicating if each leg is a protagonist (1) or not (0)
+        """
+        household_col = s.UNIQUE_HH_ID_COL
+        connected_legs_col = s.CONNECTED_LEGS_COL
+        unique_leg_id_col = s.UNIQUE_LEG_ID_COL
+        act_to_internal_col = s.ACT_TO_INTERNAL_COL
+        activities_ranked = [
+            s.ACT_ERRANDS,
+            s.ACT_LEISURE,
+            s.ACT_MEETUP,
+            s.ACT_SHOPPING,
+            s.ACT_EDUCATION,
+            s.ACT_LESSONS,
+            s.ACT_SPORTS,
+            s.ACT_EARLY_EDUCATION,
+            s.ACT_DAYCARE,  # Likely to be dropped off/picked up
+            s.ACT_BUSINESS,  # Likely to be accompanied
+            s.ACT_HOME]  # Home must stay home
+
+        def find_protagonist(household_group):
+            prot_series = pd.Series(0, index=household_group.index)
+            if household_group[connected_legs_col].isna().all():
+                logger.debug(f"No connections exist for household {household_group[household_col].iloc[0]}.")
+                return prot_series
+            else:
+                logger.debug(f"Finding protagonist for household {household_group[household_col].iloc[0]}")
+
+            checked_legs = []
+            for idx, row in household_group.iterrows():
+                if not isinstance(row[connected_legs_col], list):
+                    continue
+                if idx in checked_legs:
+                    continue
+                connected_legs = set(row[connected_legs_col]).union({row[unique_leg_id_col]})
+                leg_data = []
+                for leg_id in connected_legs:
+                    if not all(elem in connected_legs for elem in
+                               household_group.loc[
+                                   household_group[unique_leg_id_col] == leg_id, connected_legs_col].iloc[0]):
+                        logger.warning(
+                            f"Leg {leg_id} has inconsistent connections. This might lead to unexpected results.")
+
+                    checked_legs.append(household_group.loc[household_group[unique_leg_id_col] == leg_id].index[0])
+                    leg_activity = \
+                        household_group.loc[household_group[unique_leg_id_col] == leg_id, act_to_internal_col].iloc[0]
+                    activity_rank = activities_ranked.index(leg_activity) if leg_activity in activities_ranked else -1
+                    leg_data.append({'leg_id': leg_id, 'activity': leg_activity, 'activity_rank': activity_rank})
+
+                connected_legs_df = pd.DataFrame(leg_data)
+                if not connected_legs_df.empty:
+                    connected_legs_df.sort_values(by='activity_rank', ascending=False, inplace=True)
+                    protagonist_leg_id = connected_legs_df.iloc[0]['leg_id']
+                    prot_series.loc[household_group[unique_leg_id_col] == protagonist_leg_id] = 1
+
+            return prot_series
+
+        self.df[s.IS_PROTAGONIST_COL] = self.df.groupby(household_col).apply(find_protagonist).reset_index(level=0,
+                                                                                                           drop=True)

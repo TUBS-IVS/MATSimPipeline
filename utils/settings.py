@@ -124,7 +124,7 @@ FIRST_LEG_STARTS_AT_HOME = VALUE_MAPS['misc']['first_leg_starts_at_home']
 
 # Misc
 LOWEST_LEVEL_GEOGRAPHY = settings['lowest_level_geography']
-DUN_DUN_DUUUN: bool = settings['misc']['dun_dun_duuun']  # Play sound on error
+PLAY_FAILURE_ALERT: bool = settings['misc']['dun_dun_duuun']  # Play sound on error (useful for long runs)
 BASE_DATE = "2020-01-01"  # Arbitrary date for converting times to datetime objects
 
 SAMPLE_SIZE = settings['sample_size']

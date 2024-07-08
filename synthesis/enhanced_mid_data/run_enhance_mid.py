@@ -3,7 +3,7 @@ import time
 
 import winsound
 
-from utils.population_frame_processor import MiDDataEnhancer
+from synthesis.enhanced_mid_data.mid_data_enhancer import MiDDataEnhancer
 from utils import pipeline_setup, settings as s, helpers as h
 from utils.logger import logging
 from utils.stats_tracker import stats_tracker
@@ -65,7 +65,7 @@ def enhance_travel_survey():
     population.check_for_merge_suffixes()
 
     # Remove legs that are "regelmäßiger beruflicher Weg" (duration is marked as 70701)
-    population.filter_out_rows(s.LEG_IS_RBW_COL, 1)
+    population.filter_out_rows(s.LEG_IS_RBW_COL, [1])
 
     # Translate MiD activities and modes to internal ones (only internal ones are to be used in processing)
     population.df = h.translate_column(population.df, s.ACT_MID_COL, s.ACT_TO_INTERNAL_COL, "activities", "mid",
@@ -92,11 +92,14 @@ def enhance_travel_survey():
     # population.activity_times_distribution_seconds()
     # population.leg_duration_distribution_seconds()
     population.write_short_overview()
-    population.estimate_leg_times()
+    # population.estimate_leg_times()
+    population.mark_bad_times_as_nan()
+    population.correct_times()
     # Recalculate after estimating leg times
     population.calculate_activity_duration()
 
     # population.apply_group_wise_rules([rules.is_main_activity], groupby_column=s.UNIQUE_P_ID_COL)
+    population.mark_main_activity()
 
     population.adjust_mode_based_on_age()
     population.adjust_mode_based_on_license()
@@ -111,6 +114,7 @@ def enhance_travel_survey():
     population.update_number_of_legs(s.NUMBER_OF_LEGS_INCL_IMPUTED_COL)  # Writes new column
 
     # population.apply_group_wise_rules([rules.is_protagonist], groupby_column=s.UNIQUE_HH_ID_COL)
+    population.mark_protagonist_leg()
 
     population.mark_mirroring_main_activities()
 
@@ -139,11 +143,9 @@ def enhance_travel_survey():
 
 if __name__ == '__main__':
     try:
-
         enhance_travel_survey()
-
     except Exception as e:
-        if s.DUN_DUN_DUUUN:
+        if s.PLAY_FAILURE_ALERT:
             winsound.Beep(600, 500)
             time.sleep(0.1)
             winsound.Beep(500, 500)

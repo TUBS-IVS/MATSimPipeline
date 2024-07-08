@@ -162,56 +162,6 @@ class DataFrameProcessor:
             logger.error(f"Failed to load and add CSV data from {csv_path}: {e}")
             raise
 
-    # def apply_row_wise_rules(self, rules) -> None:
-    #     """
-    #     Applies a set of custom row-wise rules to the DataFrame stored in this instance.
-    #     Adds the results as new column with the name of the rule function.
-    #     """
-    #     for rule_func in rules:
-    #         logger.warning("Applying row-wise rules is being deprecated")
-    #         logger.info(f"Applying row-wise rule '{rule_func.__name__}'")
-    #         try:
-    #             # Apply the rule and store the results in a separate Series
-    #             result_series = self.df.apply(lambda row: rule_func(row), axis=1)
-    #             null_mask = result_series.isnull()
-    #
-    #             if null_mask.any():
-    #                 logger.warning(f"The rule '{rule_func.__name__}' returned None for {null_mask.sum()} rows.")
-    #             if null_mask.all():
-    #                 raise ValueError(f"The rule '{rule_func.__name__}' returned None for all rows.")
-    #
-    #             self.df[rule_func.__name__] = result_series
-    #
-    #         except Exception as e:
-    #             logger.error(f"Failed to apply row-wise rule '{rule_func.__name__}': {e}")
-    #             raise
-
-    # def apply_group_wise_rules(self, rules, groupby_column, safe_apply=True) -> None:
-    #     """
-    #     Applies a set of custom group-wise rules to the DataFrame stored in this instance.
-    #     Each rule modifies the group and returns it. The modified groups are then merged back into the original DataFrame.
-    #     """
-    #
-    #     for rule_func in rules:
-    #         logger.warning("Applying group-wise rules is being deprecated")
-    #         logger.info(f"Applying group-wise rule '{rule_func.__name__}' grouped on column '{groupby_column}'")
-    #         try:
-    #             # The rule function is expected to return the modified group with the same index
-    #             modified_groups = self.df.groupby(groupby_column).apply(rule_func)
-    #
-    #             if modified_groups.shape[0] != self.df.shape[0]:
-    #                 raise ValueError(
-    #                     f"The rule '{rule_func.__name__}' returned a group with a different number of rows than the original DataFrame.")
-    #
-    #             self.df.reset_index(inplace=True, drop=True)
-    #             modified_groups.reset_index(inplace=True, drop=True)
-    #             self.df[rule_func.__name__] = modified_groups
-    #
-    #         except Exception as e:
-    #             logger.error(f"Failed to apply group-wise rule '{rule_func.__name__}': {e}")
-    #             raise
-    #         logger.info(f"Finished applying group-wise rule '{rule_func.__name__}'")
-
     def remove_columns_startswith(self, startswith) -> None:
         """
         Removes columns from the DataFrame that start with the specified string.

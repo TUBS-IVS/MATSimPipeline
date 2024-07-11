@@ -1,4 +1,3 @@
-output/pipeline.log
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -164,3 +163,4 @@ cython_debug/
 #.idea/
 /output
 /data
+/tests/data/

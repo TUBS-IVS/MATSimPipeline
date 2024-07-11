@@ -10,11 +10,11 @@ input_files:
     - "data/synthetic_households_city.csv"
     - "data/synthetic_households_region.csv"
 
-  enhanced_mid_folder: "data/MiD/Enhanced"
+  enhanced_mid_folder: "data/mid/enhanced"
 
-  mid_hh_folder: "data/MiD/Households"
-  mid_persons_folder: "data/MiD/Persons"
-  mid_trips_folder: "data/MiD/Trips"
+  mid_hh_folder: "data/mid/households"
+  mid_persons_folder: "data/mid/persons"
+  mid_trips_folder: "data/mid/trips"
 
   buildings_in_lowest_geography_with_weights_file: "data/houses_with_weights.csv"
 

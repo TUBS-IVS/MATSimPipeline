@@ -10,6 +10,13 @@ LOG_FILE_PATH = os.path.join(OUTPUT_DIR, 'pipeline.log')
 if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
 
+
+class MultiLineFormatter(logging.Formatter):
+    def format(self, record):
+        message = super().format(record)
+        return message.replace('\n', '\n' + ' ' * 20)
+
+
 LOGGING_CONFIG = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -17,19 +24,23 @@ LOGGING_CONFIG = {
         'standard': {
             'format': '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
         },
+        'multiline': {
+            '()': MultiLineFormatter,
+            'format': '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
+        },
     },
     'handlers': {
         'console': {
             'level': 'DEBUG',
             'class': 'logging.StreamHandler',
-            'formatter': 'standard',
+            'formatter': 'multiline',
             'stream': 'ext://sys.stdout',
         },
         'file': {
             'level': 'DEBUG',
             'class': 'logging.FileHandler',
             'filename': LOG_FILE_PATH,
-            'formatter': 'standard',
+            'formatter': 'multiline',
         },
     },
     'loggers': {

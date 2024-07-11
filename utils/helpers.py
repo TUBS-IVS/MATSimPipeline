@@ -1323,6 +1323,14 @@ def create_output_directory():
 
 
 def build_estimation_tree(distances: List[float]) -> List[List[List[float]]]:  # Tree level, Leg, Lengths
+    """
+    Build a tree of estimated distances from a list of distances.
+    In helpers because it's used in multiple places.
+    :param distances:
+    :return:
+    Example output:
+
+    """
     logger.debug(f"Building estimation tree for {len(distances)} legs.")
     tree: List[List[List[float]]] = []
 

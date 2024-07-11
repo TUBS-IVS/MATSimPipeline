@@ -8,11 +8,10 @@ import pandas as pd
 from sklearn.neighbors import KDTree
 
 import math
-
+import os
 import synthesis.location_assignment.myhoerl as myhoerl
 
-from utils import settings as s, helpers as h
-from utils.helpers import build_estimation_tree
+from utils import settings as s, helpers as h, pipeline_setup
 from utils.stats_tracker import stats_tracker
 from utils.logger import logging
 
@@ -45,7 +44,8 @@ class DistanceBasedMainActivityLocator:
         """
         person_legs = self.legs_dict[person_id]
 
-        if not person_legs or 'from_location' not in person_legs[0]:
+        if not person_legs:
+            # Person doesn't seem to have legs (no mobility). This is fine.
             return
 
         home_location = person_legs[0]['from_location']
@@ -87,6 +87,7 @@ class DistanceBasedMainActivityLocator:
             self.locate_main_activity(person_id)
         return self.legs_dict
 
+
 def reformat_locations(locations_data: Dict[str, Dict[str, Dict[str, Any]]]) -> Dict[str, Dict[str, np.ndarray]]:
     """Reformat locations data from a nested dictionary to a dictionary of numpy arrays."""
     reformatted_data = {}
@@ -101,7 +102,11 @@ def reformat_locations(locations_data: Dict[str, Dict[str, Dict[str, Any]]]) -> 
             identifiers.append(location_id)
             names.append(location_details['name'])
             coordinates.append(location_details['coordinates'])
-            potentials.append(location_details['potential'])
+            try:
+                potentials.append(location_details['potential'])
+            except KeyError:
+                logger.warning("Using old capacity name instead of potential name")
+                potentials.append(location_details['capacity'])  # Old name
 
         reformatted_data[purpose] = {
             'identifiers': np.array(identifiers, dtype=object),
@@ -422,16 +427,79 @@ def monte_carlo_select_candidate(candidates, use_distance=True):
     return chosen_candidate
 
 
-def populate_legs_dict_from_df(df: pd.DataFrame, s: Any) -> Dict[str, List[Dict[str, Any]]]:
-    """Uses the MiD df to populate a nested dictionary with leg information for each person."""
+def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any]]]:
+    """Uses the MiD df to populate a nested dictionary with leg information for each person.
+    :param df: DataFrame containing MiD data (BUT units are always meters, seconds)
+    :return: Nested dictionary with leg information for each person
+    Example output:
+{
+    1: [
+        {
+            'leg_id': 101,
+            'to_act_purpose': 'work',
+            'distance': 5.0,
+            'from_location': np.array([50.0, 8.0]),
+            'to_location': np.array([50.1, 8.1]),
+            'mode': 'car',
+            'is_main_activity': True,
+            'home_to_main_distance': 600
+        },
+        {
+            'leg_id': 102,
+            'to_act_purpose': 'home',
+            'distance': 5.0,
+            'from_location': np.array([50.1, 8.1]),
+            'to_location': np.array([50.0, 8.0]),
+            'mode': 'car',
+            'is_main_activity': False,
+            'home_to_main_distance': 600
+        }
+    ],
+    2: [
+        {
+            'leg_id': 201,
+            'to_act_purpose': 'school',
+            'distance': 2.5,
+            'from_location': np.array([49.9, 8.2]),
+            'to_location': np.array([49.8, 8.3]),
+            'mode': 'bike',
+            'is_main_activity': True,
+            'home_to_main_distance': 300
+        },
+        {
+            'leg_id': 202,
+            'to_act_purpose': 'home',
+            'distance': 2.5,
+            'from_location': np.array([49.8, 8.3]),
+            'to_location': np.array([49.9, 8.2]),
+            'mode': 'bike',
+            'is_main_activity': False,
+            'home_to_main_distance': 300
+        }
+    ],
+    3: [
+        {
+            'leg_id': 301,
+            'to_act_purpose': 'gym',
+            'distance': 1.0,
+            'from_location': np.array([50.2, 8.4]),
+            'to_location': np.array([50.3, 8.5]),
+            'mode': 'walk',
+            'is_main_activity': True,
+            'home_to_main_distance': 100
+        }
+    ]
+}
 
-    # Step 1: Extract relevant information into a new DataFrame
+    """
+
+    # Extract relevant information into a new DataFrame
     legs_info_df = pd.DataFrame({
         s.UNIQUE_P_ID_COL: df[s.UNIQUE_P_ID_COL],
         'leg_info': list(zip(
             df[s.UNIQUE_LEG_ID_COL],
             df[s.ACT_TO_INTERNAL_COL],
-            df[s.LEG_DISTANCE_KM_COL],
+            df[s.LEG_DISTANCE_METERS_COL],
             [np.array(loc) if loc is not None else np.array([]) for loc in df['from_location']],
             [np.array(loc) if loc is not None else np.array([]) for loc in df['to_location']],
             df[s.MODE_MID_COL],
@@ -440,7 +508,7 @@ def populate_legs_dict_from_df(df: pd.DataFrame, s: Any) -> Dict[str, List[Dict[
         ))
     })
 
-    # Step 2: Transform each tuple into a dictionary
+    # Transform each tuple into a dictionary
     def to_leg_dict(leg_tuple):
         return {
             'leg_id': leg_tuple[0],
@@ -455,13 +523,14 @@ def populate_legs_dict_from_df(df: pd.DataFrame, s: Any) -> Dict[str, List[Dict[
 
     legs_info_df['leg_info'] = legs_info_df['leg_info'].map(to_leg_dict)
 
-    # Step 3: Group by unique person identifier and aggregate leg information
+    # Group by unique person identifier and aggregate leg information
     grouped = legs_info_df.groupby(s.UNIQUE_P_ID_COL)['leg_info'].apply(list)
 
-    # Step 4: Convert the grouped Series to a dictionary
+    # Convert the grouped Series to a dictionary
     nested_dict = grouped.to_dict()
 
     return nested_dict
+
 
 # def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any]]]:
 #     """Uses the MiD df to populate a nested dictionary with leg information for each person."""
@@ -500,7 +569,7 @@ def generate_random_location_within_hanover():
 
 def prepare_mid_df_for_legs_dict(filter_max_distance=None, number_of_persons=1000) -> pd.DataFrame:
     """Temporarily prepare the MiD DataFrame for the leg dictionary function."""
-    df = h.read_csv(s.ENHANCED_MID_FILE)
+    df = h.read_csv(h.get_files(s.ENHANCED_MID_FOLDER))
 
     # Initialize columns with empty objects to ensure dtype compatibility
     df["from_location"] = None
@@ -541,6 +610,75 @@ def prepare_mid_df_for_legs_dict(filter_max_distance=None, number_of_persons=100
 
 
 def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List[List[Dict[str, Any]]]]:
+    """
+    Segment the legs of each person into separate trips.
+    :param nested_dict:
+    :return:
+    Example output:
+    {
+    1000456: [
+        [
+            {
+                'leg_id': 101,
+                'to_act_purpose': 'work',
+                'distance': 5.0,
+                'from_location': np.array([50.0, 8.0]),
+                'to_location': np.array([]),
+                'mode': 'car',
+                'is_main_activity': True,
+                'home_to_main_distance': 600
+            }
+        ],
+        [
+            {
+                'leg_id': 102,
+                'to_act_purpose': 'leisure',
+                'distance': 2.0,
+                'from_location': np.array([]),
+                'to_location': np.array([]),
+                'mode': 'walk',
+                'is_main_activity': False,
+                'home_to_main_distance': 200
+            },
+            {
+                'leg_id': 103,
+                'to_act_purpose': 'home',
+                'distance': 7.0,
+                'from_location': np.array([]),
+                'to_location': np.array([50.3, 8.3]),
+                'mode': 'car',
+                'is_main_activity': False,
+                'home_to_main_distance': 700
+            }
+        ]
+    ],
+    1000457: [
+        [
+            {
+                'leg_id': 201,
+                'to_act_purpose': 'school',
+                'distance': 3.0,
+                'from_location': np.array([50.3, 8.3]),
+                'to_location': np.array([]),
+                'mode': 'bike',
+                'is_main_activity': True,
+                'home_to_main_distance': 300
+            },
+            {
+                'leg_id': 202,
+                'to_act_purpose': 'home',
+                'distance': 3.0,
+                'from_location': np.array([]),
+                'to_location': np.array([49.9, 8.5]),
+                'mode': 'bike',
+                'is_main_activity': False,
+                'home_to_main_distance': 300
+            }
+        ]
+    ]
+}
+
+    """
     logger.debug(f"Segmenting legs for {len(nested_dict)} persons.")
     segmented_dict = defaultdict(list)
 
@@ -560,9 +698,6 @@ def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List
             segmented_dict[person_id].append(segment)
 
     return dict(segmented_dict)
-
-
-
 
 
 def adjust_estimation_tree(tree: List[List[List[float]]], real_distance: float, strong_adjust: bool = True) -> List[
@@ -718,7 +853,7 @@ def greedy_locate_segment(segment):
 
         real_distance = euclidean_distance(segment[0]['from_location'], segment[-1]['to_location'])
 
-        tree = build_estimation_tree(distances)
+        tree = h.build_estimation_tree(distances)
         tree = adjust_estimation_tree(tree, real_distance, strong_adjust=True)
         position_on_segment_info = build_position_on_segment_info(
             len(distances))  # tells us at each level which legs to look at
@@ -948,7 +1083,7 @@ def simple_locate_segment(segment):
 
 def find_ring_candidates(purpose: str, center: np.ndarray, radius1: float, radius2: float, max_iterations=15,
                          min_candidates=10, restrict_angle=False, direction_point=None, angle_range=math.pi / 2) -> \
-Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Find candidates within a ring around a center point."""
     i = 0
     logger.debug(
@@ -1003,6 +1138,7 @@ def is_within_angle(point, center, direction_point, angle_range):
         return angle_to_point >= lower_bound or angle_to_point <= upper_bound
 
 
+os.chdir(pipeline_setup.PROJECT_ROOT)
 with open('locations_data_with_potentials.pkl', 'rb') as file:
     locations_data = pickle.load(file)
 reformatted_locations_data = reformat_locations(locations_data)

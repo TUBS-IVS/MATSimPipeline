@@ -180,7 +180,7 @@ IS_MAIN_ACTIVITY_COL = "is_main_activity"
 
 CONNECTED_LEGS_COL = "connected_legs"
 
-HOME_TO_MAIN_KM_COL = "home_to_main_km"  # Same distance type as leg distances
+HOME_TO_MAIN_METERS_COL = "home_to_main_meters"  # Same distance type as leg distances
 HOME_TO_MAIN_SECONDS_COL = "home_to_main_seconds"  # Same time type as leg times (here:minutes)
 HOME_TO_MAIN_TIME_IS_ESTIMATED_COL = "home_to_main_time_is_estimated"
 HOME_TO_MAIN_DIST_IS_ESTIMATED_COL = "home_to_main_distance_is_estimated"

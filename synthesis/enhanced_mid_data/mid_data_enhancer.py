@@ -35,6 +35,11 @@ class MiDDataEnhancer(DataFrameProcessor):
 
     def convert_minutes_to_seconds(self, minute_col, seconds_col):
         logger.info(f"Converting {minute_col} to seconds...")
+
+        self.df[minute_col] = pd.to_numeric(self.df[minute_col], errors='coerce')
+        nan_count = self.df[minute_col].isna().sum()
+        if nan_count > 0:
+            logger.warning(f"There were {nan_count} non-numeric values in {minute_col} which have been set to NaN.")
         if seconds_col not in self.df.columns:
             self.df[seconds_col] = self.df[minute_col] * 60
             logger.info(f"Created new column {seconds_col}.")
@@ -44,6 +49,12 @@ class MiDDataEnhancer(DataFrameProcessor):
 
     def convert_hours_to_seconds(self, hour_col, seconds_col):
         logger.info(f"Converting {hour_col} to seconds...")
+        self.df[hour_col] = self.df[hour_col].str.replace(',', '.')
+
+        self.df[hour_col] = pd.to_numeric(self.df[hour_col], errors='coerce')
+        nan_count = self.df[hour_col].isna().sum()
+        if nan_count > 0:
+            logger.warning(f"There were {nan_count} non-numeric values in {hour_col} which have been set to NaN.")
         if seconds_col not in self.df.columns:
             self.df[seconds_col] = self.df[hour_col] * 3600
             logger.info(f"Created new column {seconds_col}.")
@@ -53,6 +64,13 @@ class MiDDataEnhancer(DataFrameProcessor):
 
     def convert_kilometers_to_meters(self, km_col, m_col):
         logger.info(f"Converting {km_col} to meters...")
+        # Replace commas with dots for decimal conversion
+        self.df[km_col] = self.df[km_col].str.replace(',', '.')
+        self.df[km_col] = pd.to_numeric(self.df[km_col], errors='coerce')
+        nan_count = self.df[km_col].isna().sum()
+        if nan_count > 0:
+            logger.warning(f"There were {nan_count} non-numeric values in {km_col} which have been set to NaN.")
+
         if m_col not in self.df.columns:
             self.df[m_col] = self.df[km_col] * 1000
             logger.info(f"Created new column {m_col}.")
@@ -264,7 +282,7 @@ class MiDDataEnhancer(DataFrameProcessor):
 
     def mark_bad_times_as_nan(self):
         """
-        Identifies and marks bad times in the dataframe for each person's legs as NaN.
+        Identifies and marks "bad" times in the dataframe for each person's legs as NaN.
         """
         # Check for bad start times
         bad_start_time_indices = self.df[self.df[s.LEG_START_TIME_COL].isna()].index
@@ -275,6 +293,7 @@ class MiDDataEnhancer(DataFrameProcessor):
                                        (self.df["wegmin"] == 9995)
                                        ].index
         # Check for bad duration times
+        # Note: NaN activity durations aren't bad in the last leg (and the correction function will skip them)
         bad_duration_indices = self.df[(self.df[s.ACT_DUR_SECONDS_COL].isna()) |
                                        (self.df[s.ACT_DUR_SECONDS_COL] < 0) |
                                        (self.df[s.ACT_DUR_SECONDS_COL] > 86400) |
@@ -400,10 +419,13 @@ class MiDDataEnhancer(DataFrameProcessor):
                     if pd.isna(previous_activity_time):
                         # If the activity time would still be plausible (which here just means longer than 600s),
                         # use the existing times (this may now work if the previous end time was missing)
-                        previous_activity_time = round((self.df.loc[current_leg_index, s.LEG_START_TIME_COL] -
-                                                        previous_end_time).total_seconds())
+                        try:
+                            previous_activity_time = round((self.df.loc[current_leg_index, s.LEG_START_TIME_COL] -
+                                                            previous_end_time).total_seconds())
+                        except ValueError:
+                            pass
                         # Get time from similar person with same activity
-                        if previous_activity_time < 600:
+                        if pd.isna(previous_activity_time) or previous_activity_time < 600:
                             previous_activity_time = round(
                                 similar_persons[similar_persons[s.ACT_TO_INTERNAL_COL] == previous_activity_type][
                                     s.ACT_DUR_SECONDS_COL].mean())
@@ -468,7 +490,7 @@ class MiDDataEnhancer(DataFrameProcessor):
                     logger.debug(
                         f"Found {number_of_similar_persons} similar persons for {person[s.UNIQUE_P_ID_COL]} based on {combination}.")
                     return similar_persons
-
+        logger.warning(f"Found no similar persons for {person[s.UNIQUE_P_ID_COL]} with activities {activity_types}.")
         return pd.DataFrame()  # Return an empty DataFrame if no similar persons found with required activity types
 
     def find_similar_persons(self, person, min_similar, attributes: list = None):
@@ -620,6 +642,7 @@ class MiDDataEnhancer(DataFrameProcessor):
     def update_activity_for_prot_legs(self):
         """
         Update the activity of connected legs to match the activity of the protagonist leg in the group.
+        Writes to a new column.
         """
         logger.info("Updating activity for protagonist legs...")
 
@@ -814,7 +837,7 @@ class MiDDataEnhancer(DataFrameProcessor):
             ['next_person_id', 'next_act_dur', 'next_next_activity', 'next_next_person_id', 'next_leg_distance',
              'next_next_leg_distance'], axis=1, inplace=True)
 
-        logger.info("Marked mirroring main mischief, my merry miscreant mate.")
+        logger.info("Marked mirroring main.")
 
     # def find_home_to_main_time(self):
     #     """
@@ -996,7 +1019,7 @@ class MiDDataEnhancer(DataFrameProcessor):
             main_activity_row = person.index[main_activity_idx[0]]
 
             # Calculate the distance between home and main activity
-            if closest_home_idx == main_activity_idx[0] or closest_home_row == main_activity_row:
+            if closest_home_idx == main_activity_idx[0]:
                 raise ValueError(
                     f"Person {pid} has a home activity marked as main activity. This should never be the case.")
             elif closest_home_idx - main_activity_idx[0] == 1:  # Main to home
@@ -1016,10 +1039,6 @@ class MiDDataEnhancer(DataFrameProcessor):
             else:
                 logger.debug(f"Person {pid} has a main activity and home activity more than one leg apart. "
                              f"Time and distance will be estimated.")
-
-                # TODO: REMOVE DEBUG
-                if pid == "13028900_176_13028901":
-                    print("Person 13028900_176_13028901")
 
                 # Get all legs between home and main activity (thus exclude leg towards first activity)
                 if closest_home_row < main_activity_row:  # Home to main
@@ -1044,7 +1063,7 @@ class MiDDataEnhancer(DataFrameProcessor):
             home_to_main_time_estimated[pid] = time_is_estimated
             home_to_main_distance_estimated[pid] = distance_is_estimated
 
-        self.df[s.HOME_TO_MAIN_KM_COL] = self.df[s.UNIQUE_P_ID_COL].map(home_to_main_distances)
+        self.df[s.HOME_TO_MAIN_METERS_COL] = self.df[s.UNIQUE_P_ID_COL].map(home_to_main_distances)
         self.df[s.HOME_TO_MAIN_SECONDS_COL] = self.df[s.UNIQUE_P_ID_COL].map(home_to_main_times)
         self.df[s.HOME_TO_MAIN_TIME_IS_ESTIMATED_COL] = self.df[s.UNIQUE_P_ID_COL].map(home_to_main_time_estimated)
         self.df[s.HOME_TO_MAIN_DIST_IS_ESTIMATED_COL] = self.df[s.UNIQUE_P_ID_COL].map(home_to_main_distance_estimated)
@@ -1223,6 +1242,10 @@ class MiDDataEnhancer(DataFrameProcessor):
         def find_main_activity(person):
             is_main_activity_series = pd.Series(0, index=person.index)  # Initialize all values to 0
 
+            #TODO: REMOVE
+            if person[s.UNIQUE_P_ID_COL].iloc[0] == "89847850_1355_89847854":
+                print("HI")
+
             # Filter out home activities (home must not be the main activity)
             group = person[person[act_to_internal_col] != s.ACT_HOME]
 
@@ -1263,7 +1286,8 @@ class MiDDataEnhancer(DataFrameProcessor):
             # If the person has no work or education activity, the main activity is the longest activity
             if group[act_dur_seconds_col].isna().all():
                 # If all activities have no duration, pick the middle one
-                is_main_activity_series.iloc[len(group) // 2] = 1  # Integer division
+                main_act_idx = group.index[len(group) // 2]  # Integer division (within the filtered group so we don't pick home)
+                is_main_activity_series[main_act_idx] = 1
                 assert is_main_activity_series.sum() == 1
                 logger.debug(
                     f"Person {group[person_col].iloc[0]} has no activities with duration. Main activity is middle.")

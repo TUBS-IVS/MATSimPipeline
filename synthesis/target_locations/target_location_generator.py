@@ -523,7 +523,7 @@ with open('locations_data.pkl', 'rb') as file:
 locations_data = assign_random_capacities(locations_data)
 logger.debug(f"Locations data with potentials: {locations_data}")
 
-with open('locations_data_with_capacities.pkl', 'wb') as file:
+with open('locations_data_with_potentials.pkl', 'wb') as file:
     pickle.dump(locations_data, file)
     
 print("Processed OSM Data:")

@@ -1,4 +1,5 @@
 # Get all households with rwB for analysis
+import pandas as pd
 
 from utils import helpers as h, settings as s
 from synthesis.enhanced_mid_data.mid_data_enhancer import MiDDataEnhancer
@@ -10,6 +11,8 @@ from utils.pipeline_setup import PROJECT_ROOT
 os.chdir(PROJECT_ROOT)
 
 logger = logging.getLogger(__name__)
+
+
 
 # All of this stuff is just merging the files
 population = MiDDataEnhancer()

@@ -1,5 +1,7 @@
-import random as rnd
+import math
+import os
 import pickle
+import random as rnd
 from collections import defaultdict
 from typing import List, Dict, Any, Tuple
 
@@ -7,13 +9,9 @@ import numpy as np
 import pandas as pd
 from sklearn.neighbors import KDTree
 
-import math
-import os
-import synthesis.location_assignment.myhoerl as myhoerl
-
 from utils import settings as s, helpers as h, pipeline_setup
-from utils.stats_tracker import stats_tracker
 from utils.logger import logging
+from utils.stats_tracker import stats_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -432,64 +430,73 @@ def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any
     :param df: DataFrame containing MiD data (BUT units are always meters, seconds)
     :return: Nested dictionary with leg information for each person
     Example output:
-{
-    1: [
-        {
-            'leg_id': 101,
-            'to_act_purpose': 'work',
-            'distance': 5.0,
-            'from_location': np.array([50.0, 8.0]),
-            'to_location': np.array([50.1, 8.1]),
-            'mode': 'car',
-            'is_main_activity': True,
-            'home_to_main_distance': 600
-        },
-        {
-            'leg_id': 102,
-            'to_act_purpose': 'home',
-            'distance': 5.0,
-            'from_location': np.array([50.1, 8.1]),
-            'to_location': np.array([50.0, 8.0]),
-            'mode': 'car',
-            'is_main_activity': False,
-            'home_to_main_distance': 600
-        }
-    ],
-    2: [
-        {
-            'leg_id': 201,
-            'to_act_purpose': 'school',
-            'distance': 2.5,
-            'from_location': np.array([49.9, 8.2]),
-            'to_location': np.array([49.8, 8.3]),
-            'mode': 'bike',
-            'is_main_activity': True,
-            'home_to_main_distance': 300
-        },
-        {
-            'leg_id': 202,
-            'to_act_purpose': 'home',
-            'distance': 2.5,
-            'from_location': np.array([49.8, 8.3]),
-            'to_location': np.array([49.9, 8.2]),
-            'mode': 'bike',
-            'is_main_activity': False,
-            'home_to_main_distance': 300
-        }
-    ],
-    3: [
-        {
-            'leg_id': 301,
-            'to_act_purpose': 'gym',
-            'distance': 1.0,
-            'from_location': np.array([50.2, 8.4]),
-            'to_location': np.array([50.3, 8.5]),
-            'mode': 'walk',
-            'is_main_activity': True,
-            'home_to_main_distance': 100
-        }
-    ]
-}
+    data = {
+        '10000290_11563_10000291': [
+            {
+                'unique_leg_id': '10000290_11563_10000291_1.0',
+                'to_act_purpose': 'shopping',
+                'distance': 950.0,
+                'from_location': array([552452.11071084, 5807493.538159]),
+                'to_location': array([], dtype=float64),
+                'mode': 4.0,
+                'is_main_activity': 1,
+                'home_to_main_distance': 120.0
+            },
+            {
+                'unique_leg_id': '10000290_11563_10000291_2.0',
+                'to_act_purpose': 'home',
+                'distance': 1430.0,
+                'from_location': array([], dtype=float64),
+                'to_location': array([552452.11071084, 5807493.538159]),
+                'mode': 4.0,
+                'is_main_activity': 0,
+                'home_to_main_distance': 120.0
+            }
+        ],
+        '10000370_11564_10000371': [
+            {
+                'unique_leg_id': '10000370_11564_10000371_1.0',
+                'to_act_purpose': 'leisure',
+                'distance': 10450.0,
+                'from_location': array([554098.49165674, 5802930.10530201]),
+                'to_location': array([], dtype=float64),
+                'mode': 4.0,
+                'is_main_activity': 1,
+                'home_to_main_distance': 1500.0
+            },
+            {
+                'unique_leg_id': '10000370_11564_10000371_2.0',
+                'to_act_purpose': 'home',
+                'distance': 7600.0,
+                'from_location': array([], dtype=float64),
+                'to_location': array([], dtype=float64),
+                'mode': 4.0,
+                'is_main_activity': 0,
+                'home_to_main_distance': 1500.0
+            },
+            {
+                'unique_leg_id': '10000370_11564_10000371_3.0',
+                'to_act_purpose': 'shopping',
+                'distance': 13300.0,
+                'from_location': array([], dtype=float64),
+                'to_location': array([], dtype=float64),
+                'mode': 4.0,
+                'is_main_activity': 0,
+                'home_to_main_distance': 1500.0
+            },
+            {
+                'unique_leg_id': '10000370_11564_10000371_4.0',
+                'to_act_purpose': 'home',
+                'distance': 13300.0,
+                'from_location': array([], dtype=float64),
+                'to_location': array([554098.49165674, 5802930.10530201]),
+                'mode': 4.0,
+                'is_main_activity': 0,
+                'home_to_main_distance': 1500.0
+            }
+        ]
+    }
+
 
     """
 
@@ -504,14 +511,14 @@ def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any
             [np.array(loc) if loc is not None else np.array([]) for loc in df['to_location']],
             df[s.MODE_MID_COL],
             df[s.IS_MAIN_ACTIVITY_COL],
-            df[s.HOME_TO_MAIN_SECONDS_COL]  # TODO: make distance from home to main activity
+            df[s.HOME_TO_MAIN_METERS_COL]
         ))
     })
 
     # Transform each tuple into a dictionary
     def to_leg_dict(leg_tuple):
         return {
-            'leg_id': leg_tuple[0],
+            s.UNIQUE_LEG_ID_COL: leg_tuple[0],
             'to_act_purpose': leg_tuple[1],
             'distance': leg_tuple[2],
             'from_location': leg_tuple[3],
@@ -567,7 +574,7 @@ def generate_random_location_within_hanover():
     return np.array([x, y])
 
 
-def prepare_mid_df_for_legs_dict(filter_max_distance=None, number_of_persons=1000) -> pd.DataFrame:
+def prepare_mid_df_for_legs_dict(filter_max_distance=None, number_of_persons=None) -> pd.DataFrame:
     """Temporarily prepare the MiD DataFrame for the leg dictionary function."""
     df = h.read_csv(h.get_files(s.ENHANCED_MID_FOLDER))
 
@@ -577,12 +584,12 @@ def prepare_mid_df_for_legs_dict(filter_max_distance=None, number_of_persons=100
 
     # Throw out rows with missing values in the distance column
     row_count_before = df.shape[0]
-    df = df.dropna(subset=[s.LEG_DISTANCE_KM_COL])
+    df = df.dropna(subset=[s.LEG_DISTANCE_METERS_COL])
     logger.debug(f"Dropped {row_count_before - df.shape[0]} rows with missing distance values.")
 
     # Identify and remove records of persons with any trip exceeding the max distance if filter_max_distance is specified
     if filter_max_distance is not None:
-        person_ids_to_exclude = df[df[s.LEG_DISTANCE_KM_COL] > filter_max_distance][s.PERSON_ID_COL].unique()
+        person_ids_to_exclude = df[df[s.LEG_DISTANCE_METERS_COL] > filter_max_distance][s.PERSON_ID_COL].unique()
         row_count_before = df.shape[0]
         df = df[~df[s.PERSON_ID_COL].isin(person_ids_to_exclude)]
         logger.debug(
@@ -593,17 +600,15 @@ def prepare_mid_df_for_legs_dict(filter_max_distance=None, number_of_persons=100
     df["to_location"] = df["to_location"].astype(object)
 
     # Limit to the specified number of persons and keep all rows for these persons
-    person_ids = df[s.PERSON_ID_COL].unique()[:number_of_persons]
-    df = df[df[s.PERSON_ID_COL].isin(person_ids)]
+    if number_of_persons is not None:
+        person_ids = df[s.PERSON_ID_COL].unique()[:number_of_persons]
+        df = df[df[s.PERSON_ID_COL].isin(person_ids)]
 
     # Add random home locations for each person
     for person_id, group in df.groupby(s.PERSON_ID_COL):
         home_location = generate_random_location_within_hanover()
         df.at[group.index[0], "from_location"] = home_location
         df.at[group.index[-1], "to_location"] = home_location
-
-    # In-place convert km to meters for distance column
-    df[s.LEG_DISTANCE_KM_COL] = df[s.LEG_DISTANCE_KM_COL] * 1000
 
     logger.debug(df.head())
     return df
@@ -615,64 +620,94 @@ def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List
     :param nested_dict:
     :return:
     Example output:
-    {
-    1000456: [
+    data = {
+    '10000290_11563_10000291': [
         [
             {
-                'leg_id': 101,
-                'to_act_purpose': 'work',
-                'distance': 5.0,
-                'from_location': np.array([50.0, 8.0]),
-                'to_location': np.array([]),
-                'mode': 'car',
-                'is_main_activity': True,
-                'home_to_main_distance': 600
+                'leg_id': '10000290_11563_10000291_1.0',
+                'to_act_purpose': 'shopping',
+                'distance': 950.0,
+                'from_location': np.array([552452.11071084, 5807493.538159]),
+                'to_location': np.array([], dtype=float64),
+                'mode': 4.0,
+                'is_main_activity': 1,
+                'home_to_main_distance': 120.0
+            },
+            {
+                'leg_id': '10000290_11563_10000291_2.0',
+                'to_act_purpose': 'home',
+                'distance': 1430.0,
+                'from_location': np.array([], dtype=float64),
+                'to_location': np.array([552452.11071084, 5807493.538159]),
+                'mode': 4.0,
+                'is_main_activity': 0,
+                'home_to_main_distance': 120.0
             }
         ],
         [
             {
-                'leg_id': 102,
-                'to_act_purpose': 'leisure',
-                'distance': 2.0,
-                'from_location': np.array([]),
-                'to_location': np.array([]),
-                'mode': 'walk',
-                'is_main_activity': False,
-                'home_to_main_distance': 200
+                'leg_id': '10000290_11563_10000291_3.0',
+                'to_act_purpose': 'work',
+                'distance': 500.0,
+                'from_location': np.array([552452.11071084, 5807493.538159]),
+                'to_location': np.array([], dtype=float64),
+                'mode': 3.0,
+                'is_main_activity': 1,
+                'home_to_main_distance': 100.0
             },
             {
-                'leg_id': 103,
+                'leg_id': '10000290_11563_10000291_4.0',
                 'to_act_purpose': 'home',
-                'distance': 7.0,
-                'from_location': np.array([]),
-                'to_location': np.array([50.3, 8.3]),
-                'mode': 'car',
-                'is_main_activity': False,
-                'home_to_main_distance': 700
+                'distance': 1000.0,
+                'from_location': np.array([], dtype=float64),
+                'to_location': np.array([552452.11071084, 5807493.538159]),
+                'mode': 3.0,
+                'is_main_activity': 0,
+                'home_to_main_distance': 100.0
             }
         ]
     ],
-    1000457: [
+    '10000370_11564_10000371': [
         [
             {
-                'leg_id': 201,
-                'to_act_purpose': 'school',
-                'distance': 3.0,
-                'from_location': np.array([50.3, 8.3]),
-                'to_location': np.array([]),
-                'mode': 'bike',
-                'is_main_activity': True,
-                'home_to_main_distance': 300
+                'leg_id': '10000370_11564_10000371_1.0',
+                'to_act_purpose': 'leisure',
+                'distance': 10450.0,
+                'from_location': np.array([554098.49165674, 5802930.10530201]),
+                'to_location': np.array([], dtype=float64),
+                'mode': 4.0,
+                'is_main_activity': 1,
+                'home_to_main_distance': 1500.0
             },
             {
-                'leg_id': 202,
+                'leg_id': '10000370_11564_10000371_2.0',
                 'to_act_purpose': 'home',
-                'distance': 3.0,
-                'from_location': np.array([]),
-                'to_location': np.array([49.9, 8.5]),
-                'mode': 'bike',
-                'is_main_activity': False,
-                'home_to_main_distance': 300
+                'distance': 7600.0,
+                'from_location': np.array([], dtype=float64),
+                'to_location': np.array([], dtype=float64),
+                'mode': 4.0,
+                'is_main_activity': 0,
+                'home_to_main_distance': 1500.0
+            },
+            {
+                'leg_id': '10000370_11564_10000371_3.0',
+                'to_act_purpose': 'shopping',
+                'distance': 13300.0,
+                'from_location': np.array([], dtype=float64),
+                'to_location': np.array([], dtype=float64),
+                'mode': 4.0,
+                'is_main_activity': 0,
+                'home_to_main_distance': 1500.0
+            },
+            {
+                'leg_id': '10000370_11564_10000371_4.0',
+                'to_act_purpose': 'home',
+                'distance': 13300.0,
+                'from_location': np.array([], dtype=float64),
+                'to_location': np.array([554098.49165674, 5802930.10530201]),
+                'mode': 4.0,
+                'is_main_activity': 0,
+                'home_to_main_distance': 1500.0
             }
         ]
     ]
@@ -1138,13 +1173,37 @@ def is_within_angle(point, center, direction_point, angle_range):
         return angle_to_point >= lower_bound or angle_to_point <= upper_bound
 
 
+def update_dataframe(df: pd.DataFrame, placed_dict: Dict[str, Any]) -> pd.DataFrame:
+    # Initialize new columns with NaN values
+    df['from_location'] = np.nan
+    df['to_location'] = np.nan
+    df['placed_distance'] = np.nan
+    df['placed_distance_absolute_diff'] = np.nan
+    df['placed_distance_relative_diff'] = np.nan
+
+    # Flatten the dictionary and create a DataFrame
+    records = []
+    for key, value in placed_dict.items():
+        for entry in value:
+            records.extend(entry)
+
+    data_df = pd.DataFrame(records)
+
+    # Merge the DataFrame on leg_id
+    df = df.merge(data_df[[s.UNIQUE_LEG_ID_COL, 'from_location', 'to_location', 'placed_distance', 'placed_distance_absolute_diff',
+                           'placed_distance_relative_diff']],
+                  on=s.UNIQUE_LEG_ID_COL, how='left')
+
+    return df
+
+
 os.chdir(pipeline_setup.PROJECT_ROOT)
 with open('locations_data_with_potentials.pkl', 'rb') as file:
     locations_data = pickle.load(file)
 reformatted_locations_data = reformat_locations(locations_data)
 MyTargetLocations = TargetLocations(reformatted_locations_data)
 
-df = prepare_mid_df_for_legs_dict()
+df = prepare_mid_df_for_legs_dict(number_of_persons=100)
 logger.debug("df prepared.")
 dictu = populate_legs_dict_from_df(df)
 logger.debug("dict populated.")
@@ -1156,10 +1215,10 @@ logger.debug(segmented_dict)
 
 
 # Greedy petre locator
-# for person_id, segments in segmented_dict.items():
-#     for segment in segments:
-#          segment = greedy_locate_segment(segment)
-#         segment = insert_placed_distances(segment)
+for person_id, segments in segmented_dict.items():
+    for segment in segments:
+        segment = greedy_locate_segment(segment)
+        segment = insert_placed_distances(segment)  # Just for analysis
 
 # Simple locator
 # for person_id, segments in flattened_segmented_dict.items():
@@ -1168,13 +1227,17 @@ logger.debug(segmented_dict)
 #         segment = insert_placed_distances(segment)
 
 # (slightly modified) Hörl locator
-result = myhoerl.process(reformatted_locations_data, segmented_dict)
+# result = myhoerl.process(reformatted_locations_data, segmented_dict)
+
+df = update_dataframe(df, segmented_dict)
 
 segmented_dict = flatten_segmented_dict(segmented_dict)
 for person_id, segment in segmented_dict.items():
     logger.debug(f"Person ID: {person_id}")
     for leg in segment:
         logger.debug(leg)
+
+df.to_csv('mid_with_locations.csv', index=False)
 
 summarize_placement_results(segmented_dict)
 

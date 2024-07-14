@@ -53,28 +53,21 @@ def modify_text_file(input_file, output_file, replace, replace_with):
     logger.info(f"Wrote modified file to {output_file}.")
 
 
-def create_unique_leg_ids():
+def create_leg_ids(legs_file):
     """
-    If the input leg data doesn't have unique IDs for each leg, create them.
-    Adds a column with the name as specified in the settings by leg_id_column, writes back to csv
-    Note: This does obviously not create unique leg ids in the expanded population, only in the input leg data for further processing.
+    Create IDs in MiD similar to the person or hh IDs.
+    This does obviously not create unique leg ids in the expanded population, only in the input leg data for further processing.
     """
-    logger.info(f"Creating unique leg ids in {s.MiD_TRIPS_FILE}...")
-    legs_file = read_csv(s.MiD_TRIPS_FILE, s.PERSON_ID_COL)
-
+    logger.info(f"Creating unique leg ids in {legs_file}...")
     if s.LEG_ID_COL in legs_file.columns:
         logger.info(f"Legs file already has unique leg ids, skipping.")
         return
-    if not s.LEG_NON_UNIQUE_ID_COL:
-        raise ValueError(f"Please specify leg_non_unique_id_column in settings.yaml.")
 
     # Create unique leg ids
     legs_file[s.LEG_ID_COL] = legs_file[s.PERSON_ID_COL].astype(str) + "_" + legs_file[s.LEG_NON_UNIQUE_ID_COL].astype(
         str)
-
-    # Write back to file
-    legs_file.to_csv(s.MiD_TRIPS_FILE, index=False)
-    logger.info(f"Created unique leg ids in {s.MiD_TRIPS_FILE}.")
+    logger.info(f"Created unique leg ids.")
+    return legs_file
 
 
 def read_csv(csv_path: str, test_col=None, use_cols=None):
@@ -795,8 +788,8 @@ def sigmoid(x, beta, delta_T):
 
 
 def check_distance(leg_to_find, leg_to_compare):
-    distance_to_find = leg_to_find[s.LEG_DISTANCE_KM_COL]
-    distance_to_compare = leg_to_compare[s.LEG_DISTANCE_KM_COL]
+    distance_to_find = leg_to_find[s.LEG_DISTANCE_METERS_COL]
+    distance_to_compare = leg_to_compare[s.LEG_DISTANCE_METERS_COL]
 
     if pd.isnull(distance_to_find) or pd.isnull(distance_to_compare):
         return False

@@ -24,7 +24,9 @@ def enhance_travel_survey(input_hh_folder, input_persons_folder, input_trips_fol
     logger.info(f"Starting enhance_travel_survey module")
 
     # Create unique leg ids in the leg input file if necessary
-    # h.create_unique_leg_ids()
+    # df = h.read_csv(h.get_files(s.MiD_TRIPS_FOLDER))
+    # df = h.create_leg_ids(df)
+    # df.to_csv(h.get_files(s.MiD_TRIPS_FOLDER), index=False)
 
     population = MiDDataEnhancer()
     population.load_df_from_csv(h.get_files(input_hh_folder), test_col=s.HOUSEHOLD_MID_ID_COL)

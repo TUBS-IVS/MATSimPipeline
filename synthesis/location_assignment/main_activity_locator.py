@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 class ActivityLocator:
     """
-    TIME-based localizer.
+    TIME-based localizer. Depreciated. Use the SPACE-based localizer instead.
     Normalizing the potentials according to the total main activity demand means that persons will be assigned to the activity
     locations exactly proportional to the location potentials. This also means that secondary activities will have to make do
     with the remaining capacity.

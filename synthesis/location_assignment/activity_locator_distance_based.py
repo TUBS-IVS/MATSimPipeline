@@ -36,7 +36,7 @@ class DistanceBasedMainActivityLocator:
     def locate_main_activity(self, person_id: str):
         """
         Locates the main activity location for each person based on Euclidean distances,
-        normalized potentials, and the desired activity type.
+        normalized potentials, and the desired activity type. Uses the unsegmented legs dict.
         :param person_id: Identifier for the person to locate main activity for
         :return:
         """
@@ -59,9 +59,8 @@ class DistanceBasedMainActivityLocator:
 
         target_activity = main_activity_leg['to_act_purpose']
 
-        identifiers, names, coordinates, potentials, distances = self.target_locations.query_within_radius(
-            purpose=target_activity, location=home_location, radius=self.radius
-        )
+        identifiers, names, coordinates, potentials, distances = find_ring_candidates(
+            home_location, target_activity, self.radius, self.target_locations)
 
         if len(identifiers) == 0:
             # If no candidates are found within the radius, assign a random location
@@ -84,6 +83,24 @@ class DistanceBasedMainActivityLocator:
         for person_id in self.legs_dict.keys():
             self.locate_main_activity(person_id)
         return self.legs_dict
+
+def locate_main():
+    """Gets each person's main activity and locates it.
+    Currently just uses the euclidean distance and potentials.
+    Planned to also use O-D matrices.
+    :return:
+    """
+    candidates = find_ring_candidates(segment[i]['to_act_purpose'], segment[i]['from_location'], radius1,
+                                      radius2)
+    act_identifier, act_name, act_coord, act_cap, act_dist, act_score = monte_carlo_select_candidate(
+        candidates)
+
+    segment[i]['to_location'] = act_coord
+    segment[i + 1]['from_location'] = act_coord
+    segment[i]['to_act_identifier'] = act_identifier
+    segment[i]['to_act_name'] = act_name
+    segment[i]['to_act_cap'] = act_cap
+    segment[i]['to_act_score'] = act_score
 
 
 def reformat_locations(locations_data: Dict[str, Dict[str, Dict[str, Any]]]) -> Dict[str, Dict[str, np.ndarray]]:
@@ -156,10 +173,10 @@ class TargetLocations:
         return candidate_identifiers, candidate_names, candidate_coordinates, candidate_potentials, candidate_distances[
             0]
 
-    def query_within_radius(self, purpose: str, location: np.ndarray, radius: float):
+    def query_within_radius(self, act_type: str, location: np.ndarray, radius: float):
         """
         Find the activity locations within a given radius of a location and purpose.
-        :param purpose: The purpose category to query.
+        :param act_type: The activity category to query.
         :param location: A 1D numpy array representing the location to query (coordinates [1.5, 2.5]).
         :param radius: The maximum distance from the location to search for candidates.
         :return: A tuple containing four numpy arrays: identifiers, coordinates, distances, and remaining potentials of the nearest candidates.
@@ -167,25 +184,25 @@ class TargetLocations:
         # Ensure location is a 2D array with a single location
         location = location.reshape(1, -1)
 
-        # Query the KDTree for the nearest locations
-        candidate_indices = self.indices[purpose].query_radius(location, radius)
+        # Query the KDTree for locations within radius
+        candidate_indices = self.indices[act_type].query_radius(location, radius)
         logger.debug(f"Query Indices: {candidate_indices}")
 
         # Get the identifiers, coordinates, and distances for locations within the radius
-        candidate_identifiers = np.array(self.data[purpose]["identifiers"])[candidate_indices[0]]
-        candidate_names = np.array(self.data[purpose]["names"])[candidate_indices[0]]
-        candidate_coordinates = np.array(self.data[purpose]["coordinates"])[candidate_indices[0]]
-        candidate_potentials = np.array(self.data[purpose]["potentials"])[candidate_indices[0]]
+        candidate_identifiers = np.array(self.data[act_type]["identifiers"])[candidate_indices[0]]
+        candidate_names = np.array(self.data[act_type]["names"])[candidate_indices[0]]
+        candidate_coordinates = np.array(self.data[act_type]["coordinates"])[candidate_indices[0]]
+        candidate_potentials = np.array(self.data[act_type]["potentials"])[candidate_indices[0]]
         # candidate_distances = np.linalg.norm(candidate_coordinates - location, axis=1)
         candidate_distances = None
 
         return candidate_identifiers, candidate_names, candidate_coordinates, candidate_potentials, candidate_distances
 
-    def query_within_ring(self, purpose: str, location: np.ndarray, radius1: float, radius2: float) -> Tuple[
+    def query_within_ring(self, act_type: str, location: np.ndarray, radius1: float, radius2: float) -> Tuple[
         np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Find the activity locations within a ring defined by two radii around a location and purpose.
-        :param purpose: The purpose category to query.
+        :param act_type: The activity category to query.
         :param location: A 1D numpy array representing the location to query (coordinates [1.5, 2.5]).
         :param radius1: Any of the two radii defining the ring.
         :param radius2: The other one.
@@ -197,13 +214,13 @@ class TargetLocations:
         outer_radius = max(radius1, radius2)
         inner_radius = min(radius1, radius2)
 
-        outer_indices = self.indices[purpose].query_radius(location, outer_radius)
+        outer_indices = self.indices[act_type].query_radius(location, outer_radius)
         if outer_indices is None:
             return None
         if len(outer_indices[0]) == 0:
             return None
 
-        inner_indices = self.indices[purpose].query_radius(location, inner_radius)
+        inner_indices = self.indices[act_type].query_radius(location, inner_radius)
 
         outer_indices_set = set(outer_indices[0])
         inner_indices_set = set(inner_indices[0])
@@ -213,10 +230,10 @@ class TargetLocations:
             return None
 
         # Get the identifiers, coordinates, and distances for locations within the annulus
-        candidate_identifiers = np.array(self.data[purpose]["identifiers"])[annulus_indices]
-        candidate_names = np.array(self.data[purpose]["names"])[annulus_indices]
-        candidate_coordinates = np.array(self.data[purpose]["coordinates"])[annulus_indices]
-        candidate_potentials = np.array(self.data[purpose]["potentials"])[annulus_indices]
+        candidate_identifiers = np.array(self.data[act_type]["identifiers"])[annulus_indices]
+        candidate_names = np.array(self.data[act_type]["names"])[annulus_indices]
+        candidate_coordinates = np.array(self.data[act_type]["coordinates"])[annulus_indices]
+        candidate_potentials = np.array(self.data[act_type]["potentials"])[annulus_indices]
         candidate_distances = None
 
         return candidate_identifiers, candidate_names, candidate_coordinates, candidate_potentials, candidate_distances
@@ -438,7 +455,7 @@ def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any
                 'distance': 950.0,
                 'from_location': array([552452.11071084, 5807493.538159]),
                 'to_location': array([], dtype=float64),
-                'mode': 4.0,
+                'mode': 'bike',
                 'is_main_activity': 1,
                 'home_to_main_distance': 120.0
             },
@@ -448,7 +465,7 @@ def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any
                 'distance': 1430.0,
                 'from_location': array([], dtype=float64),
                 'to_location': array([552452.11071084, 5807493.538159]),
-                'mode': 4.0,
+                'mode': 'bike',
                 'is_main_activity': 0,
                 'home_to_main_distance': 120.0
             }
@@ -460,7 +477,7 @@ def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any
                 'distance': 10450.0,
                 'from_location': array([554098.49165674, 5802930.10530201]),
                 'to_location': array([], dtype=float64),
-                'mode': 4.0,
+                'mode': 'car',
                 'is_main_activity': 1,
                 'home_to_main_distance': 1500.0
             },
@@ -470,7 +487,7 @@ def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any
                 'distance': 7600.0,
                 'from_location': array([], dtype=float64),
                 'to_location': array([], dtype=float64),
-                'mode': 4.0,
+                'mode': 'car',
                 'is_main_activity': 0,
                 'home_to_main_distance': 1500.0
             },
@@ -480,7 +497,7 @@ def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any
                 'distance': 13300.0,
                 'from_location': array([], dtype=float64),
                 'to_location': array([], dtype=float64),
-                'mode': 4.0,
+                'mode': 'car',
                 'is_main_activity': 0,
                 'home_to_main_distance': 1500.0
             },
@@ -490,7 +507,7 @@ def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any
                 'distance': 13300.0,
                 'from_location': array([], dtype=float64),
                 'to_location': array([554098.49165674, 5802930.10530201]),
-                'mode': 4.0,
+                'mode': 'walk',
                 'is_main_activity': 0,
                 'home_to_main_distance': 1500.0
             }
@@ -509,7 +526,7 @@ def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any
             df[s.LEG_DISTANCE_METERS_COL],
             [np.array(loc) if loc is not None else np.array([]) for loc in df['from_location']],
             [np.array(loc) if loc is not None else np.array([]) for loc in df['to_location']],
-            df[s.MODE_MID_COL],
+            df[s.MODE_INTERNAL_COL],
             df[s.IS_MAIN_ACTIVITY_COL],
             df[s.HOME_TO_MAIN_METERS_COL]
         ))
@@ -537,32 +554,6 @@ def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any
     nested_dict = grouped.to_dict()
 
     return nested_dict
-
-
-# def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any]]]:
-#     """Uses the MiD df to populate a nested dictionary with leg information for each person."""
-#     nested_dict = defaultdict(list)
-#
-#     # Populate the defaultdict with data from the DataFrame
-#     for row in df.itertuples(index=False):
-#         identifier: str = getattr(row, s.UNIQUE_P_ID_COL)
-#
-#         from_location: np.ndarray = np.array(row.from_location) if row.from_location is not None else np.array([])
-#         to_location: np.ndarray = np.array(row.to_location) if row.to_location is not None else np.array([])
-#         mode: str = getattr(row, s.LEG_MAIN_MODE_COL)
-#
-#         leg_info: Dict[str, Any] = {
-#             'leg_id': getattr(row, s.UNIQUE_LEG_ID_COL),
-#             'to_act_purpose': getattr(row, s.ACT_TO_INTERNAL_COL),
-#             'distance': getattr(row, s.LEG_DISTANCE_COL),
-#             'from_location': from_location,
-#             'to_location': to_location,
-#             'mode': mode
-#         }
-#         nested_dict[identifier].append(leg_info)
-#
-#     # Convert defaultdict to dict for cleaner output and better compatibility
-#     return dict(nested_dict)
 
 
 def generate_random_location_within_hanover():
@@ -616,7 +607,7 @@ def prepare_mid_df_for_legs_dict(filter_max_distance=None, number_of_persons=Non
 
 def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List[List[Dict[str, Any]]]]:
     """
-    Segment the legs of each person into separate trips.
+    Segment the legs of each person into separate trips where only the start and end locations are known.
     :param nested_dict:
     :return:
     Example output:
@@ -629,7 +620,7 @@ def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List
                 'distance': 950.0,
                 'from_location': np.array([552452.11071084, 5807493.538159]),
                 'to_location': np.array([], dtype=float64),
-                'mode': 4.0,
+                'mode': 'car',
                 'is_main_activity': 1,
                 'home_to_main_distance': 120.0
             },
@@ -639,7 +630,7 @@ def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List
                 'distance': 1430.0,
                 'from_location': np.array([], dtype=float64),
                 'to_location': np.array([552452.11071084, 5807493.538159]),
-                'mode': 4.0,
+                'mode': 'car',
                 'is_main_activity': 0,
                 'home_to_main_distance': 120.0
             }
@@ -651,7 +642,7 @@ def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List
                 'distance': 500.0,
                 'from_location': np.array([552452.11071084, 5807493.538159]),
                 'to_location': np.array([], dtype=float64),
-                'mode': 3.0,
+                'mode': 'walk',
                 'is_main_activity': 1,
                 'home_to_main_distance': 100.0
             },
@@ -661,7 +652,7 @@ def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List
                 'distance': 1000.0,
                 'from_location': np.array([], dtype=float64),
                 'to_location': np.array([552452.11071084, 5807493.538159]),
-                'mode': 3.0,
+                'mode': 'bike',
                 'is_main_activity': 0,
                 'home_to_main_distance': 100.0
             }
@@ -675,7 +666,7 @@ def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List
                 'distance': 10450.0,
                 'from_location': np.array([554098.49165674, 5802930.10530201]),
                 'to_location': np.array([], dtype=float64),
-                'mode': 4.0,
+                'mode': 'car',
                 'is_main_activity': 1,
                 'home_to_main_distance': 1500.0
             },
@@ -685,7 +676,7 @@ def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List
                 'distance': 7600.0,
                 'from_location': np.array([], dtype=float64),
                 'to_location': np.array([], dtype=float64),
-                'mode': 4.0,
+                'mode': 'car',
                 'is_main_activity': 0,
                 'home_to_main_distance': 1500.0
             },
@@ -695,7 +686,7 @@ def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List
                 'distance': 13300.0,
                 'from_location': np.array([], dtype=float64),
                 'to_location': np.array([], dtype=float64),
-                'mode': 4.0,
+                'mode': 'car',
                 'is_main_activity': 0,
                 'home_to_main_distance': 1500.0
             },
@@ -705,7 +696,7 @@ def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List
                 'distance': 13300.0,
                 'from_location': np.array([], dtype=float64),
                 'to_location': np.array([554098.49165674, 5802930.10530201]),
-                'mode': 4.0,
+                'mode': 'walk',
                 'is_main_activity': 0,
                 'home_to_main_distance': 1500.0
             }
@@ -1054,7 +1045,7 @@ def simple_locate_segment(segment):
                                           distance2)
         act_identifier, act_name, act_coord, act_cap, act_dist, act_score = monte_carlo_select_candidate(candidates)
         segment[0]['to_location'] = act_coord
-        segment[-1]['from_location'] = act_coord
+        segment[1]['from_location'] = act_coord
         segment[0]['to_act_identifier'] = act_identifier
         segment[0]['to_act_name'] = act_name
         segment[0]['to_act_cap'] = act_cap

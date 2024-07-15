@@ -828,8 +828,8 @@ def check_mode(leg_to_find, leg_to_compare):
     :param leg_to_compare:
     :return:
     """
-    mode_to_find = leg_to_find[s.MODE_MID_COL]
-    mode_to_compare = leg_to_compare[s.MODE_MID_COL]
+    mode_to_find = leg_to_find[s.MODE_INTERNAL_COL]
+    mode_to_compare = leg_to_compare[s.MODE_INTERNAL_COL]
 
     if mode_to_find == mode_to_compare and mode_to_find != s.MODE_UNDEFINED:  # Make sure we don't pair undefined modes
         return True

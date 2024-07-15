@@ -3,7 +3,7 @@ from collections import deque
 
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
+# from tqdm import tqdm
 from os import path
 
 from utils import settings as s, pipeline_setup, helpers as h

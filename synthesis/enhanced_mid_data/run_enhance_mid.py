@@ -1,8 +1,6 @@
 import os
 import time
 
-import winsound
-
 from synthesis.enhanced_mid_data.mid_data_enhancer import MiDDataEnhancer
 from utils import pipeline_setup, settings as s, helpers as h
 from utils.logger import logging
@@ -20,7 +18,7 @@ def enhance_travel_survey(input_hh_folder, input_persons_folder, input_trips_fol
         - The ids of households, persons and trips must be unique within the population sample (e.g. MiD)
         (MiD: H_ID, HP_ID, and a previously added HPW_ID for legs)
     """
-
+    print("test")
     logger.info(f"Starting enhance_travel_survey module")
 
     # Create unique leg ids in the leg input file if necessary
@@ -144,10 +142,11 @@ if __name__ == '__main__':
         enhance_travel_survey(s.MiD_HH_FOLDER, s.MiD_PERSONS_FOLDER, s.MiD_TRIPS_FOLDER, pipeline_setup.OUTPUT_DIR)
     except Exception as e:
         if s.PLAY_FAILURE_ALERT:
-            winsound.Beep(600, 500)
-            time.sleep(0.1)
-            winsound.Beep(500, 500)
-            time.sleep(0.2)
-            winsound.Beep(400, 1500)
+            pass
+            # winsound.Beep(600, 500)
+            # time.sleep(0.1)
+            # winsound.Beep(500, 500)
+            # time.sleep(0.2)
+            # winsound.Beep(400, 1500)
 
         raise

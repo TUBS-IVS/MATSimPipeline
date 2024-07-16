@@ -3,7 +3,7 @@
   <component name="Black">
     <option name="sdkName" value="Python 3.11 (MATSimPipeline)" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="Remote Python 3.12.4 (sftp://felix@134.169.42.227:22/home/felix/.virtualenvs/MATSimPipeline/bin/python)" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.12 (MATSimPipeline)" project-jdk-type="Python SDK" />
   <component name="PythonCompatibilityInspectionAdvertiser">
     <option name="version" value="3" />
   </component>

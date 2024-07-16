@@ -4,6 +4,7 @@ import pickle
 import random as rnd
 from collections import defaultdict
 from typing import List, Dict, Any, Tuple
+import pprint
 
 import numpy as np
 import pandas as pd
@@ -13,101 +14,125 @@ from utils import settings as s, helpers as h, pipeline_setup
 from utils.logger import logging
 from utils.stats_tracker import stats_tracker
 
+import time
+
 logger = logging.getLogger(__name__)
 
 
-class DistanceBasedMainActivityLocator:
-    """
-    DISTANCE-based localizer.
-    Normalizing the potentials according to the total main activity demand means that persons will be assigned to the activity
-    locations exactly proportional to the location potentials. This also means that secondary activities will have to make do
-    with the remaining potential.
-    :param legs_dict: Dict of persons with their legs data
-    :param target_locations: TargetLocations object that provides query_within_radius method
-    :param radius: Search radius for locating activities
-    """
+# class DistanceBasedMainActivityLocator:
+#     """
+#     DISTANCE-based localizer.
+#     Normalizing the potentials according to the total main activity demand means that persons will be assigned to the activity
+#     locations exactly proportional to the location potentials. This also means that secondary activities will have to make do
+#     with the remaining potential.
+#     :param legs_dict: Dict of persons with their legs data
+#     :param target_locations: TargetLocations object that provides query_within_radius method
+#     :param radius: Search radius for locating activities
+#     """
+# 
+#     def __init__(self, legs_dict: Dict[str, List[Dict[str, Any]]], target_locations, radius: float):
+#         self.legs_dict = legs_dict
+#         self.target_locations = target_locations  # TargetLocations object
+#         self.radius = radius  # Radius for the search
+#         self.located_main_activities_for_current_population = False
+# 
+#     def locate_main_activity(self, person_id: str):
+#         """
+#         Locates the main activity location for each person based on Euclidean distances,
+#         normalized potentials, and the desired activity type. Uses the unsegmented legs dict.
+#         :param person_id: Identifier for the person to locate main activity for
+#         :return:
+#         """
+#         person_legs = self.legs_dict[person_id]
+# 
+#         if not person_legs:
+#             # Person doesn't seem to have legs (no mobility). This is fine.
+#             return
+# 
+#         home_location = person_legs[0]['from_location']
+# 
+#         main_activity_leg = None
+#         for leg in person_legs:
+#             if leg['to_act_type'] == 'main_activity':
+#                 main_activity_leg = leg
+#                 break
+# 
+#         if not main_activity_leg:
+#             return
+# 
+#         target_activity = main_activity_leg['to_act_type']
+# 
+#         identifiers, names, coordinates, potentials, distances = find_ring_candidates(
+#             home_location, target_activity, self.radius, self.target_locations)
+# 
+#         if len(identifiers) == 0:
+#             # If no candidates are found within the radius, assign a random location
+#             all_coords = self.target_locations.data[target_activity]['coordinates']
+#             main_activity_leg['to_location'] = rnd.choice(all_coords)
+#             return
+# 
+#         # Calculate attractiveness using the provided score_locations function
+#         attractiveness = score_locations(potentials, distances)
+# 
+#         total_weight = np.sum(attractiveness)
+#         if total_weight > 0:
+#             selected_index = np.random.choice(len(attractiveness), p=attractiveness / total_weight)
+#         else:
+#             selected_index = np.random.choice(len(attractiveness))
+# 
+#         main_activity_leg['to_location'] = coordinates[selected_index]
+# 
+#     def locate_activities(self):
+#         for person_id in self.legs_dict.keys():
+#             self.locate_main_activity(person_id)
+#         return self.legs_dict
 
-    def __init__(self, legs_dict: Dict[str, List[Dict[str, Any]]], target_locations, radius: float):
-        self.legs_dict = legs_dict
-        self.target_locations = target_locations  # TargetLocations object
-        self.radius = radius  # Radius for the search
-        self.located_main_activities_for_current_population = False
-
-    def locate_main_activity(self, person_id: str):
-        """
-        Locates the main activity location for each person based on Euclidean distances,
-        normalized potentials, and the desired activity type. Uses the unsegmented legs dict.
-        :param person_id: Identifier for the person to locate main activity for
-        :return:
-        """
-        person_legs = self.legs_dict[person_id]
-
-        if not person_legs:
-            # Person doesn't seem to have legs (no mobility). This is fine.
-            return
-
-        home_location = person_legs[0]['from_location']
-
-        main_activity_leg = None
-        for leg in person_legs:
-            if leg['to_act_purpose'] == 'main_activity':
-                main_activity_leg = leg
-                break
-
-        if not main_activity_leg:
-            return
-
-        target_activity = main_activity_leg['to_act_purpose']
-
-        identifiers, names, coordinates, potentials, distances = find_ring_candidates(
-            home_location, target_activity, self.radius, self.target_locations)
-
-        if len(identifiers) == 0:
-            # If no candidates are found within the radius, assign a random location
-            all_coords = self.target_locations.data[target_activity]['coordinates']
-            main_activity_leg['to_location'] = rnd.choice(all_coords)
-            return
-
-        # Calculate attractiveness using the provided score_locations function
-        attractiveness = score_locations(potentials, distances)
-
-        total_weight = np.sum(attractiveness)
-        if total_weight > 0:
-            selected_index = np.random.choice(len(attractiveness), p=attractiveness / total_weight)
-        else:
-            selected_index = np.random.choice(len(attractiveness))
-
-        main_activity_leg['to_location'] = coordinates[selected_index]
-
-    def locate_activities(self):
-        for person_id in self.legs_dict.keys():
-            self.locate_main_activity(person_id)
-        return self.legs_dict
-
-def locate_main():
-    """Gets each person's main activity and locates it.
-    Currently just uses the euclidean distance and potentials.
+def locate_main(person_legs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Gets a person's main activity and locates it.
+    Currently just uses the Euclidean distance and potentials.
     Planned to also use O-D matrices.
-    :return:
+    :return: Updated list of legs with located main activities.
     """
-    candidates = find_ring_candidates(segment[i]['to_act_purpose'], segment[i]['from_location'], radius1,
-                                      radius2)
-    act_identifier, act_name, act_coord, act_cap, act_dist, act_score = monte_carlo_select_candidate(
-        candidates)
 
-    segment[i]['to_location'] = act_coord
-    segment[i + 1]['from_location'] = act_coord
-    segment[i]['to_act_identifier'] = act_identifier
-    segment[i]['to_act_name'] = act_name
-    segment[i]['to_act_cap'] = act_cap
-    segment[i]['to_act_score'] = act_score
+    main_activity_leg = None
+    main_activity_index = None
+    for i, leg in enumerate(person_legs):
+        if leg['is_main_activity']:
+            main_activity_leg = leg
+            main_activity_index = i
+            break
+
+    if not main_activity_leg:
+        assert len(person_legs) <= 1, "Person has no main activity but has multiple legs."
+        return person_legs
+
+    target_activity = main_activity_leg['to_act_type']
+    home_location = person_legs[0]['from_location']
+    estimated_distance_home_to_main = person_legs[0]['home_to_main_distance']
+
+    # Radii are iteratively spread by find_ring_candidates until a candidate is found
+    radius1, radius2 = spread_distances(estimated_distance_home_to_main, estimated_distance_home_to_main)  # Initial
+    candidates = find_ring_candidates(target_activity, home_location, radius1=radius1, radius2=radius2)
+    act_identifier, act_name, act_coord, act_cap, act_dist, act_score = monte_carlo_select_candidate(candidates)
+
+    # Update the main activity leg and the subsequent leg
+    person_legs[main_activity_index]['to_location'] = act_coord
+    person_legs[main_activity_index]['to_act_identifier'] = act_identifier
+    person_legs[main_activity_index]['to_act_name'] = act_name
+    person_legs[main_activity_index]['to_act_cap'] = act_cap
+    person_legs[main_activity_index]['to_act_score'] = act_score
+
+    if main_activity_index + 1 < len(person_legs):
+        person_legs[main_activity_index + 1]['from_location'] = act_coord
+
+    return person_legs
 
 
 def reformat_locations(locations_data: Dict[str, Dict[str, Dict[str, Any]]]) -> Dict[str, Dict[str, np.ndarray]]:
     """Reformat locations data from a nested dictionary to a dictionary of numpy arrays."""
     reformatted_data = {}
 
-    for purpose, locations in locations_data.items():
+    for type, locations in locations_data.items():
         identifiers = []
         names = []
         coordinates = []
@@ -123,7 +148,7 @@ def reformat_locations(locations_data: Dict[str, Dict[str, Dict[str, Any]]]) -> 
                 logger.warning("Using old capacity name instead of potential name")
                 potentials.append(location_details['capacity'])  # Old name
 
-        reformatted_data[purpose] = {
+        reformatted_data[type] = {
             'identifiers': np.array(identifiers, dtype=object),
             'names': np.array(names, dtype=str),
             'coordinates': np.array(coordinates, dtype=float),
@@ -135,7 +160,7 @@ def reformat_locations(locations_data: Dict[str, Dict[str, Dict[str, Any]]]) -> 
 
 class TargetLocations:
     """
-    Spatial index of activity locations split by purpose.
+    Spatial index of activity locations split by type.
     This class is used to quickly find the nearest activity locations for a given location.
     """
 
@@ -143,15 +168,15 @@ class TargetLocations:
         self.data: Dict[str, Dict[str, np.ndarray]] = data
         self.indices: Dict[str, KDTree] = {}
 
-        for purpose, pdata in self.data.items():
-            logger.debug(f"Constructing spatial index for {purpose} ...")
-            self.indices[purpose] = KDTree(pdata["coordinates"])
+        for type, pdata in self.data.items():
+            logger.debug(f"Constructing spatial index for {type} ...")
+            self.indices[type] = KDTree(pdata["coordinates"])
 
-    def query_closest(self, purpose: str, location: np.ndarray, num_candidates: int = 1) -> Tuple[
+    def query_closest(self, type: str, location: np.ndarray, num_candidates: int = 1) -> Tuple[
         np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
-        Find the nearest activity locations for a given location and purpose.
-        :param purpose: The purpose category to query.
+        Find the nearest activity locations for a given location and type.
+        :param type: The type category to query.
         :param location: A 1D numpy array representing the location to query (coordinates [1.5, 2.5]).
         :param num_candidates: The number of nearest candidates to return.
         :return: A tuple containing four numpy arrays: identifiers, coordinates, distances, and remaining potentials of the nearest candidates.
@@ -160,22 +185,22 @@ class TargetLocations:
         location = location.reshape(1, -1)
 
         # Query the KDTree for the nearest locations
-        candidate_distances, indices = self.indices[purpose].query(location, k=num_candidates)
+        candidate_distances, indices = self.indices[type].query(location, k=num_candidates)
         logger.debug(f"Query Distances: {candidate_distances}")
         logger.debug(f"Query Indices: {indices}")
 
         # Get the identifiers, coordinates, and distances for the nearest neighbors
-        candidate_identifiers = np.array(self.data[purpose]["identifiers"])[indices[0]]
-        candidate_names = np.array(self.data[purpose]["names"])[indices[0]]
-        candidate_coordinates = np.array(self.data[purpose]["coordinates"])[indices[0]]
-        candidate_potentials = np.array(self.data[purpose]["potentials"])[indices[0]]
+        candidate_identifiers = np.array(self.data[type]["identifiers"])[indices[0]]
+        candidate_names = np.array(self.data[type]["names"])[indices[0]]
+        candidate_coordinates = np.array(self.data[type]["coordinates"])[indices[0]]
+        candidate_potentials = np.array(self.data[type]["potentials"])[indices[0]]
 
         return candidate_identifiers, candidate_names, candidate_coordinates, candidate_potentials, candidate_distances[
             0]
 
     def query_within_radius(self, act_type: str, location: np.ndarray, radius: float):
         """
-        Find the activity locations within a given radius of a location and purpose.
+        Find the activity locations within a given radius of a location and type.
         :param act_type: The activity category to query.
         :param location: A 1D numpy array representing the location to query (coordinates [1.5, 2.5]).
         :param radius: The maximum distance from the location to search for candidates.
@@ -201,7 +226,7 @@ class TargetLocations:
     def query_within_ring(self, act_type: str, location: np.ndarray, radius1: float, radius2: float) -> Tuple[
         np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
-        Find the activity locations within a ring defined by two radii around a location and purpose.
+        Find the activity locations within a ring defined by two radii around a location and type.
         :param act_type: The activity category to query.
         :param location: A 1D numpy array representing the location to query (coordinates [1.5, 2.5]).
         :param radius1: Any of the two radii defining the ring.
@@ -238,16 +263,16 @@ class TargetLocations:
 
         return candidate_identifiers, candidate_names, candidate_coordinates, candidate_potentials, candidate_distances
 
-    def sample(self, purpose: str, random: rnd.Random) -> Tuple[Any, np.ndarray]:
+    def sample(self, act_type: str, random: rnd.Random) -> Tuple[Any, np.ndarray]:
         """
-        Sample a random activity location for a given purpose.
-        :param purpose: The purpose category to sample from.
+        Sample a random activity location for a given act_type.
+        :param act_type: The act_type category to sample from.
         :param random: A random number generator.
         :return: A tuple containing the identifier and coordinates of the sampled activity.
         """
-        index = random.randint(0, len(self.data[purpose]["coordinates"]) - 1)
-        identifier = self.data[purpose]["identifiers"][index]
-        coordinates = self.data[purpose]["coordinates"][index]
+        index = random.randint(0, len(self.data[act_type]["coordinates"]) - 1)
+        identifier = self.data[act_type]["identifiers"][index]
+        coordinates = self.data[act_type]["coordinates"][index]
         return identifier, coordinates
 
 
@@ -369,24 +394,24 @@ def find_circle_intersections(center1: np.ndarray, radius1: float, center2: np.n
     return intersect1, intersect2
 
 
-def find_location_candidates(start_coord: np.ndarray, end_coord: np.ndarray, purpose: str,
+def find_location_candidates(start_coord: np.ndarray, end_coord: np.ndarray, type: str,
                              distance_start_to_act: float, distance_act_to_end: float,
                              num_candidates: int) -> Tuple[
     Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray],
     Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
     """
-    Find n location candidates for a given activity purpose between two known locations.
+    Find n location candidates for a given activity type between two known locations.
     Returns two sets of candidates if two intersection points are found, otherwise only one set.
     """
     intersect1, intersect2 = find_circle_intersections(start_coord, distance_start_to_act, end_coord,
                                                        distance_act_to_end)
 
     candidate_identifiers, candidate_names, candidate_coordinates, candidate_potentials, candidate_distances = MyTargetLocations.query_closest(
-        purpose, intersect1, num_candidates)
+        type, intersect1, num_candidates)
 
     if intersect2 is not None:
         candidate_identifiers2, candidate_names2, candidate_coordinates2, candidate_potentials2, candidate_distances2 = MyTargetLocations.query_closest(
-            purpose, intersect2, num_candidates)
+            type, intersect2, num_candidates)
 
         return (
             candidate_identifiers, candidate_names, candidate_coordinates, candidate_potentials, candidate_distances), \
@@ -401,18 +426,18 @@ from typing import Tuple
 import numpy as np
 
 
-def greedy_select_single_activity(start_coord: np.ndarray, end_coord: np.ndarray, purpose: str,
+def greedy_select_single_activity(start_coord: np.ndarray, end_coord: np.ndarray, type: str,
                                   distance_start_to_act: float, distance_act_to_end: float,
                                   num_candidates: int):
     """Place a single activity at the most likely location."""
-    logger.debug(f"Greedy selecting activity for purpose {purpose} between {start_coord} and {end_coord}.")
+    logger.debug(f"Greedy selecting activity for type {type} between {start_coord} and {end_coord}.")
 
     # Home locations aren't among the targets and are for now replaced by the start location
-    if purpose == s.ACT_HOME:
+    if type == s.ACT_HOME:
         logger.info("Home activity detected. Secondary locator shouldn't be used for that. Returning start location.")
         return None, "home", start_coord, None, None, None
 
-    candidates1, candidates2 = find_location_candidates(start_coord, end_coord, purpose, distance_start_to_act,
+    candidates1, candidates2 = find_location_candidates(start_coord, end_coord, type, distance_start_to_act,
                                                         distance_act_to_end, num_candidates)
 
     if candidates2 is not None:
@@ -451,7 +476,7 @@ def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any
         '10000290_11563_10000291': [
             {
                 'unique_leg_id': '10000290_11563_10000291_1.0',
-                'to_act_purpose': 'shopping',
+                'to_act_type': 'shopping',
                 'distance': 950.0,
                 'from_location': array([552452.11071084, 5807493.538159]),
                 'to_location': array([], dtype=float64),
@@ -461,7 +486,7 @@ def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any
             },
             {
                 'unique_leg_id': '10000290_11563_10000291_2.0',
-                'to_act_purpose': 'home',
+                'to_act_type': 'home',
                 'distance': 1430.0,
                 'from_location': array([], dtype=float64),
                 'to_location': array([552452.11071084, 5807493.538159]),
@@ -473,7 +498,7 @@ def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any
         '10000370_11564_10000371': [
             {
                 'unique_leg_id': '10000370_11564_10000371_1.0',
-                'to_act_purpose': 'leisure',
+                'to_act_type': 'leisure',
                 'distance': 10450.0,
                 'from_location': array([554098.49165674, 5802930.10530201]),
                 'to_location': array([], dtype=float64),
@@ -483,7 +508,7 @@ def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any
             },
             {
                 'unique_leg_id': '10000370_11564_10000371_2.0',
-                'to_act_purpose': 'home',
+                'to_act_type': 'home',
                 'distance': 7600.0,
                 'from_location': array([], dtype=float64),
                 'to_location': array([], dtype=float64),
@@ -493,7 +518,7 @@ def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any
             },
             {
                 'unique_leg_id': '10000370_11564_10000371_3.0',
-                'to_act_purpose': 'shopping',
+                'to_act_type': 'shopping',
                 'distance': 13300.0,
                 'from_location': array([], dtype=float64),
                 'to_location': array([], dtype=float64),
@@ -503,7 +528,7 @@ def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any
             },
             {
                 'unique_leg_id': '10000370_11564_10000371_4.0',
-                'to_act_purpose': 'home',
+                'to_act_type': 'home',
                 'distance': 13300.0,
                 'from_location': array([], dtype=float64),
                 'to_location': array([554098.49165674, 5802930.10530201]),
@@ -536,7 +561,7 @@ def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any
     def to_leg_dict(leg_tuple):
         return {
             s.UNIQUE_LEG_ID_COL: leg_tuple[0],
-            'to_act_purpose': leg_tuple[1],
+            'to_act_type': leg_tuple[1],
             'distance': leg_tuple[2],
             'from_location': leg_tuple[3],
             'to_location': leg_tuple[4],
@@ -569,13 +594,16 @@ def prepare_mid_df_for_legs_dict(filter_max_distance=None, number_of_persons=Non
     """Temporarily prepare the MiD DataFrame for the leg dictionary function."""
     df = h.read_csv(h.get_files(s.ENHANCED_MID_FOLDER))
 
-    # Initialize columns with empty objects to ensure dtype compatibility
+    # Initialize columns with empty objects to ensure compatibility
     df["from_location"] = None
     df["to_location"] = None
 
     # Throw out rows with missing values in the distance column
     row_count_before = df.shape[0]
+    # Count rows with no leg
+    no_leg_count = df[df[s.LEG_ID_COL].isna()].shape[0]
     df = df.dropna(subset=[s.LEG_DISTANCE_METERS_COL])
+    logger.debug(f"People with no legs: {no_leg_count}")
     logger.debug(f"Dropped {row_count_before - df.shape[0]} rows with missing distance values.")
 
     # Identify and remove records of persons with any trip exceeding the max distance if filter_max_distance is specified
@@ -616,7 +644,7 @@ def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List
         [
             {
                 'leg_id': '10000290_11563_10000291_1.0',
-                'to_act_purpose': 'shopping',
+                'to_act_type': 'shopping',
                 'distance': 950.0,
                 'from_location': np.array([552452.11071084, 5807493.538159]),
                 'to_location': np.array([], dtype=float64),
@@ -626,7 +654,7 @@ def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List
             },
             {
                 'leg_id': '10000290_11563_10000291_2.0',
-                'to_act_purpose': 'home',
+                'to_act_type': 'home',
                 'distance': 1430.0,
                 'from_location': np.array([], dtype=float64),
                 'to_location': np.array([552452.11071084, 5807493.538159]),
@@ -638,7 +666,7 @@ def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List
         [
             {
                 'leg_id': '10000290_11563_10000291_3.0',
-                'to_act_purpose': 'work',
+                'to_act_type': 'work',
                 'distance': 500.0,
                 'from_location': np.array([552452.11071084, 5807493.538159]),
                 'to_location': np.array([], dtype=float64),
@@ -648,7 +676,7 @@ def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List
             },
             {
                 'leg_id': '10000290_11563_10000291_4.0',
-                'to_act_purpose': 'home',
+                'to_act_type': 'home',
                 'distance': 1000.0,
                 'from_location': np.array([], dtype=float64),
                 'to_location': np.array([552452.11071084, 5807493.538159]),
@@ -662,7 +690,7 @@ def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List
         [
             {
                 'leg_id': '10000370_11564_10000371_1.0',
-                'to_act_purpose': 'leisure',
+                'to_act_type': 'leisure',
                 'distance': 10450.0,
                 'from_location': np.array([554098.49165674, 5802930.10530201]),
                 'to_location': np.array([], dtype=float64),
@@ -672,7 +700,7 @@ def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List
             },
             {
                 'leg_id': '10000370_11564_10000371_2.0',
-                'to_act_purpose': 'home',
+                'to_act_type': 'home',
                 'distance': 7600.0,
                 'from_location': np.array([], dtype=float64),
                 'to_location': np.array([], dtype=float64),
@@ -682,7 +710,7 @@ def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List
             },
             {
                 'leg_id': '10000370_11564_10000371_3.0',
-                'to_act_purpose': 'shopping',
+                'to_act_type': 'shopping',
                 'distance': 13300.0,
                 'from_location': np.array([], dtype=float64),
                 'to_location': np.array([], dtype=float64),
@@ -692,7 +720,7 @@ def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List
             },
             {
                 'leg_id': '10000370_11564_10000371_4.0',
-                'to_act_purpose': 'home',
+                'to_act_type': 'home',
                 'distance': 13300.0,
                 'from_location': np.array([], dtype=float64),
                 'to_location': np.array([554098.49165674, 5802930.10530201]),
@@ -711,20 +739,35 @@ def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List
     for person_id, legs in nested_dict.items():
         segment = []
         for leg in legs:
-            if not segment:
-                # Start a new segment with the first leg
-                segment.append(leg)
-            else:
-                segment.append(leg)
-                if leg['to_location'].size > 0:
-                    segmented_dict[person_id].append(segment)
-                    segment = []
+            segment.append(leg)
+            if leg['to_location'].size > 0:
+                segmented_dict[person_id].append(segment)
+                segment = []
         # If there are remaining legs in the segment after the loop, add them as well
         if segment:
             segmented_dict[person_id].append(segment)
 
     return dict(segmented_dict)
-
+    #
+    # logger.debug(f"Segmenting legs for {len(nested_dict)} persons.")
+    # segmented_dict = defaultdict(list)
+    #
+    # for person_id, legs in nested_dict.items():
+    #     segment = []
+    #     for leg in legs:
+    #         if not segment:
+    #             # Start a new segment with the first leg
+    #             segment.append(leg)
+    #         else:
+    #             segment.append(leg)
+    #             if leg['to_location'].size > 0:
+    #                 segmented_dict[person_id].append(segment)
+    #                 segment = []
+    #     # If there are remaining legs in the segment after the loop, add them as well
+    #     if segment:
+    #         segmented_dict[person_id].append(segment)
+    #
+    # return dict(segmented_dict)
 
 def adjust_estimation_tree(tree: List[List[List[float]]], real_distance: float, strong_adjust: bool = True) -> List[
     List[List[float]]]:  # Tree level, Leg, Lengths
@@ -864,7 +907,7 @@ def greedy_locate_segment(segment):
     elif len(segment) == 2:
         logger.debug("Greedy locating. Only two legs in segment.")
         act_identifier, act_name, act_coord, act_cap, act_dist, act_score = greedy_select_single_activity(
-            segment[0]['from_location'], segment[-1]['to_location'], segment[0]['to_act_purpose'],
+            segment[0]['from_location'], segment[-1]['to_location'], segment[0]['to_act_type'],
             segment[0]['distance'], segment[-1]['distance'], 5)
         segment[0]['to_location'] = act_coord
         segment[-1]['from_location'] = act_coord
@@ -903,7 +946,7 @@ def greedy_locate_segment(segment):
                 act_identifier, act_name, act_coord, act_cap, act_dist, act_score = \
                     greedy_select_single_activity(segment[from_location_idx]['from_location'],
                                                   segment[to_location_idx]['to_location'],
-                                                  segment[leg_idx]['to_act_purpose'], dist_start_to_act,
+                                                  segment[leg_idx]['to_act_type'], dist_start_to_act,
                                                   dist_act_to_end, 5)
                 segment[leg_idx]['to_location'] = act_coord
                 if leg_idx + 1 < len(segment) + 1:
@@ -925,7 +968,7 @@ def add_from_locations(segment):
 
 def insert_placed_distances(segment):
     """Inserts info on the actual distances between placed activities for a fully located segment.
-    Optional; for debugging and evaluation purposes."""
+    Optional; for debugging and evaluation."""
     for leg in segment:
         leg['placed_distance'] = euclidean_distance(leg['from_location'], leg['to_location'])
         leg['placed_distance_absolute_diff'] = abs(leg['distance'] - leg['placed_distance'])
@@ -935,7 +978,7 @@ def insert_placed_distances(segment):
 
 def summarize_placement_results(flattened_segmented_dict):
     """Summarizes the placement results of a fully located segment.
-    Optional; for debugging and evaluation purposes."""
+    Optional; for debugging and evaluation."""
     discretization_errors = []
     relative_errors = []
     total_number_of_legs = sum([len(segment) for segment in flattened_segmented_dict.values()])
@@ -958,7 +1001,7 @@ def summarize_placement_results(flattened_segmented_dict):
 
 
 def select_interesting_trips(flattened_segmented_dict, n: int):  # TODO: Implement
-    """Selects a few interesting agent trips for debugging and evaluation purposes."""
+    """Selects a few interesting agent trips for debugging and evaluation."""
     interesting_trips = []
     for person_id, segment in flattened_segmented_dict.items():
         if len(segment) > 2:
@@ -1002,13 +1045,13 @@ def flatten_segmented_dict(segmented_dict: Dict[str, List[List[Dict[str, Any]]]]
 #     """Work in progress. """
 
 #     # At the second highest level, get n candidates with score for the location
-#     candidates = find_location_candidates(segment[0]['from_location'], segment[-1]['to_location'], segment[0]['to_act_purpose'], tree[0][0][2], tree[0][1][2], 5)
+#     candidates = find_location_candidates(segment[0]['from_location'], segment[-1]['to_location'], segment[0]['to_act_type'], tree[0][0][2], tree[0][1][2], 5)
 #     logger.debug(candidates)
 
 #     # At the next levels, get n candidates with score for each connected location
 #     for level in range(1, len(tree)):
 #         for i in range(0, len(tree[level]), 2):
-#             candidates = find_location_candidates(segment[i]['from_location'], segment[i+1]['to_location'], segment[i]['to_act_purpose'], tree[level][i][2], tree[level][i+1][2], 5)
+#             candidates = find_location_candidates(segment[i]['from_location'], segment[i+1]['to_location'], segment[i]['to_act_type'], tree[level][i][2], tree[level][i+1][2], 5)
 #             logger.debug(candidates)
 
 
@@ -1024,98 +1067,100 @@ def spread_distances(distance1, distance2, iteration=0, first_step=20):
     return max(0, distance1), max(0, distance2)
 
 
-def simple_locate_segment(segment):
+def simple_locate_segment(person_legs):
     """Assumes start and end locations of segment are identical."""
-    if len(segment) == 0:
+    if len(person_legs) == 0:
         raise ValueError("No legs in segment.")
 
-    elif len(segment) == 1:
-        assert segment[0]['from_location'].size > 0 and segment[0][
+    elif len(person_legs) == 1:
+        assert person_legs[0]['from_location'].size > 0 and person_legs[0][
             'to_location'].size > 0, "Both start and end locations must be known for a single leg."
-        return segment
+        return person_legs
 
     # if there are only two legs, get a location within the two circles around home
-    elif len(segment) == 2:
+    elif len(person_legs) == 2:
         logger.debug("Simple locating. Only two legs in segment.")
-        distance1 = segment[0]['distance']
-        distance2 = segment[1]['distance']
+        distance1 = person_legs[0]['distance']
+        distance2 = person_legs[1]['distance']
         if abs(distance1 - distance2) < 30:  # always meters!
             distance1, distance2 = spread_distances(distance1, distance2, first_step=20)
-        candidates = find_ring_candidates(segment[0]['to_act_purpose'], segment[0]['from_location'], distance1,
+        candidates = find_ring_candidates(person_legs[0]['to_act_type'], person_legs[0]['from_location'], distance1,
                                           distance2)
         act_identifier, act_name, act_coord, act_cap, act_dist, act_score = monte_carlo_select_candidate(candidates)
-        segment[0]['to_location'] = act_coord
-        segment[1]['from_location'] = act_coord
-        segment[0]['to_act_identifier'] = act_identifier
-        segment[0]['to_act_name'] = act_name
-        segment[0]['to_act_cap'] = act_cap
-        segment[0]['to_act_score'] = act_score
-        return segment
+        person_legs[0]['to_location'] = act_coord
+        person_legs[1]['from_location'] = act_coord
+        person_legs[0]['to_act_identifier'] = act_identifier
+        person_legs[0]['to_act_name'] = act_name
+        person_legs[0]['to_act_cap'] = act_cap
+        person_legs[0]['to_act_score'] = act_score
+        return person_legs
 
     else:
-        total_distance = sum([leg['distance'] for leg in segment])
+        total_distance = sum([leg['distance'] for leg in person_legs])
         traveled_distance = 0
-        for i, leg in enumerate(segment):
+        for i, leg in enumerate(person_legs):
             traveled_distance += leg['distance']
-            remaining_legs = len(segment) - i
+            remaining_legs = len(person_legs) - i
 
             if remaining_legs == 1:
                 break  # done because no processing on last leg needed
 
-            elif segment[i]['to_act_purpose'] == s.ACT_HOME:
+            elif person_legs[i]['to_act_type'] == s.ACT_HOME:
                 logger.debug("Home activity. Placing at, you guessed it, home (start location).")
-                act_identifier, act_name, act_coord, act_cap, act_dist, act_score = None, "home", segment[i][
+                act_identifier, act_name, act_coord, act_cap, act_dist, act_score = None, "home", person_legs[i][
                     'from_location'], None, None, None
 
             elif traveled_distance >= total_distance / 2:
 
                 if remaining_legs == 2:
                     logger.debug("Selecting location using simple two-leg method.")
-                    assert segment[-1] == segment[
+                    assert person_legs[-1] == person_legs[
                         i + 1], "Last leg must be the last leg."  # TODO: Remove this line in production
                     act_identifier, act_name, act_coord, act_cap, act_dist, act_score = \
-                        greedy_select_single_activity(segment[i]['from_location'], segment[-1]['to_location'],
-                                                      segment[i]['to_act_purpose'], segment[i]['distance'],
-                                                      segment[-1]['distance'], 5)
+                        greedy_select_single_activity(person_legs[i]['from_location'], person_legs[-1]['to_location'],
+                                                      person_legs[i]['to_act_type'], person_legs[i]['distance'],
+                                                      person_legs[-1]['distance'], 5)
 
                 else:
                     logger.debug("Selecting location using ring with angle restriction.")
-                    distance = segment[i]['distance']
+                    distance = person_legs[i]['distance']
                     radius1, radius2 = spread_distances(distance, distance, iteration=0, first_step=20)
-                    candidates = find_ring_candidates(segment[i]['to_act_purpose'], segment[i]['from_location'],
+                    candidates = find_ring_candidates(person_legs[i]['to_act_type'], person_legs[i]['from_location'],
                                                       radius1, radius2, restrict_angle=True,
-                                                      direction_point=segment[-1]['to_location'])
+                                                      direction_point=person_legs[-1]['to_location'])
 
                     act_identifier, act_name, act_coord, act_cap, act_dist, act_score = monte_carlo_select_candidate(
                         candidates)
             else:
                 logger.debug("Selecting location using ring.")
-                distance = segment[i]['distance']
+                distance = person_legs[i]['distance']
                 radius1, radius2 = spread_distances(distance, distance, iteration=0, first_step=20)
-                candidates = find_ring_candidates(segment[i]['to_act_purpose'], segment[i]['from_location'], radius1,
+                candidates = find_ring_candidates(person_legs[i]['to_act_type'], person_legs[i]['from_location'],
+                                                  radius1,
                                                   radius2)
                 act_identifier, act_name, act_coord, act_cap, act_dist, act_score = monte_carlo_select_candidate(
                     candidates)
 
-            segment[i]['to_location'] = act_coord
-            segment[i + 1]['from_location'] = act_coord
-            segment[i]['to_act_identifier'] = act_identifier
-            segment[i]['to_act_name'] = act_name
-            segment[i]['to_act_cap'] = act_cap
-            segment[i]['to_act_score'] = act_score
+            person_legs[i]['to_location'] = act_coord
+            person_legs[i + 1]['from_location'] = act_coord
+            person_legs[i]['to_act_identifier'] = act_identifier
+            person_legs[i]['to_act_name'] = act_name
+            person_legs[i]['to_act_cap'] = act_cap
+            person_legs[i]['to_act_score'] = act_score
 
-        return segment
+        return person_legs
 
 
-def find_ring_candidates(purpose: str, center: np.ndarray, radius1: float, radius2: float, max_iterations=15,
+def find_ring_candidates(type: str, center: np.ndarray, radius1: float, radius2: float, max_iterations=15,
                          min_candidates=10, restrict_angle=False, direction_point=None, angle_range=math.pi / 2) -> \
         Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Find candidates within a ring around a center point."""
+    """Find candidates within a ring around a center point.
+    Iteratively increase the radii until a sufficient number of candidates is found."""
     i = 0
     logger.debug(
-        f"Finding candidates for purpose {purpose} within a ring around {center} with radii {radius1} and {radius2}.")
+        f"Finding candidates for type {type} within a ring around {center} with radii {radius1} and {radius2}.")
     while True:
-        candidates = MyTargetLocations.query_within_ring(purpose, center, radius1, radius2)
+        candidates = MyTargetLocations.query_within_ring(type, center, radius1, radius2)
         if candidates is not None:
             # Filter candidates by angle
             if restrict_angle:
@@ -1131,7 +1176,7 @@ def find_ring_candidates(purpose: str, center: np.ndarray, radius1: float, radiu
                 )
             if len(candidates[0]) >= min_candidates:
                 logger.debug(f"Found {len(candidates[0])} candidates.")
-                stats_tracker.log(f"Find_ring_candidates: Iterations for {purpose}", i)
+                stats_tracker.log(f"Find_ring_candidates: Iterations for {type}", i)
                 return candidates
         radius1, radius2 = spread_distances(radius1, radius2, iteration=i, first_step=20)
         i += 1
@@ -1181,26 +1226,38 @@ def update_dataframe(df: pd.DataFrame, placed_dict: Dict[str, Any]) -> pd.DataFr
     data_df = pd.DataFrame(records)
 
     # Merge the DataFrame on leg_id
-    df = df.merge(data_df[[s.UNIQUE_LEG_ID_COL, 'from_location', 'to_location', 'placed_distance', 'placed_distance_absolute_diff',
+    df = df.merge(data_df[[s.UNIQUE_LEG_ID_COL, 'from_location', 'to_location', 'placed_distance',
+                           'placed_distance_absolute_diff',
                            'placed_distance_relative_diff']],
                   on=s.UNIQUE_LEG_ID_COL, how='left')
 
     return df
 
 
+def locate_main_activities(persons_legs: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List[Dict[str, Any]]]:
+    """Processes each person's legs to locate main activities for all persons.
+    :return: Updated dictionary with located main activities for all persons.
+    """
+    for person_id, legs in persons_legs.items():
+        persons_legs[person_id] = locate_main(legs)
+    return persons_legs
+
+
+start_time = time.time()
 os.chdir(pipeline_setup.PROJECT_ROOT)
 with open('locations_data_with_potentials.pkl', 'rb') as file:
     locations_data = pickle.load(file)
 reformatted_locations_data = reformat_locations(locations_data)
 MyTargetLocations = TargetLocations(reformatted_locations_data)
 
-df = prepare_mid_df_for_legs_dict(number_of_persons=100)
+df = prepare_mid_df_for_legs_dict(number_of_persons=1000)
 logger.debug("df prepared.")
 dictu = populate_legs_dict_from_df(df)
 logger.debug("dict populated.")
-segmented_dict = segment_legs(dictu)
+with_main_dict = locate_main_activities(dictu)
+segmented_dict = segment_legs(with_main_dict)
 logger.debug("dict segmented.")
-logger.debug(segmented_dict)
+pprint.pprint(segmented_dict)
 
 # Advanced petre locator
 
@@ -1212,10 +1269,9 @@ for person_id, segments in segmented_dict.items():
         segment = insert_placed_distances(segment)  # Just for analysis
 
 # Simple locator
-# for person_id, segments in flattened_segmented_dict.items():
-#     for segment in segments:
-#         segment = simple_locate_segment(segment)
-#         segment = insert_placed_distances(segment)
+# for person_id, person_legs in dictu.items():
+#     person_legs = simple_locate_segment(person_legs)
+#     person_legs = insert_placed_distances(person_legs)
 
 # (slightly modified) Hörl locator
 # result = myhoerl.process(reformatted_locations_data, segmented_dict)
@@ -1233,5 +1289,8 @@ df.to_csv('mid_with_locations.csv', index=False)
 summarize_placement_results(segmented_dict)
 
 stats_tracker.print_stats()
+
+end_time = time.time()
+logger.debug(f"Execution time: {end_time - start_time} seconds.")
 
 logger.debug("done")

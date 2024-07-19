@@ -1,13 +1,18 @@
-import sklearn.neighbors
-import numpy as np
-import shapely.geometry as geo
-import geopandas as gpd
-import pandas as pd
-import numpy.linalg as la
-from typing import Dict, List, Any
+import os
+import pickle
+import time
 from typing import List, Dict, Any
 
-from collections import defaultdict
+import geopandas as gpd
+import numpy as np
+import numpy.linalg as la
+import pandas as pd
+import shapely.geometry as geo
+import sklearn.neighbors
+
+from utils import pipeline_setup
+from synthesis.location_assignment.activity_locator_distance_based import *
+
 # COMPONENTS
 
 # TODO: Give him my locations
@@ -61,24 +66,27 @@ class CustomDiscretizationSolver:
 
 
 def format_segmented_legs(segmented_dict: Dict[str, List[List[Dict[str, Any]]]]) -> List[Dict[str, Any]]:
+    """We use this instead of find_(bare)_assignment_problems because the input is different
+    (but it does the same thing)."""
     mode_mapping = {
-        1: "walk",
-        2: "bike",
-        3: "car_passenger",
-        4: "car",
-        5: "pt",
-        9: "no_information"
+        "walk": "walk",
+        "bike": "bike",
+        "ride": "car_passenger",
+        "car": "car",
+        "pt": "pt",
+        "undefined": "no_information"
     }
     formatted_problems = []
 
     for person_id, segments in segmented_dict.items():
         for trip_index, segment in enumerate(segments):
-            purposes = [leg['to_act_purpose'] for leg in segment]
+            purposes = [leg['to_act_type'] for leg in segment]
             purposes = purposes[
                        :-1]  # Removing the last purpose (in segments, the last to purpose heads to a fixed activity)
-
+            if len(purposes) == 0:
+                continue
             modes = [mode_mapping.get(leg['mode'], "unknown") for leg in segment]
-            distances = [leg['distance'] for leg in segment]  # Assuming 'distance' acts as a proxy for travel time
+            distances = [leg['distance'] for leg in segment]
 
             # Finding the origins and destinations
             origin_location = segment[0]['from_location'] if np.size(segment[0]['from_location']) > 0 else None
@@ -95,6 +103,7 @@ def format_segmented_legs(segmented_dict: Dict[str, List[List[Dict[str, Any]]]])
                 'trip_index': trip_index,
                 'purposes': purposes,
                 'modes': modes,
+                # We insert distance into the travel time field bcs we know them directly
                 'travel_times': distances,
                 'size': len(purposes),
                 'origin': origin_location,
@@ -102,9 +111,7 @@ def format_segmented_legs(segmented_dict: Dict[str, List[List[Dict[str, Any]]]])
                 'activity_index': trip_index + 1  # Starting index from 1
             }
 
-            formatted_problems.append(problem)
-
-    return formatted_problems
+            yield problem
 
 
 
@@ -646,3 +653,21 @@ class DiscretizationErrorObjective(AssignmentObjective):
         valid &= discretization_result["valid"]
 
         return dict(valid=valid, objective=objective)
+
+start_time = time.time()
+os.chdir(pipeline_setup.PROJECT_ROOT)
+with open('locations_data_with_potentials.pkl', 'rb') as file:
+    locations_data = pickle.load(file)
+reformatted_locations_data = reformat_locations(locations_data)
+df = prepare_mid_df_for_legs_dict(number_of_persons=1000)
+logger.debug("df prepared.")
+dictu = populate_legs_dict_from_df(df)
+logger.debug("dict populated.")
+with_main_dict = locate_main_activities(dictu)
+segmented_dict = segment_legs(with_main_dict)
+logger.debug("dict segmented.")
+process(reformatted_locations_data, segmented_dict)
+
+for person_id, segments in segmented_dict.items():
+    for segment in segments:
+        segment = insert_placed_distances(segment)  # Just for analysis

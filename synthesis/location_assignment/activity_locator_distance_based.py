@@ -18,6 +18,8 @@ import time
 
 logger = logging.getLogger(__name__)
 
+#TODO: place Pendler (persons, definable, that exceed some max trip dist)
+# either near Bahnhof (pt) or according to landuse (car)
 
 # class DistanceBasedMainActivityLocator:
 #     """
@@ -624,10 +626,21 @@ def prepare_mid_df_for_legs_dict(filter_max_distance=None, number_of_persons=Non
         df = df[df[s.PERSON_ID_COL].isin(person_ids)]
 
     # Add random home locations for each person
+    # TODO: write function that properly assigns homes (very similar to now, from popsim)
     for person_id, group in df.groupby(s.PERSON_ID_COL):
         home_location = generate_random_location_within_hanover()
         df.at[group.index[0], "from_location"] = home_location
         df.at[group.index[-1], "to_location"] = home_location
+
+        home_rows_to = group[group[s.ACT_TO_INTERNAL_COL] == s.ACT_HOME].index
+        if not home_rows_to.empty:
+            for idx in home_rows_to:
+                df.at[idx, "to_location"] = home_location
+
+        home_rows_from = group[group[s.ACT_FROM_INTERNAL_COL] == s.ACT_HOME].index
+        if not home_rows_from.empty:
+            for idx in home_rows_from:
+                df.at[idx, "from_location"] = home_location
 
     logger.debug(df.head())
     return df
@@ -1243,54 +1256,64 @@ def locate_main_activities(persons_legs: Dict[str, List[Dict[str, Any]]]) -> Dic
     return persons_legs
 
 
-start_time = time.time()
-os.chdir(pipeline_setup.PROJECT_ROOT)
-with open('locations_data_with_potentials.pkl', 'rb') as file:
-    locations_data = pickle.load(file)
-reformatted_locations_data = reformat_locations(locations_data)
-MyTargetLocations = TargetLocations(reformatted_locations_data)
 
-df = prepare_mid_df_for_legs_dict(number_of_persons=1000)
-logger.debug("df prepared.")
-dictu = populate_legs_dict_from_df(df)
-logger.debug("dict populated.")
-with_main_dict = locate_main_activities(dictu)
-segmented_dict = segment_legs(with_main_dict)
-logger.debug("dict segmented.")
-pprint.pprint(segmented_dict)
+if __name__ == '__main__':
+    start_time = time.time()
+    os.chdir(pipeline_setup.PROJECT_ROOT)
+    with open('locations_data_with_potentials.pkl', 'rb') as file:
+        #TODO: make handler, use OSMOX
+        locations_data = pickle.load(file)
+    reformatted_locations_data = reformat_locations(locations_data)
+    MyTargetLocations = TargetLocations(reformatted_locations_data)
 
-# Advanced petre locator
+    df = prepare_mid_df_for_legs_dict(number_of_persons=1000)
+    logger.debug("df prepared.")
+    dictu = populate_legs_dict_from_df(df)
+    logger.debug("dict populated.")
+    with_main_dict = locate_main_activities(dictu)
+    segmented_dict = segment_legs(with_main_dict)
+    logger.debug("dict segmented.")
+    pprint.pprint(segmented_dict)
+
+    # Advanced petre locator
 
 
-# Greedy petre locator
-for person_id, segments in segmented_dict.items():
-    for segment in segments:
-        segment = greedy_locate_segment(segment)
-        segment = insert_placed_distances(segment)  # Just for analysis
+    # Greedy petre locator
+    for person_id, segments in segmented_dict.items():
+        for segment in segments:
+            segment = greedy_locate_segment(segment)
+            segment = insert_placed_distances(segment)  # Just for analysis
 
-# Simple locator
-# for person_id, person_legs in dictu.items():
-#     person_legs = simple_locate_segment(person_legs)
-#     person_legs = insert_placed_distances(person_legs)
+    # Simple locator
+    # for person_id, person_legs in dictu.items():
+    #     person_legs = simple_locate_segment(person_legs)
+    #     person_legs = insert_placed_distances(person_legs)
 
-# (slightly modified) Hörl locator
-# result = myhoerl.process(reformatted_locations_data, segmented_dict)
+    # (slightly modified) Hörl locator
+    # result = myhoerl.process(reformatted_locations_data, segmented_dict)
 
-df = update_dataframe(df, segmented_dict)
+    df = update_dataframe(df, segmented_dict)
 
-segmented_dict = flatten_segmented_dict(segmented_dict)
-for person_id, segment in segmented_dict.items():
-    logger.debug(f"Person ID: {person_id}")
-    for leg in segment:
-        logger.debug(leg)
+    segmented_dict = flatten_segmented_dict(segmented_dict)
+    for person_id, segment in segmented_dict.items():
+        logger.debug(f"Person ID: {person_id}")
+        for leg in segment:
+            logger.debug(leg)
 
-df.to_csv('mid_with_locations.csv', index=False)
+    df.to_csv('mid_with_locations.csv', index=False)
 
-summarize_placement_results(segmented_dict)
+    summarize_placement_results(segmented_dict)
 
-stats_tracker.print_stats()
+    stats_tracker.print_stats()
 
-end_time = time.time()
-logger.debug(f"Execution time: {end_time - start_time} seconds.")
+    end_time = time.time()
+    logger.debug(f"Execution time: {end_time - start_time} seconds.")
 
-logger.debug("done")
+    logger.debug("done")
+
+else:
+    os.chdir(pipeline_setup.PROJECT_ROOT)
+    with open('locations_data_with_potentials.pkl', 'rb') as file:
+        locations_data = pickle.load(file)
+    reformatted_locations_data = reformat_locations(locations_data)
+    MyTargetLocations = TargetLocations(reformatted_locations_data)

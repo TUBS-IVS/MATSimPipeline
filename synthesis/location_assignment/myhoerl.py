@@ -666,8 +666,9 @@ logger.debug("dict populated.")
 with_main_dict = locate_main_activities(dictu)
 segmented_dict = segment_legs(with_main_dict)
 logger.debug("dict segmented.")
-process(reformatted_locations_data, segmented_dict)
-
+pprint.pprint(segmented_dict)
+df_location, df_convergence = process(reformatted_locations_data, segmented_dict)
+logger.debug("df processed.")
 for person_id, segments in segmented_dict.items():
     for segment in segments:
         segment = insert_placed_distances(segment)  # Just for analysis

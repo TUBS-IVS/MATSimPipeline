@@ -54,11 +54,14 @@ class DataFrameProcessor:
             new_df = h.read_csv(csv_path, test_col=test_col, use_cols=use_cols)
 
             if if_df_exists == 'replace':
+                if self.df:
+                    logger.info("DataFrame loaded and replaced successfully from CSV.")
+                else:
+                    logger.info("DataFrame loaded successfully from CSV.")
                 self.df = new_df
             elif if_df_exists == 'concat':
                 self.df = pd.concat([self.df, new_df], ignore_index=True) if self.df is not None else new_df
-
-            logger.info("DataFrame loaded successfully from CSV.")
+                logger.info("DataFrame loaded and concatenated successfully from CSV.")
         except Exception as e:
             logger.error(f"Failed to load DataFrame from {csv_path}: {e}")
             raise
@@ -278,3 +281,10 @@ class DataFrameProcessor:
                 self.df[col] = self.df[col].astype(dtype)
             except (ValueError, TypeError) as e:
                 raise ValueError(f"Error converting column '{col}' to {dtype}: {e}")
+
+    def transpose(self):
+        """
+        Transpose the DataFrame.
+        """
+        self.df = self.df.T
+

@@ -137,8 +137,15 @@ oxmox_config = {
             "theme_park"
         ],
         "medicalcare": ["*"],
-        "healthcare": ["*"]
+        "healthcare": ["*"],
+        "public_transport": ["*"],
+        "highway": ["bus_stop"]
     },
+
+    "object_features": ["units", "levels", "area", "floor_area"],
+
+    "default_tags": [["building", "residential"]],
+
     "activity_mapping": {
         "building": {
             "apartments": [s.ACT_HOME],
@@ -214,12 +221,12 @@ oxmox_config = {
                        s.ACT_RETURN_JOURNEY, s.ACT_DAYCARE, s.ACT_ACCOMPANY_ADULT, s.ACT_UNSPECIFIED],
             "university": [s.ACT_EDUCATION, s.ACT_WORK, s.ACT_PICK_UP_DROP_OFF, s.ACT_RETURN_JOURNEY,
                            s.ACT_UNSPECIFIED],
-            "bank": [s.ACT_BUSINESS, s.ACT_WORK, s.ACT_PICK_UP_DROP_OFF, s.ACT_RETURN_JOURNEY, s.ACT_UNSPECIFIED],
-            "clinic": [s.ACT_BUSINESS, s.ACT_WORK, s.ACT_PICK_UP_DROP_OFF, s.ACT_RETURN_JOURNEY, s.ACT_UNSPECIFIED],
-            "dentist": [s.ACT_BUSINESS, s.ACT_WORK, s.ACT_PICK_UP_DROP_OFF, s.ACT_RETURN_JOURNEY, s.ACT_UNSPECIFIED],
-            "doctors": [s.ACT_BUSINESS, s.ACT_WORK, s.ACT_PICK_UP_DROP_OFF, s.ACT_RETURN_JOURNEY, s.ACT_UNSPECIFIED],
-            "hospital": [s.ACT_BUSINESS, s.ACT_WORK, s.ACT_PICK_UP_DROP_OFF, s.ACT_RETURN_JOURNEY, s.ACT_UNSPECIFIED],
-            "pharmacy": [s.ACT_SHOPPING, s.ACT_WORK, s.ACT_PICK_UP_DROP_OFF, s.ACT_RETURN_JOURNEY, s.ACT_UNSPECIFIED],
+            "bank": [s.ACT_BUSINESS, s.ACT_WORK, s.ACT_PICK_UP_DROP_OFF, s.ACT_RETURN_JOURNEY, s.ACT_UNSPECIFIED, s.ACT_ERRANDS, s.ACT_OTHER],
+            "clinic": [s.ACT_BUSINESS, s.ACT_WORK, s.ACT_PICK_UP_DROP_OFF, s.ACT_RETURN_JOURNEY, s.ACT_UNSPECIFIED, s.ACT_ERRANDS, s.ACT_OTHER],
+            "dentist": [s.ACT_BUSINESS, s.ACT_WORK, s.ACT_PICK_UP_DROP_OFF, s.ACT_RETURN_JOURNEY, s.ACT_UNSPECIFIED, s.ACT_ERRANDS, s.ACT_OTHER],
+            "doctors": [s.ACT_BUSINESS, s.ACT_WORK, s.ACT_PICK_UP_DROP_OFF, s.ACT_RETURN_JOURNEY, s.ACT_UNSPECIFIED, s.ACT_ERRANDS, s.ACT_OTHER],
+            "hospital": [s.ACT_BUSINESS, s.ACT_WORK, s.ACT_PICK_UP_DROP_OFF, s.ACT_RETURN_JOURNEY, s.ACT_UNSPECIFIED, s.ACT_ERRANDS,s.ACT_OTHER],
+            "pharmacy": [s.ACT_SHOPPING, s.ACT_WORK, s.ACT_PICK_UP_DROP_OFF, s.ACT_RETURN_JOURNEY, s.ACT_UNSPECIFIED, s.ACT_ERRANDS,s.ACT_OTHER],
             "social_facility": [s.ACT_BUSINESS, s.ACT_WORK, s.ACT_PICK_UP_DROP_OFF, s.ACT_RETURN_JOURNEY,
                                 s.ACT_UNSPECIFIED],
             "vetinary": [s.ACT_BUSINESS, s.ACT_WORK, s.ACT_PICK_UP_DROP_OFF, s.ACT_RETURN_JOURNEY, s.ACT_UNSPECIFIED],
@@ -358,3 +365,96 @@ def write_config_to_json(config, file_path):
 os.chdir(pipeline_setup.PROJECT_ROOT)
 output_dir = os.path.join(pipeline_setup.OUTPUT_DIR, 'config.json')
 write_config_to_json(oxmox_config, output_dir)
+
+
+def run_oxmox(config_file):
+    logger.info(f"Running OXMox with config file: {config_file}")
+    # Run OXMox here
+    pass
+
+
+class OSMDataProcessor:
+    def __init__(self, data, purpose_remap):
+        self.data = data
+        self.purpose_remap = purpose_remap
+        self.wgs_84_to_epsg25832_transformer = Transformer.from_crs("epsg:4326", "epsg:25832")
+        self.epsg25832_to_wgs_84_transformer = Transformer.from_crs("epsg:25832", "epsg:4326")
+        self.processed_locations_data = None
+
+    def get_purposes(self, element):
+        # Loop through possible keys to match elements with purposes
+        for key in [
+            "amenity",
+            "building",
+            "landuse",
+            "leisure",
+            "medicalcare",
+            "healthcare",
+            "office",
+            "government",
+            "shop",
+        ]:
+            if key in element["tags"]:
+                value = element["tags"][key]
+                if value in self.purpose_remap[key]:
+                    return self.purpose_remap[key][value]
+                elif "*" in self.purpose_remap[key]:
+                    return self.purpose_remap[key]["*"]
+        return [s.ACT_UNSPECIFIED]
+
+    def format_name(self, name):
+        # Remove diacritics and replace spaces with hyphens
+        formatted_name = (
+            unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("utf-8")
+        )
+        formatted_name = formatted_name.replace(" ", "-")
+        # Truncate to first 20 characters
+        return formatted_name[:20]
+
+    def transform_coords(self, lon, lat):
+        x, y = self.wgs_84_to_epsg25832_transformer.transform(lat, lon)
+        return x, y
+
+    def transform_elements_coords(self):
+        # Transform the coordinates of all elements in the JSON data
+        for element in self.data['elements']:
+            if 'lon' in element and 'lat' in element:
+                element['x'], element['y'] = self.transform_coords(element['lon'], element['lat'])
+                del element['lon']
+                del element['lat']
+
+    def process_data(self):
+        # Ensure coordinates are transformed before processing anything else
+        self.transform_elements_coords()
+
+        locations_data = {}
+
+        for element in self.data["elements"]:
+            if "tags" in element:
+                name = element["tags"].get("name", "Unnamed")
+                x = element.get("x", np.nan)
+                y = element.get("y", np.nan)
+                capacity = int(element["tags"].get("capacity", 0))  # Assuming capacity is an integer
+
+                purposes = self.get_purposes(element)
+
+                # Get the unique ID of the location from Overpass API
+                location_id = str(element["id"])
+
+                # Format and truncate the name
+                formatted_name = self.format_name(name)
+
+                # Add the location to each purpose in the purpose dictionary
+                if not np.isnan(x) and not np.isnan(y):
+                    for purpose in purposes:
+                        if purpose not in locations_data:
+                            locations_data[purpose] = {}
+                        # Store the location data along with its capacity and formatted name
+                        locations_data[purpose][location_id] = {
+                            "coordinates": np.array([x, y]),
+                            "capacity": capacity,
+                            "name": formatted_name,
+                        }
+
+        self.processed_locations_data = locations_data
+        return locations_data

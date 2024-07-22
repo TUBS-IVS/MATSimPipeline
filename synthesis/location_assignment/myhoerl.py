@@ -79,7 +79,7 @@ def format_segmented_legs(segmented_dict: Dict[str, List[List[Dict[str, Any]]]])
     formatted_problems = []
 
     for person_id, segments in segmented_dict.items():
-        for trip_index, segment in enumerate(segments):
+        for segment in segments:
             purposes = [leg['to_act_type'] for leg in segment]
             purposes = purposes[
                        :-1]  # Removing the last purpose (in segments, the last to purpose heads to a fixed activity)
@@ -98,6 +98,13 @@ def format_segmented_legs(segmented_dict: Dict[str, List[List[Dict[str, Any]]]])
             if destination_location is not None:
                 destination_location = np.array(destination_location).reshape(1, -1)
 
+            # HACKY way to get the trip index from the unique_leg_id
+            unique_leg_id = segment[0]['unique_leg_id']
+            before_dot = unique_leg_id.split('.')[0]
+            # Extract the last segment after the last underscore
+            number_before_dot = before_dot.split('_')[-1]
+            trip_index = int(number_before_dot)
+
             problem = {
                 'person_id': person_id,
                 'trip_index': trip_index,
@@ -108,7 +115,7 @@ def format_segmented_legs(segmented_dict: Dict[str, List[List[Dict[str, Any]]]])
                 'size': len(purposes),
                 'origin': origin_location,
                 'destination': destination_location,
-                'activity_index': trip_index + 1  # Starting index from 1
+                'activity_index': trip_index + 1  # STARTING act index. Origin does always exist here
             }
 
             yield problem
@@ -641,7 +648,7 @@ class DiscretizationErrorObjective(AssignmentObjective):
         discretized_distances = la.norm(discretized_locations[:-1] - discretized_locations[1:], axis=1)
         discretization_error = np.abs(sampled_distances - discretized_distances)
 
-        objective = 0.0 # TODO: In die segments die modes reinbringen für hörl problem, aber bei mir wieder entfernen (?)
+        objective = 0.0
         for error, mode in zip(discretization_error, problem["modes"]):
             target_error = self.thresholds[mode]
             excess_error = max(0.0, error - target_error)
@@ -654,12 +661,15 @@ class DiscretizationErrorObjective(AssignmentObjective):
 
         return dict(valid=valid, objective=objective)
 
+
+
 start_time = time.time()
 os.chdir(pipeline_setup.PROJECT_ROOT)
 with open('locations_data_with_potentials.pkl', 'rb') as file:
     locations_data = pickle.load(file)
 reformatted_locations_data = reformat_locations(locations_data)
-df = prepare_mid_df_for_legs_dict(number_of_persons=1000)
+df = h.read_csv(h.get_files(s.ENHANCED_MID_FOLDER))
+df = prepare_mid_df_for_legs_dict(df, number_of_persons=100)
 logger.debug("df prepared.")
 dictu = populate_legs_dict_from_df(df)
 logger.debug("dict populated.")
@@ -669,6 +679,5 @@ logger.debug("dict segmented.")
 pprint.pprint(segmented_dict)
 df_location, df_convergence = process(reformatted_locations_data, segmented_dict)
 logger.debug("df processed.")
-for person_id, segments in segmented_dict.items():
-    for segment in segments:
-        segment = insert_placed_distances(segment)  # Just for analysis
+df = write_hoerl_df_to_big_df(df_location, df)
+logger.debug("df written.")

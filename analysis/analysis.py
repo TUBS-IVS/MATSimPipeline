@@ -4,21 +4,25 @@ import statsmodels.api as sm
 from matplotlib import pyplot as plt
 from sklearn.preprocessing import OneHotEncoder
 import numpy as np
+import numpy.linalg as la
+
 import os
+import folium
 
 from synthesis.enhanced_mid_data.mid_data_enhancer import MiDDataEnhancer
 from utils import helpers as h
-from utils import matsim_pipeline_setup as m
+from utils import pipeline_setup
+from utils import data_frame_processor as dfp
 from utils.logger import logging
 
 logger = logging.getLogger(__name__)
 
 
-class DataframeAnalysis:
+class DataframeAnalysis(dfp.DataFrameProcessor):
     def __init__(self, df: pd.DataFrame):
-        self.df = df
+        super().__init__(df)
 
-    def find_upper_cutoff(self, column, jump_multiplier=10):
+    def find_upper_cutoff(self, column, jump_multiplier=10):  # Doesn't work too reliably, depending on the data
         # Remove NaN values and sort the column
         sorted_values = column.dropna().sort_values().reset_index(drop=True)
 
@@ -124,7 +128,8 @@ class DataframeAnalysis:
 
         return combined_df
 
-    def plot_column(self, column, title=None, xlabel=None, ylabel='Frequency', plot_type=None, figsize=(10, 6), save_name=None):
+    def plot_column(self, column, title=None, xlabel=None, ylabel='Frequency', plot_type=None, figsize=(10, 6),
+                    save_name=None):
         """
         Plots a column from a pandas DataFrame.
 
@@ -179,11 +184,115 @@ class DataframeAnalysis:
 
         # Save the plot if a save path is provided
         if save_name:
-            save_name = os.path.join(m.OUTPUT_DIR, save_name)
+            save_name = os.path.join(pipeline_setup.OUTPUT_DIR, save_name)
             plt.savefig(save_name, bbox_inches='tight')
 
         else:
             plt.show()
+
+    def plot_locations(self, show_lines=True):  # TODO: make work
+        # Extract main locations from the DataFrame
+        main_locations = self.df[['main_lat', 'main_lon']].dropna().values
+
+        # Check if the DataFrame contains target locations
+        if 'target_lat' in self.df.columns and 'target_lon' in self.df.columns:
+            target_locations = self.df[['target_lat', 'target_lon']].dropna().values
+        else:
+            target_locations = None
+
+        plt.figure(figsize=(10, 6))
+
+        # Plot the main locations
+        plt.scatter(main_locations[:, 1], main_locations[:, 0], c='blue', marker='o', label='Locations')
+
+        if target_locations is not None:
+            # Plot the target locations
+            plt.scatter(target_locations[:, 1], target_locations[:, 0], c='red', marker='x', label='Target Locations')
+
+        if show_lines:
+            # Draw lines between the main locations
+            for i in range(len(main_locations) - 1):
+                plt.plot([main_locations[i, 1], main_locations[i + 1, 1]],
+                         [main_locations[i, 0], main_locations[i + 1, 0]], 'b-')
+
+        plt.xlabel('Longitude')
+        plt.ylabel('Latitude')
+        plt.legend()
+        plt.grid(True)
+        plt.title('Locations with Paths')
+        plt.show()
+
+    def plot_locations_with_map(self):  # TODO: make work
+        # Extract main locations from the DataFrame
+        main_locations = self.df[['main_lat', 'main_lon']].dropna().values.tolist()
+
+        # Generate random target locations around Hanover based on the DataFrame's data
+        num_targets = 50
+        target_locations = [
+            (
+                52.3759 + np.random.uniform(-0.01, 0.01),
+                9.7320 + np.random.uniform(-0.01, 0.01)
+            ) for _ in range(num_targets)
+        ]
+
+        # Create a map centered around Hanover
+        m = folium.Map(location=(52.3759, 9.7320), zoom_start=13)
+
+        # Add main locations to the map as dots
+        for loc in main_locations:
+            folium.CircleMarker(
+                location=loc,
+                radius=5,
+                color='blue',
+                fill=True,
+                fill_color='blue',
+                fill_opacity=0.7,
+                popup='Main Location'
+            ).add_to(m)
+
+        # Add target locations to the map as dots
+        for target in target_locations:
+            folium.CircleMarker(
+                location=target,
+                radius=3,
+                color='red',
+                fill=True,
+                fill_color='red',
+                fill_opacity=0.7,
+                popup='Target Location'
+            ).add_to(m)
+
+        # Draw lines only between the main locations
+        for i in range(len(main_locations) - 1):
+            folium.PolyLine(locations=[main_locations[i], main_locations[i + 1]], color='blue').add_to(m)
+
+        # Save the map to an HTML file
+        m.save('hanover_map.html')
+
+    def evaluate_distance_deviations(self, problem, distance_result, relaxation_result, discretization_result):  # TODO edit
+        sampled_distances = distance_result["distances"]
+
+        discretized_locations = []
+        if not problem["origin"] is None: discretized_locations.append(problem["origin"])
+        discretized_locations.append(discretization_result["locations"])
+        if not problem["destination"] is None: discretized_locations.append(problem["destination"])
+        discretized_locations = np.vstack(discretized_locations)
+
+        discretized_distances = la.norm(discretized_locations[:-1] - discretized_locations[1:], axis=1)
+        discretization_error = np.abs(sampled_distances - discretized_distances)
+
+        objective = 0.0
+        for error, mode in zip(discretization_error, problem["modes"]):
+            target_error = self.thresholds[mode]
+            excess_error = max(0.0, error - target_error)
+            objective = max(objective, excess_error)
+
+        valid = objective == 0.0
+        valid &= distance_result["valid"]
+        valid &= relaxation_result["valid"]
+        valid &= discretization_result["valid"]
+
+        return dict(valid=valid, objective=objective)
 
 
 def analyze_influence_on_slack(df):
@@ -193,7 +302,8 @@ def analyze_influence_on_slack(df):
 
     # One-hot encode the categorical variables
     encoder = OneHotEncoder(drop='first')  # Drop first column to avoid multicollinearity
-    categorical_columns = ['direct_mode'] # ,'RegioStaR7_x', 'start_activity', 'via_activity', 'end_activity', "pergrup1", "start_mode", "end_mode"]
+    categorical_columns = [
+        'direct_mode']  # ,'RegioStaR7_x', 'start_activity', 'via_activity', 'end_activity', "pergrup1", "start_mode", "end_mode"]
     encoded_vars = encoder.fit_transform(df[categorical_columns])
     encoded_vars_df = pd.DataFrame(encoded_vars.toarray(), columns=encoder.get_feature_names_out(categorical_columns))
 
@@ -244,10 +354,6 @@ vc_df.to_csv("testdata/analyze/enhanced_final_mid_analysis.csv", index=False)
 logger.info("Done")
 
 
-
-
-
-
 def plot_sigmoid():
     delta_T = 20
     time_diff_range = np.arange(0, 60, 0.1)
@@ -270,4 +376,3 @@ def plot_sigmoid():
     plt.grid(True)
     plt.legend()
     plt.show()
-

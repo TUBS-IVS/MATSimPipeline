@@ -18,7 +18,8 @@ import time
 
 logger = logging.getLogger(__name__)
 
-#TODO: place Pendler (persons, definable, that exceed some max trip dist)
+
+# TODO: place Pendler (persons, definable, that exceed some max trip dist)
 # either near Bahnhof (pt) or according to landuse (car)
 
 # class DistanceBasedMainActivityLocator:
@@ -592,9 +593,8 @@ def generate_random_location_within_hanover():
     return np.array([x, y])
 
 
-def prepare_mid_df_for_legs_dict(filter_max_distance=None, number_of_persons=None) -> pd.DataFrame:
+def prepare_mid_df_for_legs_dict(df, filter_max_distance=None, number_of_persons=None) -> pd.DataFrame:
     """Temporarily prepare the MiD DataFrame for the leg dictionary function."""
-    df = h.read_csv(h.get_files(s.ENHANCED_MID_FOLDER))
 
     # Initialize columns with empty objects to ensure compatibility
     df["from_location"] = None
@@ -781,6 +781,7 @@ def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List
     #         segmented_dict[person_id].append(segment)
     #
     # return dict(segmented_dict)
+
 
 def adjust_estimation_tree(tree: List[List[List[float]]], real_distance: float, strong_adjust: bool = True) -> List[
     List[List[float]]]:  # Tree level, Leg, Lengths
@@ -1256,17 +1257,17 @@ def locate_main_activities(persons_legs: Dict[str, List[Dict[str, Any]]]) -> Dic
     return persons_legs
 
 
-
 if __name__ == '__main__':
     start_time = time.time()
     os.chdir(pipeline_setup.PROJECT_ROOT)
     with open('locations_data_with_potentials.pkl', 'rb') as file:
-        #TODO: make handler, use OSMOX
+        # TODO: make handler, use OSMOX
         locations_data = pickle.load(file)
     reformatted_locations_data = reformat_locations(locations_data)
     MyTargetLocations = TargetLocations(reformatted_locations_data)
 
-    df = prepare_mid_df_for_legs_dict(number_of_persons=1000)
+    df = h.read_csv(h.get_files(s.ENHANCED_MID_FOLDER))
+    df = prepare_mid_df_for_legs_dict(df, number_of_persons=100)
     logger.debug("df prepared.")
     dictu = populate_legs_dict_from_df(df)
     logger.debug("dict populated.")
@@ -1276,7 +1277,6 @@ if __name__ == '__main__':
     pprint.pprint(segmented_dict)
 
     # Advanced petre locator
-
 
     # Greedy petre locator
     for person_id, segments in segmented_dict.items():
@@ -1317,3 +1317,35 @@ else:
         locations_data = pickle.load(file)
     reformatted_locations_data = reformat_locations(locations_data)
     MyTargetLocations = TargetLocations(reformatted_locations_data)
+
+
+# -------------
+def write_hoerl_df_to_big_df(hoerl_df, big_df):  #TODO: fix merge suffixes AND write (somewher else) the main act results to df
+    """Unites the Hoerl DataFrame with the big DataFrame."""
+    hoerl_df = hoerl_df.rename(columns={'person_id': s.PERSON_ID_COL,
+                                        'location_id': 'location_id',
+                                        'geometry': 'to_location'})
+
+    # Recreate the unique leg id column
+    hoerl_df[s.LEG_NON_UNIQUE_ID_COL] = hoerl_df['activity_index'] - 1  # Starting index
+    hoerl_df[s.UNIQUE_LEG_ID_COL] = (hoerl_df[s.PERSON_ID_COL] + "_" + hoerl_df[s.LEG_NON_UNIQUE_ID_COL].astype(str) +
+                                     ".0") # .0 is added to match the format of the big DataFrame ;(
+
+    hoerl_df = hoerl_df[[s.UNIQUE_LEG_ID_COL, 'location_id', 'to_location']]
+
+    big_df = big_df.merge(hoerl_df, on=s.UNIQUE_LEG_ID_COL, how='left')
+    return big_df
+
+
+def write_placement_results_dict_to_big_df(placement_results_dict, big_df):  # TODO: finish
+    """Writes the placement results from the dictionary to the big DataFrame."""
+    records = []
+    for person_id, segment in placement_results_dict.items():
+        for leg in segment:
+            records.append(leg)
+
+    data_df = pd.DataFrame(records)
+    big_df = big_df.merge(data_df[[s.UNIQUE_LEG_ID_COL, 'from_location', 'to_location', 'placed_distance',
+                                   'placed_distance_absolute_diff', 'placed_distance_relative_diff']],
+                          on=s.UNIQUE_LEG_ID_COL, how='left')
+    return big_df

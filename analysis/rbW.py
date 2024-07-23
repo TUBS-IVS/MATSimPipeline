@@ -13,7 +13,6 @@ os.chdir(PROJECT_ROOT)
 logger = logging.getLogger(__name__)
 
 
-
 # All of this stuff is just merging the files
 population = MiDDataEnhancer()
 population.load_df_from_csv(h.get_files(s.MiD_HH_FOLDER), test_col=s.HOUSEHOLD_MID_ID_COL)

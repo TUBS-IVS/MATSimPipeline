@@ -59,7 +59,7 @@ def popsim_to_matsim_plans_main():
 
     # Turn the point string at home_loc into a shapely point (this is sometimes necessary)
     # population.apply_row_wise_rules([rules.home_loc])
-    population.df[s.HOME_LOC_COL] = population.df[s.HOME_LOC_COL].apply(h.string_to_shapely_point)
+    population.df[s.HOME_LOC_COL] = population.df[s.HOME_LOC_COL].apply(h.convert_to_shapely_point)
 
     # Add all data of each household (increases the number of rows)
     logger.info("Loading enhanced MiD data")
@@ -167,7 +167,7 @@ def popsim_to_matsim_plans_main():
     logger.info(f"Population df after locating: \n{population.df.head()}")
 
     population.vary_times_by_household(s.UNIQUE_HH_ID_COL, [s.LEG_START_TIME_COL, s.LEG_END_TIME_COL])
-    population.df[s.COORD_TO_COL] = population.df[s.COORD_TO_COL].apply(h.string_to_shapely_point)
+    population.df[s.COORD_TO_COL] = population.df[s.COORD_TO_COL].apply(h.convert_to_shapely_point)
 
     # Write plans to MATSim XML format
     population.df.sort_values(by=[s.UNIQUE_LEG_ID_COL], inplace=True, ignore_index=True)

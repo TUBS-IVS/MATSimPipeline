@@ -102,27 +102,34 @@ def read_csv(csv_path: str, test_col=None, use_cols=None):
     return df
 
 
-def string_to_shapely_point(point_input):
+def convert_to_shapely_point(point_input):
     """
     Needed when loading a point from a csv file, because it is loaded as a string.
-    :param point_input: String input of the format 'x,y' or Shapely Point
+    :param point_input: String input of the format 'x,y' or '[x,y]', a list [x, y], or a Shapely Point
     :return: Shapely Point
     """
+    if point_input is None:
+        return point_input
     if isinstance(point_input, Point):
         return point_input
-    if not isinstance(point_input, str):
-        raise ValueError("Input must be a string or a Shapely Point")
+    if isinstance(point_input, list) or isinstance(point_input, np.ndarray):
+        if len(point_input) == 2 and all(isinstance(coord, (int, float)) for coord in point_input):
+            return Point(point_input)
+        else:
+            raise ValueError("List or array input must be of the form [x, y] with numeric coordinates")
+    if isinstance(point_input, str):
 
-    # Use a regular expression to extract numbers
-    matches = re.findall(r"[-+]?\d*\.\d+|\d+", point_input)
+        # Use a regular expression to extract numbers from a string
+        matches = re.findall(r"[-+]?\d*\.\d+|\d+", point_input)
 
-    # Convert the extracted strings to float and create a Shapely Point
-    if len(matches) == 2:
-        x, y = map(float, matches)
-        return Point(x, y)
-    else:
-        raise ValueError("Invalid point string format")
+        # Convert the extracted strings to float and create a Shapely Point
+        if len(matches) == 2:
+            x, y = map(float, matches)
+            return Point(x, y)
+        else:
+            raise ValueError("Invalid point string format")
 
+    return point_input
 
 def seconds_from_datetime(datetime):
     """

@@ -1320,21 +1320,30 @@ else:
 
 
 # -------------
-def write_hoerl_df_to_big_df(hoerl_df, big_df):  #TODO: fix merge suffixes AND write (somewher else) the main act results to df
+def write_hoerl_df_to_big_df(hoerl_df, big_df):  # TODO: write main stuff (somewhere else) to big df
     """Unites the Hoerl DataFrame with the big DataFrame."""
     hoerl_df = hoerl_df.rename(columns={'person_id': s.PERSON_ID_COL,
-                                        'location_id': 'location_id',
-                                        'geometry': 'to_location'})
+                                        'location_id': 'location_id_hoerl',
+                                        'geometry': 'to_location_hoerl'})
 
     # Recreate the unique leg id column
     hoerl_df[s.LEG_NON_UNIQUE_ID_COL] = hoerl_df['activity_index'] - 1  # Starting index
     hoerl_df[s.UNIQUE_LEG_ID_COL] = (hoerl_df[s.PERSON_ID_COL] + "_" + hoerl_df[s.LEG_NON_UNIQUE_ID_COL].astype(str) +
-                                     ".0") # .0 is added to match the format of the big DataFrame ;(
+                                     ".0")  # .0 is added to match the format of the big DataFrame :(
 
-    hoerl_df = hoerl_df[[s.UNIQUE_LEG_ID_COL, 'location_id', 'to_location']]
+    hoerl_df = hoerl_df[[s.UNIQUE_LEG_ID_COL, 'location_id_hoerl', 'to_location_hoerl']]
 
-    big_df = big_df.merge(hoerl_df, on=s.UNIQUE_LEG_ID_COL, how='left')
-    return big_df
+    # Perform the merge with suffixes
+    merged_df = big_df.merge(hoerl_df, on=s.UNIQUE_LEG_ID_COL, how='left', suffixes=('', '_hoerl'))
+
+    # Combine the columns to prioritize non-NaN values from hoerl_df
+    # merged_df['location_id'] = merged_df['location_id_hoerl'].combine_first(merged_df['location_id'])
+    merged_df['to_location'] = merged_df['to_location_hoerl'].combine_first(merged_df['to_location'])
+
+    # Drop the temporary hoerl columns
+    merged_df = merged_df.drop(columns=['location_id_hoerl', 'to_location_hoerl'])
+
+    return merged_df
 
 
 def write_placement_results_dict_to_big_df(placement_results_dict, big_df):  # TODO: finish

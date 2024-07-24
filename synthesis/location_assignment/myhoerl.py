@@ -663,22 +663,39 @@ class DiscretizationErrorObjective(AssignmentObjective):
 
 
 
-start_time = time.time()
-os.chdir(pipeline_setup.PROJECT_ROOT)
-with open('locations_data_with_potentials.pkl', 'rb') as file:
-    locations_data = pickle.load(file)
-reformatted_locations_data = reformat_locations(locations_data)
-df = h.read_csv(h.get_files(s.ENHANCED_MID_FOLDER))
-df = prepare_mid_df_for_legs_dict(df, number_of_persons=100)
-logger.debug("df prepared.")
-dictu = populate_legs_dict_from_df(df)
-logger.debug("dict populated.")
-with_main_dict = locate_main_activities(dictu)
-segmented_dict = segment_legs(with_main_dict)
-logger.debug("dict segmented.")
-pprint.pprint(segmented_dict)
-df_location, df_convergence = process(reformatted_locations_data, segmented_dict)
-logger.debug("df processed.")
-df = write_hoerl_df_to_big_df(df_location, df)
-df['to_location'] = df['to_location'].apply(h.convert_to_shapely_point)
-logger.debug("df written.")
+
+def run_hoerl():
+    start_time = time.time()
+    os.chdir(pipeline_setup.PROJECT_ROOT)
+    with open('locations_data_with_potentials.pkl', 'rb') as file:
+        locations_data = pickle.load(file)
+    reformatted_locations_data = reformat_locations(locations_data)
+    df = h.read_csv(h.get_files(s.ENHANCED_MID_FOLDER))
+    df = prepare_mid_df_for_legs_dict(df, number_of_persons=100)
+    logger.debug("df prepared.")
+    dictu = populate_legs_dict_from_df(df)
+    logger.debug("dict populated.")
+    with_main_dict = locate_main_activities(dictu)
+    segmented_dict = segment_legs(with_main_dict)
+    logger.debug("dict segmented.")
+    pprint.pprint(segmented_dict)
+    df_location, df_convergence = process(reformatted_locations_data, segmented_dict)
+    logger.debug("df processed.")
+    df['to_location'] = df['to_location'].apply(h.convert_to_shapely_point)  # Needed currently so [] becomes None
+    df['from_location'] = df['from_location'].apply(h.convert_to_shapely_point)  # Needed currently so [] becomes None
+    df = write_hoerl_df_to_big_df(df_location, df)
+    logger.debug("hoerl df written.")
+    df = write_placement_results_dict_to_big_df(segmented_dict, df)
+    logger.debug("df written.")
+    df['to_location'] = df['to_location'].apply(h.convert_to_shapely_point)
+
+    logger.debug("df converted.")
+    assert not df['to_location'].isna().any()
+    df = h.add_from_location(df, 'to_location', 'from_location', backup_existing_from_col=True)
+    df['from_location'] = df['from_location'].apply(h.convert_to_shapely_point)
+    df.to_csv(os.path.join(pipeline_setup.OUTPUT_DIR, 'hoerl_df.csv'))
+    logger.debug("done")
+
+if __name__ == "__main__":
+    run_hoerl()
+

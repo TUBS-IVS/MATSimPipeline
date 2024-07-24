@@ -13,14 +13,15 @@ from synthesis.enhanced_mid_data.mid_data_enhancer import MiDDataEnhancer
 from utils import helpers as h
 from utils import pipeline_setup
 from utils import data_frame_processor as dfp
+from utils import settings as s
 from utils.logger import logging
 
 logger = logging.getLogger(__name__)
 
 
 class DataframeAnalysis(dfp.DataFrameProcessor):
-    def __init__(self, df: pd.DataFrame):
-        super().__init__(df)
+    def __init__(self):
+        super().__init__()
 
     def find_upper_cutoff(self, column, jump_multiplier=10):  # Doesn't work too reliably, depending on the data
         # Remove NaN values and sort the column
@@ -269,7 +270,8 @@ class DataframeAnalysis(dfp.DataFrameProcessor):
         # Save the map to an HTML file
         m.save('hanover_map.html')
 
-    def evaluate_distance_deviations(self, problem, distance_result, relaxation_result, discretization_result):  # TODO edit
+    def evaluate_distance_deviations(self, problem, distance_result, relaxation_result,
+                                     discretization_result):  # TODO edit
         sampled_distances = distance_result["distances"]
 
         discretized_locations = []
@@ -294,6 +296,12 @@ class DataframeAnalysis(dfp.DataFrameProcessor):
 
         return dict(valid=valid, objective=objective)
 
+    def evaluate_distance_deviations_from_df(self):
+        self.df['placed_distance'] = self.df.apply(lambda row: row['from_location'].distance(row['to_location']), axis=1)
+
+        # Calculate the discretization error
+        self.df['discretization_error'] = np.abs(self.df[s.LEG_DISTANCE_METERS_COL] - self.df['placed_distance'])
+
 
 def analyze_influence_on_slack(df):
     logger.info(f"Analyzing influence on slack factor, {len(df)} rows.")
@@ -316,42 +324,42 @@ def analyze_influence_on_slack(df):
 
     return model.summary()
 
+def weirdstuff():
+    # df = h.read_csv("data/MiD2017_Wege_edited.csv")
+    # # analysis = DataframeAnalysis(df)
+    # columns_to_plot = []
+    # # columns_to_plot.extend(s.L_COLUMNS.values())
+    # columns_to_plot.extend(s.P_COLUMNS.values())
+    # columns_to_plot.extend(s.HH_COLUMNS.values())
+    # # analysis.plot_valid_vs_anomalous(columns_to_plot)
+    # for col in s.L_COLUMNS.values():
+    #     h.plot_column(df, col)
 
-# df = h.read_csv("data/MiD2017_Wege_edited.csv")
-# # analysis = DataframeAnalysis(df)
-# columns_to_plot = []
-# # columns_to_plot.extend(s.L_COLUMNS.values())
-# columns_to_plot.extend(s.P_COLUMNS.values())
-# columns_to_plot.extend(s.HH_COLUMNS.values())
-# # analysis.plot_valid_vs_anomalous(columns_to_plot)
-# for col in s.L_COLUMNS.values():
-#     h.plot_column(df, col)
+    # slack_df = h.read_csv("data/slack_factors_raw.csv")
+    # persons_df = h.read_csv(s.MiD_PERSONS_FILE)
+    # slack_df = slack_df.merge(persons_df, on=s.PERSON_ID_COL, how='left')
+    # print(analyze_influence_on_slack(slack_df))
 
-# slack_df = h.read_csv("data/slack_factors_raw.csv")
-# persons_df = h.read_csv(s.MiD_PERSONS_FILE)
-# slack_df = slack_df.merge(persons_df, on=s.PERSON_ID_COL, how='left')
-# print(analyze_influence_on_slack(slack_df))
+    # ttdf1 = h.read_csv("data/TTmatrices/hour_Min_0_Max 1car_travel_times.csv" )
+    # ttdf2 = h.read_csv("data/TTmatrices/hour_Min_4_Max 5car_distances.csv", "FROM")
+    # ttdf3= h.read_csv("data/TTmatrices/hour_Min_4_Max 5car_travel_times.csv", "FROM")
+    # connections_df = h.read_csv("output/20240103_020348/leg_connections_logs.csv")  # TODO:repeat and check.
+    enhanced_mid_df = h.read_csv("output/enhanced_frame_final.csv")
+    #  mid_df = h.read_csv(s.MiD_TRIPS_FILE)  # TODO: check num of rows (enh: 999803)
+    logger.info("Loaded DataFrame")
+    # Filter out where time and distance are False
+    # connections_df = connections_df[(connections_df['mode_match'] != False) & (connections_df["activity_match"] != False)]
+    # Add a col that is true when all four comparisons are true
+    # connections_df['all_match'] = connections_df[['mode_match', 'activity_match', 'time_match', 'dist_match']].all(axis=1)
 
-# ttdf1 = h.read_csv("data/TTmatrices/hour_Min_0_Max 1car_travel_times.csv" )
-# ttdf2 = h.read_csv("data/TTmatrices/hour_Min_4_Max 5car_distances.csv", "FROM")
-# ttdf3= h.read_csv("data/TTmatrices/hour_Min_4_Max 5car_travel_times.csv", "FROM")
-# connections_df = h.read_csv("output/20240103_020348/leg_connections_logs.csv")  # TODO:repeat and check.
-enhanced_mid_df = h.read_csv("output/enhanced_frame_final.csv")
-#  mid_df = h.read_csv(s.MiD_TRIPS_FILE)  # TODO: check num of rows (enh: 999803)
-logger.info("Loaded DataFrame")
-# Filter out where time and distance are False
-# connections_df = connections_df[(connections_df['mode_match'] != False) & (connections_df["activity_match"] != False)]
-# Add a col that is true when all four comparisons are true
-# connections_df['all_match'] = connections_df[['mode_match', 'activity_match', 'time_match', 'dist_match']].all(axis=1)
+    pop = MiDDataEnhancer(enhanced_mid_df)
+    pop.check_for_merge_suffixes()
 
-pop = MiDDataEnhancer(enhanced_mid_df)
-pop.check_for_merge_suffixes()
-
-ana = DataframeAnalysis(enhanced_mid_df)
-logger.info(f"Rows: {len(enhanced_mid_df)} Columns: {len(enhanced_mid_df.columns)}")
-vc_df = ana.df_value_counts()
-vc_df.to_csv("testdata/analyze/enhanced_final_mid_analysis.csv", index=False)
-logger.info("Done")
+    ana = DataframeAnalysis(enhanced_mid_df)
+    logger.info(f"Rows: {len(enhanced_mid_df)} Columns: {len(enhanced_mid_df.columns)}")
+    vc_df = ana.df_value_counts()
+    vc_df.to_csv("testdata/analyze/enhanced_final_mid_analysis.csv", index=False)
+    logger.info("Done")
 
 
 def plot_sigmoid():

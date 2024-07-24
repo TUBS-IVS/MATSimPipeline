@@ -1,0 +1,1 @@
+"""Creates a full synthetic population with assigned home locations"""

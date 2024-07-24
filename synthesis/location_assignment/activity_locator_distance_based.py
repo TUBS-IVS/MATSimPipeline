@@ -311,12 +311,6 @@ def score_locations(potentials: np.ndarray, distances: np.ndarray = None) -> np.
     scores = base_scores / np.sum(base_scores)
     return scores
 
-
-def euclidean_distance(start: np.ndarray, end: np.ndarray) -> float:
-    """Compute the Euclidean distance between two points."""
-    return np.linalg.norm(end - start)
-
-
 def find_circle_intersections(center1: np.ndarray, radius1: float, center2: np.ndarray, radius2: float) -> Tuple[
     np.ndarray, np.ndarray]:
     """
@@ -334,7 +328,7 @@ def find_circle_intersections(center1: np.ndarray, radius1: float, center2: np.n
     r2 = radius2
 
     # Calculate the distance between the two centers
-    d = euclidean_distance(center1, center2)
+    d = h.euclidean_distance(center1, center2)
 
     logger.debug(f"Center 1: {center1}, Radius 1: {radius1}, Center 2: {center2}, Radius 2: {radius2}")
 
@@ -375,7 +369,7 @@ def find_circle_intersections(center1: np.ndarray, radius1: float, center2: np.n
         logger.info("Whaaat? Tangential circles: The circles touch at exactly one point.")
 
         a = (r1 ** 2 - r2 ** 2 + d ** 2) / (2 * d)
-        h = 0  # Tangential circles will have h = 0 as h = sqrt(r1^2 - a^2)
+        hi = 0  # Tangential circles will have h = 0 as h = sqrt(r1^2 - a^2)
 
         x3 = x1 + a * (x2 - x1) / d
         y3 = y1 + a * (y2 - y1) / d
@@ -386,13 +380,13 @@ def find_circle_intersections(center1: np.ndarray, radius1: float, center2: np.n
 
     # Calculate points of intersection
     a = (r1 ** 2 - r2 ** 2 + d ** 2) / (2 * d)
-    h = np.sqrt(r1 ** 2 - a ** 2)
+    hi = np.sqrt(r1 ** 2 - a ** 2)
 
     x3 = x1 + a * (x2 - x1) / d
     y3 = y1 + a * (y2 - y1) / d
 
-    intersect1 = np.array([x3 + h * (y2 - y1) / d, y3 - h * (x2 - x1) / d])
-    intersect2 = np.array([x3 - h * (y2 - y1) / d, y3 + h * (x2 - x1) / d])
+    intersect1 = np.array([x3 + hi * (y2 - y1) / d, y3 - hi * (x2 - x1) / d])
+    intersect2 = np.array([x3 - hi * (y2 - y1) / d, y3 + hi * (x2 - x1) / d])
 
     return intersect1, intersect2
 
@@ -627,8 +621,11 @@ def prepare_mid_df_for_legs_dict(df, filter_max_distance=None, number_of_persons
 
     # Add random home locations for each person
     # TODO: write function that properly assigns homes (very similar to now, from popsim)
+    df[s.HOME_LOC_COL] = None
     for person_id, group in df.groupby(s.PERSON_ID_COL):
         home_location = generate_random_location_within_hanover()
+        for i in group.index:
+            df.at[i, s.HOME_LOC_COL] = home_location
         df.at[group.index[0], "from_location"] = home_location
         df.at[group.index[-1], "to_location"] = home_location
 
@@ -934,7 +931,7 @@ def greedy_locate_segment(segment):
         logger.debug(f"Greedy locating. Segment has {len(segment)} legs.")
         distances = [leg['distance'] for leg in segment]
 
-        real_distance = euclidean_distance(segment[0]['from_location'], segment[-1]['to_location'])
+        real_distance = h.euclidean_distance(segment[0]['from_location'], segment[-1]['to_location'])
 
         tree = h.build_estimation_tree(distances)
         tree = adjust_estimation_tree(tree, real_distance, strong_adjust=True)
@@ -984,7 +981,7 @@ def insert_placed_distances(segment):
     """Inserts info on the actual distances between placed activities for a fully located segment.
     Optional; for debugging and evaluation."""
     for leg in segment:
-        leg['placed_distance'] = euclidean_distance(leg['from_location'], leg['to_location'])
+        leg['placed_distance'] = h.euclidean_distance(leg['from_location'], leg['to_location'])
         leg['placed_distance_absolute_diff'] = abs(leg['distance'] - leg['placed_distance'])
         leg['placed_distance_relative_diff'] = leg['placed_distance_absolute_diff'] / leg['distance']
     return segment
@@ -1235,7 +1232,7 @@ def update_dataframe(df: pd.DataFrame, placed_dict: Dict[str, Any]) -> pd.DataFr
     records = []
     for key, value in placed_dict.items():
         for entry in value:
-            records.extend(entry)
+            records.extend(entry)  # works here because the entries are lists
 
     data_df = pd.DataFrame(records)
 
@@ -1247,6 +1244,55 @@ def update_dataframe(df: pd.DataFrame, placed_dict: Dict[str, Any]) -> pd.DataFr
 
     return df
 
+def write_hoerl_df_to_big_df(hoerl_df, big_df):  # TODO: write main stuff (somewhere else) to big df
+    """Unites the Hoerl DataFrame with the big DataFrame."""
+    hoerl_df = hoerl_df.rename(columns={'person_id': s.PERSON_ID_COL,
+                                        'location_id': 'location_id_hoerl',
+                                        'geometry': 'to_location_hoerl'})
+
+    # Recreate the unique leg id column
+    hoerl_df[s.LEG_NON_UNIQUE_ID_COL] = hoerl_df['activity_index'] - 1  # Starting index
+    hoerl_df[s.UNIQUE_LEG_ID_COL] = (hoerl_df[s.PERSON_ID_COL] + "_" + hoerl_df[s.LEG_NON_UNIQUE_ID_COL].astype(str) +
+                                     ".0")  # .0 is added to match the format of the big DataFrame :(
+
+    hoerl_df = hoerl_df[[s.UNIQUE_LEG_ID_COL, 'location_id_hoerl', 'to_location_hoerl']]
+
+    # Perform the merge with suffixes
+    merged_df = big_df.merge(hoerl_df, on=s.UNIQUE_LEG_ID_COL, how='left', suffixes=('', '_hoerl'))
+
+    # Combine the columns to prioritize non-NaN values from hoerl_df
+    # merged_df['location_id'] = merged_df['location_id_hoerl'].combine_first(merged_df['location_id'])
+    merged_df['to_location'] = merged_df['to_location_hoerl'].combine_first(merged_df['to_location'])
+
+    # Drop the temporary hoerl columns
+    merged_df = merged_df.drop(columns=['location_id_hoerl', 'to_location_hoerl'])
+
+    return merged_df
+
+
+def write_placement_results_dict_to_big_df(placement_results_dict, big_df):  # TODO: finish
+    """Writes the placement results from the dictionary to the big DataFrame."""
+    records = []
+    for person_id, segments in placement_results_dict.items():
+        for segment in segments:
+            for leg in segment:
+                records.append(leg)
+
+    data_df = pd.DataFrame(records)
+    # Merge without suffixes
+    merged_df = big_df.merge(data_df[[s.UNIQUE_LEG_ID_COL, 'from_location', 'to_location', 'to_act_identifier', 'to_act_name']],
+                             on=s.UNIQUE_LEG_ID_COL, how='left')
+
+    # Combine columns to prioritize non-NaN values from data_df
+    merged_df['from_location'] = merged_df['from_location_x'].combine_first(merged_df['from_location_y'])
+    merged_df['to_location'] = merged_df['to_location_x'].combine_first(merged_df['to_location_y'])
+    # merged_df['to_act_identifier'] = merged_df['to_act_identifier_y'].combine_first(merged_df['to_act_identifier_x'])
+    # merged_df['to_act_name'] = merged_df['to_act_name_y'].combine_first(merged_df['to_act_name_x'])
+
+    # Drop the temporary columns
+    merged_df = merged_df.drop(columns=['from_location_x', 'from_location_y', 'to_location_x', 'to_location_y'])
+
+    return merged_df
 
 def locate_main_activities(persons_legs: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List[Dict[str, Any]]]:
     """Processes each person's legs to locate main activities for all persons.
@@ -1292,7 +1338,8 @@ if __name__ == '__main__':
     # (slightly modified) Hörl locator
     # result = myhoerl.process(reformatted_locations_data, segmented_dict)
 
-    df = update_dataframe(df, segmented_dict)
+    # df = update_dataframe(df, segmented_dict)
+    df = write_placement_results_dict_to_big_df(segmented_dict, df)
 
     segmented_dict = flatten_segmented_dict(segmented_dict)
     for person_id, segment in segmented_dict.items():
@@ -1300,7 +1347,9 @@ if __name__ == '__main__':
         for leg in segment:
             logger.debug(leg)
 
-    df.to_csv('mid_with_locations.csv', index=False)
+    assert not df['to_location'].isnull().any(), "Some to_locations are missing."
+
+    df.to_csv(os.path.join(pipeline_setup.OUTPUT_DIR, 'located_activities.csv'), index=False)
 
     summarize_placement_results(segmented_dict)
 
@@ -1320,41 +1369,4 @@ else:
 
 
 # -------------
-def write_hoerl_df_to_big_df(hoerl_df, big_df):  # TODO: write main stuff (somewhere else) to big df
-    """Unites the Hoerl DataFrame with the big DataFrame."""
-    hoerl_df = hoerl_df.rename(columns={'person_id': s.PERSON_ID_COL,
-                                        'location_id': 'location_id_hoerl',
-                                        'geometry': 'to_location_hoerl'})
 
-    # Recreate the unique leg id column
-    hoerl_df[s.LEG_NON_UNIQUE_ID_COL] = hoerl_df['activity_index'] - 1  # Starting index
-    hoerl_df[s.UNIQUE_LEG_ID_COL] = (hoerl_df[s.PERSON_ID_COL] + "_" + hoerl_df[s.LEG_NON_UNIQUE_ID_COL].astype(str) +
-                                     ".0")  # .0 is added to match the format of the big DataFrame :(
-
-    hoerl_df = hoerl_df[[s.UNIQUE_LEG_ID_COL, 'location_id_hoerl', 'to_location_hoerl']]
-
-    # Perform the merge with suffixes
-    merged_df = big_df.merge(hoerl_df, on=s.UNIQUE_LEG_ID_COL, how='left', suffixes=('', '_hoerl'))
-
-    # Combine the columns to prioritize non-NaN values from hoerl_df
-    # merged_df['location_id'] = merged_df['location_id_hoerl'].combine_first(merged_df['location_id'])
-    merged_df['to_location'] = merged_df['to_location_hoerl'].combine_first(merged_df['to_location'])
-
-    # Drop the temporary hoerl columns
-    merged_df = merged_df.drop(columns=['location_id_hoerl', 'to_location_hoerl'])
-
-    return merged_df
-
-
-def write_placement_results_dict_to_big_df(placement_results_dict, big_df):  # TODO: finish
-    """Writes the placement results from the dictionary to the big DataFrame."""
-    records = []
-    for person_id, segment in placement_results_dict.items():
-        for leg in segment:
-            records.append(leg)
-
-    data_df = pd.DataFrame(records)
-    big_df = big_df.merge(data_df[[s.UNIQUE_LEG_ID_COL, 'from_location', 'to_location', 'placed_distance',
-                                   'placed_distance_absolute_diff', 'placed_distance_relative_diff']],
-                          on=s.UNIQUE_LEG_ID_COL, how='left')
-    return big_df

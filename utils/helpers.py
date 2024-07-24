@@ -109,11 +109,13 @@ def convert_to_shapely_point(point_input):
     :return: Shapely Point
     """
     if point_input is None:
-        return point_input
+        return None
     if isinstance(point_input, Point):
         return point_input
     if isinstance(point_input, list) or isinstance(point_input, np.ndarray):
-        if len(point_input) == 2 and all(isinstance(coord, (int, float)) for coord in point_input):
+        if len(point_input) == 0:
+            return None
+        elif len(point_input) == 2 and all(isinstance(coord, (int, float)) for coord in point_input):
             return Point(point_input)
         else:
             raise ValueError("List or array input must be of the form [x, y] with numeric coordinates")
@@ -129,7 +131,7 @@ def convert_to_shapely_point(point_input):
         else:
             raise ValueError("Invalid point string format")
 
-    return point_input
+    raise ValueError("Invalid point input format")
 
 def seconds_from_datetime(datetime):
     """
@@ -1122,6 +1124,31 @@ def add_from_coord(df):
     logger.info("Done.")
     return df
 
+def add_from_location(df, col_to, col_from, backup_existing_from_col = False):
+    """
+    Add a 'from_activity' column to the DataFrame, which is the to_activity of the previous leg.
+    For the first leg of each person, set 'from_activity' based on 'starts_at_home' (-> home or unspecified).
+    :return:
+    """
+    logger.info("Adding/updating from_coord column...")
+
+    if backup_existing_from_col and col_from in df.columns:
+        col_from_old = col_from + "_old"
+        df[col_from_old] = df[col_from]
+
+    # Sort the DataFrame by person ID and leg number (the df should usually already be sorted this way)
+    df.sort_values(by=[s.UNIQUE_P_ID_COL, s.LEG_NON_UNIQUE_ID_COL], inplace=True)
+
+    # Shift the 'to_activity' down to create 'from_activity' for each group
+    df[col_from] = df.groupby(s.PERSON_ID_COL)[col_to].shift(1)
+
+    # For the first leg of each person, set 'from_coord' to home coord
+    df.loc[(df[s.LEG_NON_UNIQUE_ID_COL] == 1), col_from] = df.loc[
+        (df[s.LEG_NON_UNIQUE_ID_COL] == 1), s.HOME_LOC_COL]
+
+    logger.info("Done.")
+    return df
+
 
 def add_from_cell(df):
     """
@@ -1401,3 +1428,8 @@ def get_files(folder_path: str, get_all: bool = False) -> Union[str, List[str]]:
         # Get the newest file among the remaining files
         newest_file = max(filtered_files, key=os.path.getctime)
         return newest_file
+
+
+def euclidean_distance(start: np.ndarray, end: np.ndarray) -> float:
+    """Compute the Euclidean distance between two points."""
+    return np.linalg.norm(end - start)

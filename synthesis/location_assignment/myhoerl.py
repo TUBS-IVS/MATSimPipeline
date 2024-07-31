@@ -15,9 +15,6 @@ from synthesis.location_assignment.activity_locator_distance_based import *
 
 # COMPONENTS
 
-# TODO: Give him my locations
-# TODO: Give him my segments in the right format
-
 # For retrieving locations quickly
 class CandidateIndex:
     def __init__(self, data):

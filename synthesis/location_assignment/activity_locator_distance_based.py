@@ -22,6 +22,21 @@ logger = logging.getLogger(__name__)
 # TODO: place Pendler (persons, definable, that exceed some max trip dist)
 # either near Bahnhof (pt) or according to landuse (car)
 
+def place_commuter():
+    """
+    Place commuters near a Bahnhof or according to land use.
+    """
+    raise NotImplementedError
+
+
+def place_commuter_near_bahnhof():
+    raise NotImplementedError
+
+
+def place_commuter_by_landuse():
+    raise NotImplementedError
+
+
 # class DistanceBasedMainActivityLocator:
 #     """
 #     DISTANCE-based localizer.
@@ -266,6 +281,55 @@ class TargetLocations:
 
         return candidate_identifiers, candidate_names, candidate_coordinates, candidate_potentials, candidate_distances
 
+    def query_within_two_overlapping_rings(self, act_type: str, location1: np.ndarray, location2: np.ndarray,
+                                           radius1a: float, radius1b: float, radius2a: float, radius2b: float):
+        """
+        Find the activity locations within a ring defined by two radii around a location and type.
+        :param act_type: The activity category to query.
+        :param location1: A 1D numpy array representing the first location to query (coordinates [1.5, 2.5]).
+        :param location2: A 1D numpy array representing the second location to query (coordinates [1.5, 2.5]).
+        :param radius1a: One of the two radii defining the first ring.
+        :param radius1b: The other radius defining the first ring.
+        :param radius2a: One of the two radii defining the second ring.
+        :param radius2b: The other radius defining the second ring.
+        :return: A tuple containing five numpy arrays: identifiers, names, coordinates, potentials, and distances of the nearest candidates.
+        """
+        # Ensure location is a 2D array with a single location
+        location1 = location1.reshape(1, -1)
+        location2 = location2.reshape(1, -1)
+
+        outer_radius1 = max(radius1a, radius1b)
+        inner_radius1 = min(radius1a, radius1b)
+        outer_radius2 = max(radius2a, radius2b)
+        inner_radius2 = min(radius2a, radius2b)
+
+        outer_indices1 = self.indices[act_type].query_radius(location1, outer_radius1)
+        outer_indices2 = self.indices[act_type].query_radius(location2, outer_radius2)
+        if outer_indices1 is None or outer_indices2 is None:
+            return None
+        if len(outer_indices1[0]) == 0 or len(outer_indices2[0]) == 0:
+            return None
+
+        inner_indices1 = self.indices[act_type].query_radius(location1, inner_radius1)
+        inner_indices2 = self.indices[act_type].query_radius(location2, inner_radius2)
+
+        outer_indices_set1 = set(outer_indices1[0])
+        inner_indices_set1 = set(inner_indices1[0])
+        outer_indices_set2 = set(outer_indices2[0])
+        inner_indices_set2 = set(inner_indices2[0])
+
+        overlapping_rings_indices = list(outer_indices_set1.intersection(outer_indices_set2) -
+                                         inner_indices_set1.union(inner_indices_set2))
+        if not overlapping_rings_indices:
+            return None
+
+        # Get the identifiers, coordinates, and distances for locations within the annulus
+        candidate_identifiers = np.array(self.data[act_type]["identifiers"])[overlapping_rings_indices]
+        candidate_coordinates = np.array(self.data[act_type]["coordinates"])[overlapping_rings_indices]
+        candidate_potentials = np.array(self.data[act_type]["potentials"])[overlapping_rings_indices]
+
+        return candidate_identifiers, candidate_coordinates, candidate_potentials
+
     def sample(self, act_type: str, random: rnd.Random) -> Tuple[Any, np.ndarray]:
         """
         Sample a random activity location for a given act_type.
@@ -277,6 +341,27 @@ class TargetLocations:
         identifier = self.data[act_type]["identifiers"][index]
         coordinates = self.data[act_type]["coordinates"][index]
         return identifier, coordinates
+
+    @staticmethod
+    def to_dict(identifiers, names, coordinates, potentials, distances=None):  # TODO: maybe remove for performance
+        """
+        Returns:
+        - dict: Dictionary with lists for each value type.
+        """
+        if distances is None:
+            distances = np.array([None] * len(identifiers))
+
+        # Create a dictionary with lists for each attribute
+        candidates_dict = {
+            'identifiers': identifiers.tolist(),
+            'names': names.tolist(),
+            'coordinates': [tuple(coord) for coord in coordinates],
+            'potentials': potentials.tolist(),
+            'distances': distances.tolist()
+        }
+
+        return candidates_dict
+
 
 
 # def sigmoid(x):
@@ -310,6 +395,7 @@ def score_locations(potentials: np.ndarray, distances: np.ndarray = None) -> np.
     # Normalize the scores to ensure they sum to 1
     scores = base_scores / np.sum(base_scores)
     return scores
+
 
 def find_circle_intersections(center1: np.ndarray, radius1: float, center2: np.ndarray, radius2: float) -> Tuple[
     np.ndarray, np.ndarray]:
@@ -423,9 +509,9 @@ from typing import Tuple
 import numpy as np
 
 
-def greedy_select_single_activity(start_coord: np.ndarray, end_coord: np.ndarray, type: str,
-                                  distance_start_to_act: float, distance_act_to_end: float,
-                                  num_candidates: int):
+def select_single_activity(start_coord: np.ndarray, end_coord: np.ndarray, type: str,
+                           distance_start_to_act: float, distance_act_to_end: float,
+                           num_candidates: int):
     """Place a single activity at the most likely location."""
     logger.debug(f"Greedy selecting activity for type {type} between {start_coord} and {end_coord}.")
 
@@ -917,7 +1003,7 @@ def greedy_locate_segment(segment):
     # if there are only two legs, we can find the loc immediately
     elif len(segment) == 2:
         logger.debug("Greedy locating. Only two legs in segment.")
-        act_identifier, act_name, act_coord, act_cap, act_dist, act_score = greedy_select_single_activity(
+        act_identifier, act_name, act_coord, act_cap, act_dist, act_score = select_single_activity(
             segment[0]['from_location'], segment[-1]['to_location'], segment[0]['to_act_type'],
             segment[0]['distance'], segment[-1]['distance'], 5)
         segment[0]['to_location'] = act_coord
@@ -942,23 +1028,25 @@ def greedy_locate_segment(segment):
         for level in range(len(tree) - 1, -1, -1):
             for i, leg_idx in enumerate(position_on_segment_info[level]):
                 logger.debug(f"Level: {level}, i: {i}, leg_idx: {leg_idx}")
-                segment_step = 2 ** level
-                from_location_idx = leg_idx - segment_step + 1  # + 1 because we get the from_location
+                step = 2 ** level  # How far from the current leg to look for start and end locations
+                from_location_idx = leg_idx - step + 1  # + 1 because we get the from_location
                 assert from_location_idx >= 0, "From location index must be greater or equal to 0."
-                to_location_idx = min(len(segment) - 1, leg_idx + segment_step)
+                to_location_idx = min(len(segment) - 1, leg_idx + step)
 
                 if level == 0:
                     dist_start_to_act = segment[leg_idx]['distance']
                     dist_act_to_end = segment[to_location_idx]['distance']
                 else:
+                    # 2 * i because two lower legs are combined to one higher leg
+                    # in odd cases on the current level, the last leg is skipped
                     dist_start_to_act = tree[level - 1][2 * i][2]
                     dist_act_to_end = tree[level - 1][2 * i + 1][2]
 
                 act_identifier, act_name, act_coord, act_cap, act_dist, act_score = \
-                    greedy_select_single_activity(segment[from_location_idx]['from_location'],
-                                                  segment[to_location_idx]['to_location'],
-                                                  segment[leg_idx]['to_act_type'], dist_start_to_act,
-                                                  dist_act_to_end, 5)
+                    select_single_activity(segment[from_location_idx]['from_location'],
+                                           segment[to_location_idx]['to_location'],
+                                           segment[leg_idx]['to_act_type'], dist_start_to_act,
+                                           dist_act_to_end, 1)
                 segment[leg_idx]['to_location'] = act_coord
                 if leg_idx + 1 < len(segment) + 1:
                     segment[leg_idx + 1]['from_location'] = act_coord
@@ -1011,6 +1099,91 @@ def summarize_placement_results(flattened_segmented_dict):
     return total_number_of_legs, mean_discretization_error, mean_relative_error, median_discretization_error, median_relative_error
 
 
+def solve_segment(segment, number_of_candidates=1):
+    """At each level, find the best n locations, solve n*l subproblems, and choose the best solution.
+    -Solve the highest current level with n candidates
+    -Place their locations and resegment (split) the segment
+    -Feed the new segments back into the solver"""
+
+    if len(segment) == 0:
+        raise ValueError("No legs in segment.")
+    elif len(segment) == 1:
+        assert segment[0]['from_location'].size > 0 and segment[0][
+            'to_location'].size > 0, "Both start and end locations must be known for a single leg."
+        return segment
+    # if there are only two legs, we can find the loc immediately
+    elif len(segment) == 2:
+        logger.debug("Advanced locating. Only two legs in segment.")
+        act_identifier, act_name, act_coord, act_cap, act_dist, act_score = select_single_activity(
+            segment[0]['from_location'], segment[-1]['to_location'], segment[0]['to_act_type'],
+            segment[0]['distance'], segment[-1]['distance'], 1)
+        segment[0]['to_location'] = act_coord
+        segment[-1]['from_location'] = act_coord
+        segment[0]['to_act_identifier'] = act_identifier
+        segment[0]['to_act_name'] = act_name
+        segment[0]['to_act_cap'] = act_cap
+        segment[0]['to_act_score'] = act_score
+        return segment
+
+    else:
+        logger.debug(f"Advanced locating. Segment has {len(segment)} legs.")
+
+        distances = [leg['distance'] for leg in segment]
+        # This automatically takes into account the currently set candidate locations Ü
+        real_distance = h.euclidean_distance(segment[0]['from_location'], segment[-1]['to_location'])
+
+        tree = h.build_estimation_tree(distances)
+        tree = adjust_estimation_tree(tree, real_distance, strong_adjust=True)
+
+        position_on_segment_info = build_position_on_segment_info(
+            len(distances))  # tells us at each level which legs to look at
+        assert len(tree) == len(position_on_segment_info), "Tree and position info must have the same length."
+
+        # Get candidates for the highest level
+        candidates = MyTargetLocations.query_within_two_overlapping_rings()
+        # Locate and split and make new segments
+        for i in range(number_of_candidates):
+            located_seg1=solveseg(seg, level, tree)
+            located_seg2=solveseg(seg, level, tree)
+            full_seg = located_seg1 + located_seg2
+            full_segs.append(full_seg)
+        max_score = max([seg[0]['to_act_score'] for seg in full_segs])
+        best_seg = [seg for seg in full_segs if seg[0]['to_act_score'] == max_score]
+        return best_seg
+        # Do the sme for all new segments
+
+        for level in range(len(tree) - 1, -1, -1):
+            for i, leg_idx in enumerate(position_on_segment_info[level]):
+                logger.debug(f"Level: {level}, i: {i}, leg_idx: {leg_idx}")
+                step = 2 ** level  # How far from the current leg to look for start and end locations
+                from_location_idx = leg_idx - step + 1  # + 1 because we get the from_location
+                assert from_location_idx >= 0, "From location index must be greater or equal to 0."
+                to_location_idx = min(len(segment) - 1, leg_idx + step)
+
+                if level == 0:
+                    dist_start_to_act = segment[leg_idx]['distance']
+                    dist_act_to_end = segment[to_location_idx]['distance']
+                else:
+                    # 2 * i because two lower legs are combined to one higher leg
+                    # in odd cases on the current level, the last leg is skipped
+                    dist_start_to_act = tree[level - 1][2 * i][2]
+                    dist_act_to_end = tree[level - 1][2 * i + 1][2]
+
+                act_identifier, act_name, act_coord, act_cap, act_dist, act_score = \
+                    select_single_activity(segment[from_location_idx]['from_location'],
+                                           segment[to_location_idx]['to_location'],
+                                           segment[leg_idx]['to_act_type'], dist_start_to_act,
+                                           dist_act_to_end, 5)
+                segment[leg_idx]['to_location'] = act_coord
+                if leg_idx + 1 < len(segment) + 1:
+                    segment[leg_idx + 1]['from_location'] = act_coord
+                segment[leg_idx]['to_act_identifier'] = act_identifier
+                segment[leg_idx]['to_act_name'] = act_name
+                segment[leg_idx]['to_act_cap'] = act_cap
+                segment[leg_idx]['to_act_score'] = act_score
+        return segment
+
+
 def select_interesting_trips(flattened_segmented_dict, n: int):  # TODO: Implement
     """Selects a few interesting agent trips for debugging and evaluation."""
     interesting_trips = []
@@ -1021,7 +1194,33 @@ def select_interesting_trips(flattened_segmented_dict, n: int):  # TODO: Impleme
 
 
 def build_position_on_segment_info(n: int) -> list[list[int]]:
-    """Based on the number of legs in a segment, returns a list of lists that tells us at each level which legs to process."""
+    """Based on the number of legs in a segment,
+    returns a list of lists that tells us at each level which legs to process.
+    Takes basically 0 time.
+    n = 2
+    [[0]]
+
+    n = 3
+    [[0], [1]]
+
+    n = 4
+    [[0, 2], [1]]
+
+    n = 5
+    [[0, 2], [1], [3]]
+
+    n = 6
+    [[0, 2, 4], [1], [3]]
+
+    n = 7
+    [[0, 2, 4], [1, 5], [3]]
+
+    n = 8
+    [[0, 2, 4, 6], [1, 5], [3]]
+
+    n = 9
+    [[0, 2, 4, 6], [1, 5], [3], [7]]
+    """
     # The first list contains numbers from 0 to n-2
     original_list = list(range(n - 1))
     result = []
@@ -1128,9 +1327,9 @@ def simple_locate_segment(person_legs):
                     assert person_legs[-1] == person_legs[
                         i + 1], "Last leg must be the last leg."  # TODO: Remove this line in production
                     act_identifier, act_name, act_coord, act_cap, act_dist, act_score = \
-                        greedy_select_single_activity(person_legs[i]['from_location'], person_legs[-1]['to_location'],
-                                                      person_legs[i]['to_act_type'], person_legs[i]['distance'],
-                                                      person_legs[-1]['distance'], 5)
+                        select_single_activity(person_legs[i]['from_location'], person_legs[-1]['to_location'],
+                                               person_legs[i]['to_act_type'], person_legs[i]['distance'],
+                                               person_legs[-1]['distance'], 5)
 
                 else:
                     logger.debug("Selecting location using ring with angle restriction.")
@@ -1244,6 +1443,7 @@ def update_dataframe(df: pd.DataFrame, placed_dict: Dict[str, Any]) -> pd.DataFr
 
     return df
 
+
 def write_hoerl_df_to_big_df(hoerl_df, big_df):  # TODO: write main stuff (somewhere else) to big df
     """Unites the Hoerl DataFrame with the big DataFrame."""
     hoerl_df = hoerl_df.rename(columns={'person_id': s.PERSON_ID_COL,
@@ -1280,8 +1480,9 @@ def write_placement_results_dict_to_big_df(placement_results_dict, big_df):  # T
 
     data_df = pd.DataFrame(records)
     # Merge without suffixes
-    merged_df = big_df.merge(data_df[[s.UNIQUE_LEG_ID_COL, 'from_location', 'to_location', 'to_act_identifier', 'to_act_name']],
-                             on=s.UNIQUE_LEG_ID_COL, how='left')
+    merged_df = big_df.merge(
+        data_df[[s.UNIQUE_LEG_ID_COL, 'from_location', 'to_location', 'to_act_identifier', 'to_act_name']],
+        on=s.UNIQUE_LEG_ID_COL, how='left')
 
     # Combine columns to prioritize non-NaN values from data_df
     merged_df['from_location'] = merged_df['from_location_x'].combine_first(merged_df['from_location_y'])
@@ -1293,6 +1494,7 @@ def write_placement_results_dict_to_big_df(placement_results_dict, big_df):  # T
     merged_df = merged_df.drop(columns=['from_location_x', 'from_location_y', 'to_location_x', 'to_location_y'])
 
     return merged_df
+
 
 def locate_main_activities(persons_legs: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List[Dict[str, Any]]]:
     """Processes each person's legs to locate main activities for all persons.
@@ -1367,6 +1569,4 @@ else:
     reformatted_locations_data = reformat_locations(locations_data)
     MyTargetLocations = TargetLocations(reformatted_locations_data)
 
-
 # -------------
-

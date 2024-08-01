@@ -249,7 +249,7 @@ class TargetLocations:
         :param location: A 1D numpy array representing the location to query (coordinates [1.5, 2.5]).
         :param radius1: Any of the two radii defining the ring.
         :param radius2: The other one.
-        :return: A tuple containing four numpy arrays: identifiers, coordinates, distances, and remaining potentials of the nearest candidates.
+        :return: A tuple containing four numpy arrays: identifiers, coordinates (2D array), distances, and remaining potentials of the nearest candidates.
         """
         # Ensure location is a 2D array with a single location
         location = location.reshape(1, -1)
@@ -282,7 +282,8 @@ class TargetLocations:
         return candidate_identifiers, candidate_names, candidate_coordinates, candidate_potentials, candidate_distances
 
     def query_within_two_overlapping_rings(self, act_type: str, location1: np.ndarray, location2: np.ndarray,
-                                           radius1a: float, radius1b: float, radius2a: float, radius2b: float):
+                                           radius1a: float, radius1b: float, radius2a: float, radius2b: float,
+                                           max_number_of_candidates: int = None):
         """
         Find the activity locations within a ring defined by two radii around a location and type.
         :param act_type: The activity category to query.
@@ -292,7 +293,8 @@ class TargetLocations:
         :param radius1b: The other radius defining the first ring.
         :param radius2a: One of the two radii defining the second ring.
         :param radius2b: The other radius defining the second ring.
-        :return: A tuple containing five numpy arrays: identifiers, names, coordinates, potentials, and distances of the nearest candidates.
+        :param max_number_of_candidates: Reduces the number of candidates to evaluate, for some small performance gain.
+        :return: A tuple containing three numpy arrays: Identifiers, coordinates (2D array), potentials
         """
         # Ensure location is a 2D array with a single location
         location1 = location1.reshape(1, -1)
@@ -322,6 +324,9 @@ class TargetLocations:
                                          inner_indices_set1.union(inner_indices_set2))
         if not overlapping_rings_indices:
             return None
+
+        if max_number_of_candidates is not None:
+            overlapping_rings_indices = overlapping_rings_indices[:max_number_of_candidates]
 
         # Get the identifiers, coordinates, and distances for locations within the annulus
         candidate_identifiers = np.array(self.data[act_type]["identifiers"])[overlapping_rings_indices]
@@ -363,7 +368,6 @@ class TargetLocations:
         return candidates_dict
 
 
-
 # def sigmoid(x):
 #     """
 #     Sigmoid function for likelihood calculation.
@@ -378,23 +382,24 @@ class TargetLocations:
 #     return 1 / (1 + np.exp(z))
 
 
-def score_locations(potentials: np.ndarray, distances: np.ndarray = None) -> np.ndarray:
+def evaluate_candidates(potentials: np.ndarray = None, distances: np.ndarray = None,
+                        number_of_candidates: int = None) -> np.ndarray:
     """
-    Evaluate the returned locations by distance and potential and return a score.
+    Evaluate the candidates.
 
-    :param distances: Numpy array of distances from desired point for the returned locations.
-    :param potentials: Numpy array of remaining potentials for the returned locations.
-    :return: Numpy array of scores for the returned locations.
+    :param potentials: Numpy array of potentials for the returned locations.
+    :param distances: Distance deviations from the target (if available).
+    :param number_of_candidates:
+    :return: Non-normalized, absolute scores.
     """
+    if distances is not None and potentials is not None:
+        return potentials / distances  # TODO: Improve scoring function
+    if potentials is not None:
+        return potentials
     if distances is not None:
-        base_scores = potentials / distances  # TODO: Improve scoring function
-
+        return 1 / distances
     else:
-        base_scores = potentials
-
-    # Normalize the scores to ensure they sum to 1
-    scores = base_scores / np.sum(base_scores)
-    return scores
+        return np.ones(number_of_candidates)
 
 
 def find_circle_intersections(center1: np.ndarray, radius1: float, center2: np.ndarray, radius2: float) -> Tuple[
@@ -477,9 +482,9 @@ def find_circle_intersections(center1: np.ndarray, radius1: float, center2: np.n
     return intersect1, intersect2
 
 
-def find_location_candidates(start_coord: np.ndarray, end_coord: np.ndarray, type: str,
-                             distance_start_to_act: float, distance_act_to_end: float,
-                             num_candidates: int) -> Tuple[
+def find_closest_location_candidates(start_coord: np.ndarray, end_coord: np.ndarray, type: str,
+                                     distance_start_to_act: float, distance_act_to_end: float,
+                                     num_candidates: int) -> Tuple[
     Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray],
     Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
     """
@@ -509,10 +514,10 @@ from typing import Tuple
 import numpy as np
 
 
-def select_single_activity(start_coord: np.ndarray, end_coord: np.ndarray, type: str,
-                           distance_start_to_act: float, distance_act_to_end: float,
-                           num_candidates: int):
-    """Place a single activity at the most likely location."""
+def select_single_close_activity(start_coord: np.ndarray, end_coord: np.ndarray, type: str,
+                                 distance_start_to_act: float, distance_act_to_end: float,
+                                 num_candidates: int):
+    """Place a single activity at one of the closest locations."""
     logger.debug(f"Greedy selecting activity for type {type} between {start_coord} and {end_coord}.")
 
     # Home locations aren't among the targets and are for now replaced by the start location
@@ -520,26 +525,30 @@ def select_single_activity(start_coord: np.ndarray, end_coord: np.ndarray, type:
         logger.info("Home activity detected. Secondary locator shouldn't be used for that. Returning start location.")
         return None, "home", start_coord, None, None, None
 
-    candidates1, candidates2 = find_location_candidates(start_coord, end_coord, type, distance_start_to_act,
-                                                        distance_act_to_end, num_candidates)
+    candidates1, candidates2 = find_closest_location_candidates(start_coord, end_coord, type, distance_start_to_act,
+                                                                distance_act_to_end, num_candidates)
 
     if candidates2 is not None:
         combined_candidates = tuple(np.concatenate((arr1, arr2)) for arr1, arr2 in zip(candidates1, candidates2))
     else:
         combined_candidates = candidates1
 
-    return monte_carlo_select_candidate(combined_candidates)
+    scores = evaluate_candidates(combined_candidates[-2], combined_candidates[-1], num_candidates)
+    candidate, score = monte_carlo_select_candidates(combined_candidates, scores, 1)
 
+    identifier, name, coord, potential, distance = candidate
+
+    return identifier, name, coord, potential, distance, score
 
 def monte_carlo_select_candidate(candidates, use_distance=True):
+    """Depreciated. Use monte_carlo_select_candidates instead."""  # TODO: Remove
     if use_distance:
-        scores = score_locations(candidates[-2], candidates[-1])
+        scores = evaluate_candidates(candidates[-2], candidates[-1])
     else:
-        scores = score_locations(candidates[-2])
+        scores = evaluate_candidates(candidates[-2])
 
-    # Verify that scores are normalized to 1
-    logger.debug(f"Scores: {scores}")
-    assert np.isclose(np.sum(scores), 1.0), "Scores are not normalized to 1."  # TODO: Remove this line in production
+    # Normalize scores
+    scores = scores / np.sum(scores)
 
     chosen_index = np.random.choice(len(scores), p=scores)
 
@@ -548,6 +557,33 @@ def monte_carlo_select_candidate(candidates, use_distance=True):
         scores[chosen_index],)
 
     return chosen_candidate
+
+
+def monte_carlo_select_candidates(
+        candidates: Tuple[np.ndarray, ...],
+        scores: np.ndarray,
+        num_candidates: int):
+    """
+    Selects a specified number of candidates based on their normalized scores using Monte Carlo sampling.
+
+    :param candidates: A tuple of arrays with the candidates.
+    :param scores: A 1D array of scores corresponding to the candidates.
+    :param num_candidates: The number of candidates to select.
+    :return A tuple containing:
+        - A tuple of arrays with the selected candidates.
+        - A 1D array of the scores corresponding to the selected candidates.
+    """
+    assert len(candidates) == len(scores), "The number of candidates and scores must match."
+    if num_candidates >= len(candidates):
+        return candidates, scores
+
+    scores = scores / np.sum(scores)
+
+    chosen_indices = np.random.choice(len(scores), num_candidates, p=scores, replace=False)
+
+    selected_candidates = tuple(arr[chosen_indices] if arr is not None else None for arr in candidates)
+
+    return selected_candidates, scores[chosen_indices]
 
 
 def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any]]]:
@@ -1003,7 +1039,7 @@ def greedy_locate_segment(segment):
     # if there are only two legs, we can find the loc immediately
     elif len(segment) == 2:
         logger.debug("Greedy locating. Only two legs in segment.")
-        act_identifier, act_name, act_coord, act_cap, act_dist, act_score = select_single_activity(
+        act_identifier, act_name, act_coord, act_cap, act_dist, act_score = select_single_close_activity(
             segment[0]['from_location'], segment[-1]['to_location'], segment[0]['to_act_type'],
             segment[0]['distance'], segment[-1]['distance'], 5)
         segment[0]['to_location'] = act_coord
@@ -1043,10 +1079,10 @@ def greedy_locate_segment(segment):
                     dist_act_to_end = tree[level - 1][2 * i + 1][2]
 
                 act_identifier, act_name, act_coord, act_cap, act_dist, act_score = \
-                    select_single_activity(segment[from_location_idx]['from_location'],
-                                           segment[to_location_idx]['to_location'],
-                                           segment[leg_idx]['to_act_type'], dist_start_to_act,
-                                           dist_act_to_end, 1)
+                    select_single_close_activity(segment[from_location_idx]['from_location'],
+                                                 segment[to_location_idx]['to_location'],
+                                                 segment[leg_idx]['to_act_type'], dist_start_to_act,
+                                                 dist_act_to_end, 1)
                 segment[leg_idx]['to_location'] = act_coord
                 if leg_idx + 1 < len(segment) + 1:
                     segment[leg_idx + 1]['from_location'] = act_coord
@@ -1098,6 +1134,10 @@ def summarize_placement_results(flattened_segmented_dict):
 
     return total_number_of_legs, mean_discretization_error, mean_relative_error, median_discretization_error, median_relative_error
 
+def meta_solve_segment(segment, number_of_candidates=1):
+    if len(segment) > 2:
+        tree = h.build_estimation_tree(distances)
+        tree = adjust_estimation_tree(tree, real_distance, strong_adjust=True)
 
 def solve_segment(segment, number_of_candidates=1):
     """At each level, find the best n locations, solve n*l subproblems, and choose the best solution.
@@ -1110,11 +1150,11 @@ def solve_segment(segment, number_of_candidates=1):
     elif len(segment) == 1:
         assert segment[0]['from_location'].size > 0 and segment[0][
             'to_location'].size > 0, "Both start and end locations must be known for a single leg."
-        return segment
+        return segment, 0
     # if there are only two legs, we can find the loc immediately
     elif len(segment) == 2:
         logger.debug("Advanced locating. Only two legs in segment.")
-        act_identifier, act_name, act_coord, act_cap, act_dist, act_score = select_single_activity(
+        act_identifier, act_name, act_coord, act_cap, act_dist, act_score = select_single_close_activity(
             segment[0]['from_location'], segment[-1]['to_location'], segment[0]['to_act_type'],
             segment[0]['distance'], segment[-1]['distance'], 1)
         segment[0]['to_location'] = act_coord
@@ -1123,7 +1163,7 @@ def solve_segment(segment, number_of_candidates=1):
         segment[0]['to_act_name'] = act_name
         segment[0]['to_act_cap'] = act_cap
         segment[0]['to_act_score'] = act_score
-        return segment
+        return segment, act_score
 
     else:
         logger.debug(f"Advanced locating. Segment has {len(segment)} legs.")
@@ -1131,7 +1171,6 @@ def solve_segment(segment, number_of_candidates=1):
         distances = [leg['distance'] for leg in segment]
         # This automatically takes into account the currently set candidate locations Ü
         real_distance = h.euclidean_distance(segment[0]['from_location'], segment[-1]['to_location'])
-
         tree = h.build_estimation_tree(distances)
         tree = adjust_estimation_tree(tree, real_distance, strong_adjust=True)
 
@@ -1139,49 +1178,105 @@ def solve_segment(segment, number_of_candidates=1):
             len(distances))  # tells us at each level which legs to look at
         assert len(tree) == len(position_on_segment_info), "Tree and position info must have the same length."
 
+        level = len(tree) - 1
+        leg_idx = 0
+
+        def leftover():
+            for level in range(len(tree) - 1, -1, -1):
+                for i, leg_idx in enumerate(position_on_segment_info[level]):
+                    logger.debug(f"Level: {level}, i: {i}, leg_idx: {leg_idx}")
+                    step = 2 ** level  # How far from the current leg to look for start and end locations
+                    from_location_idx = leg_idx - step + 1  # + 1 because we get the from_location
+                    assert from_location_idx >= 0, "From location index must be greater or equal to 0."
+                    to_location_idx = min(len(segment) - 1, leg_idx + step)
+
+                    if level == 0:
+                        dist_start_to_act = segment[leg_idx]['distance']
+                        dist_act_to_end = segment[to_location_idx]['distance']
+                    else:
+                        # 2 * i because two lower legs are combined to one higher leg
+                        # in odd cases on the current level, the last leg is skipped
+                        dist_start_to_act = tree[level - 1][2 * i][2]
+                        dist_act_to_end = tree[level - 1][2 * i + 1][2]
+
+                    act_identifier, act_name, act_coord, act_cap, act_dist, act_score = \
+                        select_single_close_activity(segment[from_location_idx]['from_location'],
+                                                     segment[to_location_idx]['to_location'],
+                                                     segment[leg_idx]['to_act_type'], dist_start_to_act,
+                                                     dist_act_to_end, 5)
+                    segment[leg_idx]['to_location'] = act_coord
+                    if leg_idx + 1 < len(segment) + 1:
+                        segment[leg_idx + 1]['from_location'] = act_coord
+                    segment[leg_idx]['to_act_identifier'] = act_identifier
+                    segment[leg_idx]['to_act_name'] = act_name
+                    segment[leg_idx]['to_act_cap'] = act_cap
+                    segment[leg_idx]['to_act_score'] = act_score
+
         # Get candidates for the highest level
-        candidates = MyTargetLocations.query_within_two_overlapping_rings()
+        act_type = segment[0]['to_act_type']
+        location1 = segment[0]['from_location']  # From
+        location2 = segment[-1]['to_location']  # To
+        # Radii describing the search area (two overlapping donuts)
+        radius1a = segment[0]['to_act_cap']
+        radius1b = segment[0]['to_act_cap']
+        radius2a = segment[-1]['to_act_cap']
+        radius2b = segment[-1]['to_act_cap']
+        min_candidates = 1
+        max_candidates = None
+        max_iterations = 15
+
+        candidates, iterations = find_overlapping_rings_candidates(act_type,
+                                                                   location1, location2,
+                                                                   radius1a, radius1b,
+                                                                   radius2a, radius2b,
+                                                                   min_candidates, max_candidates,
+                                                                   max_iterations)
+
+        candidate_identifiers, candidate_coordinates, candidate_potentials = candidates
+
+        if iterations > 0:  # We need to find distance deviations of each candidate to score them
+            candidate_distances_from_start = np.linalg.norm(candidate_coordinates - location1, axis=1)
+            candidate_distances_to_end = np.linalg.norm(candidate_coordinates - location2, axis=1)
+
+            upper_radius1 = max(radius1a, radius1b)
+            lower_radius1 = min(radius1a, radius1b)
+            upper_radius2 = max(radius2a, radius2b)
+            lower_radius2 = min(radius2a, radius2b)
+
+            upper_deviations1 = np.maximum(0, candidate_distances_from_start - upper_radius1)
+            lower_deviations1 = np.maximum(0, lower_radius1 - candidate_distances_from_start)
+            upper_deviations2 = np.maximum(0, candidate_distances_to_end - upper_radius2)
+            lower_deviations2 = np.maximum(0, lower_radius2 - candidate_distances_to_end)
+
+            total_deviations = upper_deviations1 + lower_deviations1 + upper_deviations2 + lower_deviations2
+            local_scores = evaluate_candidates(candidate_potentials, total_deviations)
+
+        else:  # No distance deviations expected, just score by potentials
+            local_scores = evaluate_candidates(candidate_potentials, None)
+
+        # Select the n best candidates
+        selected_candidates, scores = monte_carlo_select_candidates(candidates, local_scores, number_of_candidates)
+        selected_identifiers, selected_coords, selected_potentials = selected_candidates
+
         # Locate and split and make new segments
-        for i in range(number_of_candidates):
-            located_seg1=solveseg(seg, level, tree)
-            located_seg2=solveseg(seg, level, tree)
+        full_segs = []
+        branch_scores = []
+        for i in range(len(selected_candidates)):
+            segment[0]['to_location'] = selected_coords[i]
+            subsegment1 = segment[:len(segment) // 2]
+            subsegment2 = segment[len(segment) // 2:]
+            located_seg1, score1 = solve_segment(subsegment1, number_of_candidates, tree)
+            located_seg2, score2 = solve_segment(subsegment2, number_of_candidates, tree)
+            total_branch_score = score1 + score2 + scores[i]
+            branch_scores.append(total_branch_score)
             full_seg = located_seg1 + located_seg2
             full_segs.append(full_seg)
-        max_score = max([seg[0]['to_act_score'] for seg in full_segs])
-        best_seg = [seg for seg in full_segs if seg[0]['to_act_score'] == max_score]
-        return best_seg
-        # Do the sme for all new segments
+        max_score = max(branch_scores)
+        best_seg = full_segs[branch_scores.index(max_score)]
 
-        for level in range(len(tree) - 1, -1, -1):
-            for i, leg_idx in enumerate(position_on_segment_info[level]):
-                logger.debug(f"Level: {level}, i: {i}, leg_idx: {leg_idx}")
-                step = 2 ** level  # How far from the current leg to look for start and end locations
-                from_location_idx = leg_idx - step + 1  # + 1 because we get the from_location
-                assert from_location_idx >= 0, "From location index must be greater or equal to 0."
-                to_location_idx = min(len(segment) - 1, leg_idx + step)
+        return best_seg, max_score
 
-                if level == 0:
-                    dist_start_to_act = segment[leg_idx]['distance']
-                    dist_act_to_end = segment[to_location_idx]['distance']
-                else:
-                    # 2 * i because two lower legs are combined to one higher leg
-                    # in odd cases on the current level, the last leg is skipped
-                    dist_start_to_act = tree[level - 1][2 * i][2]
-                    dist_act_to_end = tree[level - 1][2 * i + 1][2]
 
-                act_identifier, act_name, act_coord, act_cap, act_dist, act_score = \
-                    select_single_activity(segment[from_location_idx]['from_location'],
-                                           segment[to_location_idx]['to_location'],
-                                           segment[leg_idx]['to_act_type'], dist_start_to_act,
-                                           dist_act_to_end, 5)
-                segment[leg_idx]['to_location'] = act_coord
-                if leg_idx + 1 < len(segment) + 1:
-                    segment[leg_idx + 1]['from_location'] = act_coord
-                segment[leg_idx]['to_act_identifier'] = act_identifier
-                segment[leg_idx]['to_act_name'] = act_name
-                segment[leg_idx]['to_act_cap'] = act_cap
-                segment[leg_idx]['to_act_score'] = act_score
-        return segment
 
 
 def select_interesting_trips(flattened_segmented_dict, n: int):  # TODO: Implement
@@ -1327,9 +1422,9 @@ def simple_locate_segment(person_legs):
                     assert person_legs[-1] == person_legs[
                         i + 1], "Last leg must be the last leg."  # TODO: Remove this line in production
                     act_identifier, act_name, act_coord, act_cap, act_dist, act_score = \
-                        select_single_activity(person_legs[i]['from_location'], person_legs[-1]['to_location'],
-                                               person_legs[i]['to_act_type'], person_legs[i]['distance'],
-                                               person_legs[-1]['distance'], 5)
+                        select_single_close_activity(person_legs[i]['from_location'], person_legs[-1]['to_location'],
+                                                     person_legs[i]['to_act_type'], person_legs[i]['distance'],
+                                                     person_legs[-1]['distance'], 5)
 
                 else:
                     logger.debug("Selecting location using ring with angle restriction.")
@@ -1391,6 +1486,33 @@ def find_ring_candidates(type: str, center: np.ndarray, radius1: float, radius2:
         radius1, radius2 = spread_distances(radius1, radius2, iteration=i, first_step=20)
         i += 1
         logger.debug(f"Iteration {i}. Increasing radii to {radius1} and {radius2}.")
+        if i > max_iterations:
+            raise ValueError(f"Not enough candidates found after {max_iterations} iterations.")
+
+
+def find_overlapping_rings_candidates(act_type: str, location1: np.ndarray, location2: np.ndarray,
+                                      radius1a: float, radius1b: float, radius2a: float, radius2b: float,
+                                      min_candidates=1, max_candidates=None, max_iterations=15):
+    """Find candidates within two overlapping rings around two center points.
+    Iteratively increase the radii until a sufficient number of candidates is found.
+    """
+    original_ring_width1 = abs(radius1b - radius1a)
+    original_ring_width2 = abs(radius2b - radius2a)
+    i = 0
+    while True:
+        candidates = MyTargetLocations.query_within_two_overlapping_rings(
+            act_type, location1, location2, radius1a, radius1b, radius2a, radius2b, max_candidates)
+        if candidates is not None:
+            if len(candidates[0]) >= min_candidates:
+                logger.debug(f"Found {len(candidates[0])} candidates.")
+                stats_tracker.log(f"Find_ring_candidates: Iterations for {act_type}", i)
+                total_ring_width_change = (abs(radius1b - radius1a) + abs(radius2b - radius2a) -
+                                           original_ring_width1 - original_ring_width2)
+                return candidates, total_ring_width_change
+        radius1a, radius1b = spread_distances(radius1a, radius1b, iteration=i, first_step=20)
+        radius2a, radius2b = spread_distances(radius2a, radius2b, iteration=i, first_step=20)
+        i += 1
+        logger.debug(f"Iteration {i}. Increasing radii to {radius1a}, {radius1b} and {radius2a}, {radius2b}.")
         if i > max_iterations:
             raise ValueError(f"Not enough candidates found after {max_iterations} iterations.")
 
@@ -1561,12 +1683,12 @@ if __name__ == '__main__':
     logger.debug(f"Execution time: {end_time - start_time} seconds.")
 
     logger.debug("done")
-
-else:
-    os.chdir(pipeline_setup.PROJECT_ROOT)
-    with open('locations_data_with_potentials.pkl', 'rb') as file:
-        locations_data = pickle.load(file)
-    reformatted_locations_data = reformat_locations(locations_data)
-    MyTargetLocations = TargetLocations(reformatted_locations_data)
+#
+# else:
+#     os.chdir(pipeline_setup.PROJECT_ROOT)
+#     with open('locations_data_with_potentials.pkl', 'rb') as file:
+#         locations_data = pickle.load(file)
+#     reformatted_locations_data = reformat_locations(locations_data)
+#     MyTargetLocations = TargetLocations(reformatted_locations_data)
 
 # -------------

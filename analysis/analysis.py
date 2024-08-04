@@ -270,37 +270,19 @@ class DataframeAnalysis(dfp.DataFrameProcessor):
         # Save the map to an HTML file
         m.save('hanover_map.html')
 
-    def evaluate_distance_deviations(self, problem, distance_result, relaxation_result,
-                                     discretization_result):  # TODO edit
-        sampled_distances = distance_result["distances"]
-
-        discretized_locations = []
-        if not problem["origin"] is None: discretized_locations.append(problem["origin"])
-        discretized_locations.append(discretization_result["locations"])
-        if not problem["destination"] is None: discretized_locations.append(problem["destination"])
-        discretized_locations = np.vstack(discretized_locations)
-
-        discretized_distances = la.norm(discretized_locations[:-1] - discretized_locations[1:], axis=1)
-        discretization_error = np.abs(sampled_distances - discretized_distances)
-
-        objective = 0.0
-        for error, mode in zip(discretization_error, problem["modes"]):
-            target_error = self.thresholds[mode]
-            excess_error = max(0.0, error - target_error)
-            objective = max(objective, excess_error)
-
-        valid = objective == 0.0
-        valid &= distance_result["valid"]
-        valid &= relaxation_result["valid"]
-        valid &= discretization_result["valid"]
-
-        return dict(valid=valid, objective=objective)
-
     def evaluate_distance_deviations_from_df(self):
         self.df['placed_distance'] = self.df.apply(lambda row: row['from_location'].distance(row['to_location']), axis=1)
 
         # Calculate the discretization error
         self.df['discretization_error'] = np.abs(self.df[s.LEG_DISTANCE_METERS_COL] - self.df['placed_distance'])
+
+    def find_interesting_trips(self, n: int):  # TODO: Implement
+        """Selects a few interesting agent trips for debugging and evaluation."""
+        interesting_trips = []
+        for person_id, segment in flattened_segmented_dict.items():
+            if len(segment) > 2:
+                interesting_trips.append(segment)
+        return interesting_trips
 
 
 def analyze_influence_on_slack(df):

@@ -142,7 +142,7 @@ def process(destinations, segmented_dict):
     maximum_iterations = 1000
 
     # Set up discretization solver
-    candidate_index = CandidateIndex(destinations)  # TODO: Give him my locations
+    candidate_index = CandidateIndex(destinations)
     discretization_solver = CustomDiscretizationSolver(candidate_index)
 
     # Set up distance sampler -- not needed for now
@@ -662,7 +662,7 @@ class DiscretizationErrorObjective(AssignmentObjective):
 
 
 def run_hoerl():
-    start_time = time.time()
+
     os.chdir(pipeline_setup.PROJECT_ROOT)
     with open('locations_data_with_potentials.pkl', 'rb') as file:
         locations_data = pickle.load(file)
@@ -674,9 +674,13 @@ def run_hoerl():
     logger.debug("dict populated.")
     with_main_dict = locate_main_activities(dictu)
     segmented_dict = segment_legs(with_main_dict)
+    pickle.dump(segmented_dict, open(r'C:\Users\Felix\PycharmProjects\MATSimPipeline\data\segmented_dict2.pkl', 'wb'))
+    segmented_dict = pickle.load(open(r'C:\Users\Felix\PycharmProjects\MATSimPipeline\data\segmented_dict2.pkl', 'rb'))
     logger.debug("dict segmented.")
     pprint.pprint(segmented_dict)
+    start_time = time.time()
     df_location, df_convergence = process(reformatted_locations_data, segmented_dict)
+    end_time = time.time()
     logger.debug("df processed.")
     df['to_location'] = df['to_location'].apply(h.convert_to_shapely_point)  # Needed currently so [] becomes None
     df['from_location'] = df['from_location'].apply(h.convert_to_shapely_point)  # Needed currently so [] becomes None
@@ -692,6 +696,8 @@ def run_hoerl():
     df['from_location'] = df['from_location'].apply(h.convert_to_shapely_point)
     df.to_csv(os.path.join(pipeline_setup.OUTPUT_DIR, 'hoerl_df.csv'))
     logger.debug("done")
+    logger.info(f"Time taken: {end_time - start_time}")
+
 
 if __name__ == "__main__":
     run_hoerl()

@@ -5,8 +5,9 @@ import pickle
 import pprint
 import random
 import time
+import json
 from collections import defaultdict
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Literal
 
 import numpy as np
 import pandas as pd
@@ -182,13 +183,30 @@ class TargetLocations:
     This class is used to quickly find the nearest activity locations for a given location.
     """
 
-    def __init__(self, data: Dict[str, Dict[str, np.ndarray]]):
-        self.data: Dict[str, Dict[str, np.ndarray]] = data
+    # def __init__(self, data: Dict[str, Dict[str, np.ndarray]]):
+    #     self.data: Dict[str, Dict[str, np.ndarray]] = data
+    #     self.indices: Dict[str, KDTree] = {}
+    #
+    #     for type, pdata in self.data.items():
+    #         logger.debug(f"Constructing spatial index for {type} ...")
+    #         self.indices[type] = KDTree(pdata["coordinates"])
+
+    def __init__(self, json_folder_path: str):
+        self.data: Dict[str, Dict[str, np.ndarray]] = self.load_reformatted_data(h.get_files(json_folder_path))
         self.indices: Dict[str, KDTree] = {}
 
         for type, pdata in self.data.items():
             logger.debug(f"Constructing spatial index for {type} ...")
             self.indices[type] = KDTree(pdata["coordinates"])
+
+    def load_reformatted_data(self, file_path: str):
+        with open(file_path, 'r') as f:
+            data = json.load(f)
+        # Convert lists back to numpy arrays
+        for purpose in data:
+            for key in data[purpose]:
+                data[purpose][key] = np.array(data[purpose][key])
+        return data
 
     def query_closest(self, type: str, location: np.ndarray, num_candidates: int = 1) -> Tuple[
         np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -719,19 +737,22 @@ def generate_random_location_within_hanover():
     return np.array([x, y])
 
 
-def prepare_mid_df_for_legs_dict(df, filter_max_distance=None, number_of_persons=None) -> pd.DataFrame:
+def prepare_population_df_for_location_assignment(df, filter_max_distance=None, number_of_persons=None) -> (pd.DataFrame, pd.DataFrame):
     """Temporarily prepare the MiD DataFrame for the leg dictionary function."""
 
     # Initialize columns with empty objects to ensure compatibility
     df["from_location"] = None
     df["to_location"] = None
 
+    # Split persons with no leg ID into a separate DataFrame
+    no_leg_df = df[df[s.LEG_ID_COL].isna()].copy()
+    df = df.dropna(subset=[s.LEG_ID_COL])
+
+    logger.debug(f"People with no legs: {no_leg_df.shape[0]}")
+
     # Throw out rows with missing values in the distance column
     row_count_before = df.shape[0]
-    # Count rows with no leg
-    no_leg_count = df[df[s.LEG_ID_COL].isna()].shape[0]
     df = df.dropna(subset=[s.LEG_DISTANCE_METERS_COL])
-    logger.debug(f"People with no legs: {no_leg_count}")
     logger.debug(f"Dropped {row_count_before - df.shape[0]} rows with missing distance values.")
 
     # Identify and remove records of persons with any trip exceeding the max distance if filter_max_distance is specified
@@ -739,8 +760,7 @@ def prepare_mid_df_for_legs_dict(df, filter_max_distance=None, number_of_persons
         person_ids_to_exclude = df[df[s.LEG_DISTANCE_METERS_COL] > filter_max_distance][s.PERSON_ID_COL].unique()
         row_count_before = df.shape[0]
         df = df[~df[s.PERSON_ID_COL].isin(person_ids_to_exclude)]
-        logger.debug(
-            f"Dropped {row_count_before - df.shape[0]} rows from persons with trips exceeding the max distance of {filter_max_distance} km.")
+        logger.debug(f"Dropped {row_count_before - df.shape[0]} rows from persons with trips exceeding the max distance of {filter_max_distance} km.")
 
     # Ensure these columns are treated as object type to store arrays
     df["from_location"] = df["from_location"].astype(object)
@@ -772,7 +792,7 @@ def prepare_mid_df_for_legs_dict(df, filter_max_distance=None, number_of_persons
                 df.at[idx, "from_location"] = home_location
 
     logger.debug(df.head())
-    return df
+    return df, no_leg_df
 
 
 def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List[List[Dict[str, Any]]]]:
@@ -1640,30 +1660,30 @@ def locate_main_activities(persons_legs: Dict[str, List[Dict[str, Any]]]) -> Dic
 if __name__ == '__main__':
 
     os.chdir(pipeline_setup.PROJECT_ROOT)
-    with open('locations_data_with_potentials.pkl', 'rb') as file:
-        # TODO: make handler, use OSMOX
-        locations_data = pickle.load(file)
-    reformatted_locations_data = reformat_locations(locations_data)
-    MyTargetLocations = TargetLocations(reformatted_locations_data)
+    # with open('locations_data_with_potentials.pkl', 'rb') as file:
+    #     locations_data = pickle.load(file)
+    # reformatted_locations_data = reformat_locations(locations_data)
+    json_data_path = r"C:\Users\petre\Documents\GitHub\MATSimPipeline\playground\json_locations"
+    MyTargetLocations = TargetLocations(json_data_path)
     #
     df = h.read_csv(h.get_files(s.ENHANCED_MID_FOLDER))
-    df = prepare_mid_df_for_legs_dict(df, number_of_persons=100)
-    # logger.debug("df prepared.")
-    # dictu = populate_legs_dict_from_df(df)
-    # logger.debug("dict populated.")
-    # with_main_dict = locate_main_activities(dictu)
-    # segmented_dict = segment_legs(with_main_dict)
-    # logger.debug("dict segmented.")
-    # pprint.pprint(segmented_dict)
-    # pickle.dump(segmented_dict, open(r'C:\Users\Felix\PycharmProjects\MATSimPipeline\data\segmented_dict.pkl', 'wb'))
-    segmented_dict = pickle.load(open(r'C:\Users\Felix\PycharmProjects\MATSimPipeline\data\segmented_dict2.pkl', 'rb'))
+    df, _ = prepare_population_df_for_location_assignment(df, number_of_persons=100, filter_max_distance=30000)
+    logger.debug("df prepared.")
+    dictu = populate_legs_dict_from_df(df)
+    logger.debug("dict populated.")
+    with_main_dict = locate_main_activities(dictu)
+    segmented_dict = segment_legs(with_main_dict)
+    logger.debug("dict segmented.")
+    pprint.pprint(segmented_dict)
+    pickle.dump(segmented_dict, open(r'C:\Users\petre\Documents\GitHub\MATSimPipeline\data\segmented_dict_ohne_pendler.pkl', 'wb'))
+    segmented_dict = pickle.load(open(r'C:\Users\petre\Documents\GitHub\MATSimPipeline\data\segmented_dict_ohne_pendler.pkl', 'rb'))
     start_time = time.time()
     # Advanced petre locator
     all_dict = {}
     for person_id, segments in segmented_dict.items():
         all_dict[person_id] = []  # Initialize an empty list for each person_id
         for segment in segments:
-            placed_segment, _ = solve_segment(segment, number_of_branches=100, max_candidates=None, anchor_strategy="lower_middle")
+            placed_segment, _ = solve_segment(segment, number_of_branches=100, max_candidates=None, anchor_strategy="start")
             with_from_segment = add_from_locations(placed_segment)
             with_all_segment = insert_placed_distances(with_from_segment)
             all_dict[person_id].append(with_all_segment)

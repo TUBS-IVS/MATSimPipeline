@@ -1,7 +1,7 @@
 import os
 import time
 
-from synthesis.enhanced_mid_data.mid_data_enhancer import MiDDataEnhancer
+from synthesis.enhanced_mid.mid_data_enhancer import MiDDataEnhancer
 from utils import pipeline_setup, settings as s, helpers as h
 from utils.logger import logging
 from utils.stats_tracker import stats_tracker

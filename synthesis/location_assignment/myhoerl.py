@@ -13,6 +13,7 @@ import sklearn.neighbors
 from utils import pipeline_setup
 from synthesis.location_assignment.activity_locator_distance_based import *
 
+
 # COMPONENTS
 
 # For retrieving locations quickly
@@ -116,7 +117,6 @@ def format_segmented_legs(segmented_dict: Dict[str, List[List[Dict[str, Any]]]])
             }
 
             yield problem
-
 
 
 # ---------------------------------
@@ -400,6 +400,7 @@ class FeasibleDistanceSampler(DistanceSampler):
             "iterations": None  # No iterations needed as distances are known and valid
         }
 
+
 #
 # class CustomDistanceSampler(FeasibleDistanceSampler):
 #     def __init__(self, random, distributions, maximum_iterations=1000):
@@ -441,6 +442,7 @@ class AssignmentSolver:
 
         if distance_sampler is None:
             self.distance_sampler = FeasibleDistanceSampler(random=None)
+
     def solve(self, problem):
         best_result = None
 
@@ -659,23 +661,27 @@ class DiscretizationErrorObjective(AssignmentObjective):
         return dict(valid=valid, objective=objective)
 
 
-
-
 def run_hoerl():
-
     os.chdir(pipeline_setup.PROJECT_ROOT)
     with open('locations_data_with_potentials.pkl', 'rb') as file:
         locations_data = pickle.load(file)
     reformatted_locations_data = reformat_locations(locations_data)
     df = h.read_csv(h.get_files(s.ENHANCED_MID_FOLDER))
-    df = prepare_mid_df_for_legs_dict(df, number_of_persons=100)
+    df = prepare_population_df_for_location_assignment(df, number_of_persons=100, filter_max_distance=30000)
     logger.debug("df prepared.")
+    dic_population_start = time.time()
     dictu = populate_legs_dict_from_df(df)
+    dic_population_end = time.time()
     logger.debug("dict populated.")
+    main_placement_start = time.time()
     with_main_dict = locate_main_activities(dictu)
+    main_placement_end = time.time()
+    segmenting_start = time.time()
     segmented_dict = segment_legs(with_main_dict)
-    pickle.dump(segmented_dict, open(r'C:\Users\Felix\PycharmProjects\MATSimPipeline\data\segmented_dict2.pkl', 'wb'))
-    segmented_dict = pickle.load(open(r'C:\Users\Felix\PycharmProjects\MATSimPipeline\data\segmented_dict2.pkl', 'rb'))
+    segmenting_end = time.time()
+    pickle.dump(segmented_dict, open(r'C:\Users\petre\Documents\GitHub\MATSimPipeline\data\segmented_dict_ohne_pendler.pkl', 'wb'))
+    segmented_dict = pickle.load(
+        open(r'C:\Users\petre\Documents\GitHub\MATSimPipeline\data\segmented_dict_ohne_pendler.pkl', 'rb'))
     logger.debug("dict segmented.")
     pprint.pprint(segmented_dict)
     start_time = time.time()
@@ -696,9 +702,11 @@ def run_hoerl():
     df['from_location'] = df['from_location'].apply(h.convert_to_shapely_point)
     df.to_csv(os.path.join(pipeline_setup.OUTPUT_DIR, 'hoerl_df.csv'))
     logger.debug("done")
-    logger.info(f"Time taken: {end_time - start_time}")
+    logger.info(f"Processing time taken: {end_time - start_time}")
+    logger.info(f"Dictionary population time taken: {dic_population_end - dic_population_start}")
+    logger.info(f"Main placement time taken: {main_placement_end - main_placement_start}")
+    logger.info(f"Segmenting time taken: {segmenting_end - segmenting_start}")
 
 
 if __name__ == "__main__":
     run_hoerl()
-

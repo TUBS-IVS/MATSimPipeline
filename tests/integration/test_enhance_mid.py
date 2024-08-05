@@ -3,7 +3,7 @@ import shutil
 import pytest
 import pandas as pd
 
-from synthesis.enhanced_mid_data.run_enhance_mid import enhance_travel_survey
+from synthesis.enhanced_mid.run_enhance_mid import enhance_travel_survey
 from utils import settings as s
 
 @pytest.fixture(scope='module')

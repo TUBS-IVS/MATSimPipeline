@@ -1407,12 +1407,19 @@ def estimate_length_with_slack(length1, length2, slack_factor=2, min_slack_lower
     return [length_diff, wanted_minimum, result, wanted_maximum, length_sum]
 
 
-def get_files(folder_path: str, get_all: bool = False) -> Union[str, List[str]]:
+def get_files(path: str, get_all: bool = False) -> Union[str, List[str]]:
+    # Normalize the path to handle different OS path conventions
+    normalized_path = os.path.normpath(path)
+
+    # Check if the provided path is a file
+    if "." in os.path.basename(normalized_path):
+        return normalized_path
+
     # Get all files in the folder
-    files = glob.glob(os.path.join(folder_path, '*'))
+    files = glob.glob(os.path.join(normalized_path, '*'))
 
     if not files:
-        raise FileNotFoundError(f'No files found in the folder: {folder_path}')
+        raise FileNotFoundError(f'No files found in the folder: {normalized_path}')
 
     if get_all:
         return files
@@ -1423,7 +1430,7 @@ def get_files(folder_path: str, get_all: bool = False) -> Union[str, List[str]]:
         filtered_files = [f for f in files if not os.path.basename(f).startswith(('X', 'x'))]
 
         if not filtered_files:
-            raise FileNotFoundError(f'No suitable files found in the folder: {folder_path}')
+            raise FileNotFoundError(f'No suitable files found in the folder: {normalized_path}')
 
         # Get the newest file among the remaining files
         newest_file = max(filtered_files, key=os.path.getctime)
@@ -1433,3 +1440,41 @@ def get_files(folder_path: str, get_all: bool = False) -> Union[str, List[str]]:
 def euclidean_distance(start: np.ndarray, end: np.ndarray) -> float:
     """Compute the Euclidean distance between two points."""
     return np.linalg.norm(end - start)
+
+
+def get_min_max_distance(arr):
+    """Get the minimum and maximum possible distance/radius (from a fixed point) given a list of distances.
+    Works on integer distances and converts to integers!"""
+
+    if len(arr) == 0:
+        raise ValueError("No distances given.")
+    if len(arr) == 1:
+        return arr[0], arr[0]
+
+    arr = np.array(arr, dtype=int)
+
+    total_sum = sum(arr)
+
+    dp = np.zeros(total_sum + 1, dtype=bool)
+    dp[0] = True
+
+    # Update dp array for each number in arr using vectorized operations
+    for num in arr:
+        dp[num:] = dp[num:] | dp[:-num]
+
+    # Find the minimum difference by checking sums <= total_sum // 2
+    possible_sums = np.nonzero(dp[:total_sum // 2 + 1])[0]
+    min_diff = min(total_sum - 2 * s for s in possible_sums)
+
+    return min_diff, total_sum
+
+def spread_distances(distance1, distance2, iteration=0, first_step=20):
+    """Increases the difference between two distances, keeping them positive."""
+    step = first_step * (2 ** iteration)
+    if distance1 > distance2:
+        distance1 += step
+        distance2 -= step
+    else:
+        distance1 -= step
+        distance2 += step
+    return max(0, distance1), max(0, distance2)

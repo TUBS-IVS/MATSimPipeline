@@ -50,7 +50,7 @@ class CustomDiscretizationSolver:
         discretized_identifiers = []
 
         for location, purpose in zip(locations, problem["purposes"]):
-            identifier, location = self.index.query(purpose, location.reshape(1,
+            identifier, location = self.index.hoerl_query(purpose, location.reshape(1,
                                                                               -1))
 
             discretized_identifiers.append(identifier)
@@ -133,7 +133,7 @@ def format_segmented_legs(segmented_dict: Dict[str, List[List[Dict[str, Any]]]])
 
 # the ooooooverall run function
 # def process(context, arguments):
-def process(destinations, segmented_dict):
+def process(my_target_locations, segmented_dict):
     """Destinations is the reformatted version of my locations. Segmented_dict is the reformatted version of my segments."""
     # Set up RNG
     # random = np.random.RandomState(context.config("random_seed"))
@@ -142,8 +142,8 @@ def process(destinations, segmented_dict):
     maximum_iterations = 1000
 
     # Set up discretization solver
-    candidate_index = CandidateIndex(destinations)
-    discretization_solver = CustomDiscretizationSolver(candidate_index)
+    # candidate_index = CandidateIndex(destinations)
+    discretization_solver = CustomDiscretizationSolver(my_target_locations)
 
     # Set up distance sampler -- not needed for now
     # distance_distributions = context.data("distance_distributions")

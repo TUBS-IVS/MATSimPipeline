@@ -688,18 +688,18 @@ def run_hoerl():
     df_location, df_convergence = process(reformatted_locations_data, segmented_dict)
     end_time = time.time()
     logger.debug("df processed.")
-    df['to_location'] = df['to_location'].apply(h.convert_to_shapely_point)  # Needed currently so [] becomes None
-    df['from_location'] = df['from_location'].apply(h.convert_to_shapely_point)  # Needed currently so [] becomes None
+    df['to_location'] = df['to_location'].apply(h.convert_to_point)  # Needed currently so [] becomes None
+    df['from_location'] = df['from_location'].apply(h.convert_to_point)  # Needed currently so [] becomes None
     df = write_hoerl_df_to_big_df(df_location, df)
     logger.debug("hoerl df written.")
-    df = write_placement_results_dict_to_big_df(segmented_dict, df)
+    df = write_placement_results_dict_to_population_df(segmented_dict, df)
     logger.debug("df written.")
-    df['to_location'] = df['to_location'].apply(h.convert_to_shapely_point)
+    df['to_location'] = df['to_location'].apply(h.convert_to_point)
 
     logger.debug("df converted.")
     assert not df['to_location'].isna().any()
     df = h.add_from_location(df, 'to_location', 'from_location', backup_existing_from_col=True)
-    df['from_location'] = df['from_location'].apply(h.convert_to_shapely_point)
+    df['from_location'] = df['from_location'].apply(h.convert_to_point)
     df.to_csv(os.path.join(pipeline_setup.OUTPUT_DIR, 'hoerl_df.csv'))
     logger.debug("done")
     logger.info(f"Processing time taken: {end_time - start_time}")

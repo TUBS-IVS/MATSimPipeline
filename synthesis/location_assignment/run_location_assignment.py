@@ -14,15 +14,19 @@ logger = logging.getLogger(__name__)
 
 def run_location_assignment():
     """Runs the location assignment algorithm(s) on the given population and locations CSV files."""
-    population_df = h.read_csv(h.get_files(r"C:\Users\petre\Documents\GitHub\MATSimPipeline\data\mid\enhanced"))
-    locations_json_path = r"C:\Users\petre\Documents\GitHub\MATSimPipeline\playground\reformatted_data2.json"
-    algorithms_to_run = ['advanced_petre']
+    population_df = h.read_csv(h.get_files(r"data/mid/enhanced"))
+    locations_json_path = r"playground/reformatted_data2.json"
+    algorithms_to_run = ['main', 'advanced_petre']  # prepend "load_" to load intermediate results
     save_intermediate_results = True
+    assert_no_missing_locations = True
 
+    # Early check if all algorithms are valid
     valid_algorithms = ['hoerl', 'simple_lelke', 'greedy_petre', 'main', 'advanced_petre']
-
-    # Check if all algorithms are valid
-    if not all(algorithm in valid_algorithms for algorithm in algorithms_to_run):
+    algos_to_check = [
+        algorithm[len("load_"):] if algorithm.startswith("load_") else algorithm
+        for algorithm in algorithms_to_run
+    ]
+    if not all(algorithm in valid_algorithms for algorithm in algos_to_check):
         raise ValueError(f"Invalid algorithm. Valid algorithms are: {valid_algorithms}")
 
     # Build the common KDTree for the locations
@@ -31,10 +35,13 @@ def run_location_assignment():
     # Prepare the population dataframe, split off non-mobile persons
     mobile_population_df, non_mobile_population_df = al.prepare_population_df_for_location_assignment(population_df,
                                                                                                       number_of_persons=100,
-                                                                                                      filter_max_distance=30000)
+                                                                                                      filter_max_distance=10000)
 
     for algorithm in algorithms_to_run:
-        if algorithm == 'hoerl':
+        if algorithm.startswith("load"):
+            mobile_population_df = load_intermediate(algorithm)
+            non_mobile_population_df = pd.DataFrame()
+        elif algorithm == 'hoerl':
             mobile_population_df = run_hoerl(
                 mobile_population_df, target_locations)
         elif algorithm == 'simple_lelke':
@@ -49,20 +56,42 @@ def run_location_assignment():
         elif algorithm == 'advanced_petre':
             mobile_population_df = run_advanced_petre(
                 mobile_population_df, target_locations, number_of_branches=100, max_candidates=None,
-                anchor_strategy="start")
-            # 'lower_middle', 'upper_middle', 'start', 'end'
+                anchor_strategy="lower_middle")
         else:
             raise ValueError("Invalid algorithm.")
 
+        # Make sure algorithm results are in the correct format
+        mobile_population_df['to_location'] = mobile_population_df['to_location'].apply(
+            lambda x: h.convert_to_point(x, target='array'))
+        mobile_population_df['from_location'] = mobile_population_df['from_location'].apply(
+            lambda x: h.convert_to_point(x, target='array'))
         if save_intermediate_results:
             mobile_population_df.to_csv(os.path.join(pipeline_setup.OUTPUT_DIR, f"mobile_population_{algorithm}.csv"),
                                         index=False)
+
+    if assert_no_missing_locations:
+        assert mobile_population_df['to_location'].notna().all(), "Some persons have no location assigned."
 
     # Recombine the population dataframes
     result_df = pd.concat([mobile_population_df, non_mobile_population_df], ignore_index=True)
     result_df.sort_values(by=[s.UNIQUE_HH_ID_COL, s.UNIQUE_P_ID_COL, s.UNIQUE_LEG_ID_COL], ascending=[True, True, True],
                           inplace=True)
-    result_df.to_csv(os.path.join(pipeline_setup.OUTPUT_DIR, "location_assignment_result.csv"), index=False)
+    algos_string = "_".join(algorithms_to_run)
+    result_df.to_csv(os.path.join(pipeline_setup.OUTPUT_DIR, f"location_assignment_result_{algos_string}.csv"), index=False)
+    logger.info(f"Wrote location assignment result to {pipeline_setup.OUTPUT_DIR}.")
+
+
+def load_intermediate(algorithm: str):
+    intermediate_to_load = algorithm[len("load_"):]
+    mobile_population_df = h.read_csv(
+        os.path.join(pipeline_setup.PROJECT_ROOT, f"data\\intermediates\\mobile_population_{intermediate_to_load}.csv"))
+    if "to_location" in mobile_population_df.columns:
+        mobile_population_df["to_location"] = mobile_population_df["to_location"].apply(
+            lambda x: h.convert_to_point(x, target='array'))
+    if "from_location" in mobile_population_df.columns:
+        mobile_population_df["from_location"] = mobile_population_df["from_location"].apply(
+            lambda x: h.convert_to_point(x, target='array'))
+    return mobile_population_df
 
 
 def run_hoerl(population_df, target_locations):
@@ -74,9 +103,9 @@ def run_hoerl(population_df, target_locations):
     logger.info("Dict segmented.")
     df_location, df_convergence = myhoerl.process(target_locations, segmented_dict)
     population_df['to_location'] = population_df['to_location'].apply(
-        h.convert_to_shapely_point)  # Needed currently so [] becomes None
+        lambda x: h.convert_to_point(x, target='array'))  # Needed currently so [] becomes None
     population_df['from_location'] = population_df['from_location'].apply(
-        h.convert_to_shapely_point)  # Needed currently so [] becomes None
+        lambda x: h.convert_to_point(x, target='array'))  # Needed currently so [] becomes None
     population_df = al.write_hoerl_df_to_big_df(df_location, population_df)
     population_df = h.add_from_location(population_df, 'to_location', 'from_location')
     return population_df
@@ -91,7 +120,7 @@ def run_greedy_petre(population_df, target_locations):
     logger.info("Dict segmented.")
     greedy_petre_algorithm = al.WeirdPetreAlgorithm(target_locations, segmented_dict, variant="greedy")
     result_dict = greedy_petre_algorithm.run()
-    population_df = al.write_placement_results_dict_to_big_df(result_dict, population_df)
+    population_df = al.write_placement_results_dict_to_population_df(result_dict, population_df)
     return h.add_from_location(population_df, 'to_location', 'from_location')
 
 
@@ -104,7 +133,7 @@ def run_simple_lelke(population_df, target_locations):
     logger.info("Dict segmented.")
     lelke_algorithm = al.SimpleLelkeAlgorithm(target_locations, segmented_dict)
     result_dict = lelke_algorithm.run()
-    population_df = al.write_placement_results_dict_to_big_df(result_dict, population_df)
+    population_df = al.write_placement_results_dict_to_population_df(result_dict, population_df)
     return h.add_from_location(population_df, 'to_location', 'from_location')
 
 
@@ -113,16 +142,15 @@ def run_main(population_df, target_locations):
     logger.info("Starting Main algorithm.")
     legs_dict = al.populate_legs_dict_from_df(population_df)
     logger.info("Dict populated.")
-    segmented_dict = al.segment_legs(legs_dict)
-    logger.info("Dict segmented.")
-    simple_main_algorithm = al.SimpleMainLocationAlgorithm(target_locations, segmented_dict)
+    simple_main_algorithm = al.SimpleMainLocationAlgorithm(target_locations, legs_dict)  # It wants unsegmented legs
     result_dict = simple_main_algorithm.run()
-    population_df = al.write_placement_results_dict_to_big_df(result_dict, population_df)
+    result_dict = al.segment_legs(result_dict)  # Needed as writer expects segmented legs
+    population_df = al.write_placement_results_dict_to_population_df(result_dict, population_df)
     return h.add_from_location(population_df, 'to_location', 'from_location')
 
 
 def run_advanced_petre(population_df, target_locations, number_of_branches: int = 10, max_candidates=None,
-                       anchor_strategy: Literal["lower_middle", "upper_middle", "start", "end"] = "start"):
+                       anchor_strategy: Literal["lower_middle", "upper_middle", "start", "end"] = "lower_middle"):
     """Runs the Advanced Petre algorithm on the given population and locations CSV files."""
     logger.info("Starting Advanced Petre algorithm.")
     legs_dict = al.populate_legs_dict_from_df(population_df)
@@ -134,7 +162,7 @@ def run_advanced_petre(population_df, target_locations, number_of_branches: int 
                                                         max_candidates=max_candidates,
                                                         anchor_strategy=anchor_strategy)
     result_dict = advance_petre_algorithm.run()
-    population_df = al.write_placement_results_dict_to_big_df(result_dict, population_df)
+    population_df = al.write_placement_results_dict_to_population_df(result_dict, population_df)
     return h.add_from_location(population_df, 'to_location', 'from_location')
 
 

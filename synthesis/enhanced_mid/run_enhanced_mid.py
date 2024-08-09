@@ -1,6 +1,8 @@
 import os
 import time
 
+import pandas as pd
+
 from synthesis.enhanced_mid.mid_data_enhancer import MiDDataEnhancer
 from utils import pipeline_setup, settings as s, helpers as h
 from utils.logger import logging
@@ -18,8 +20,10 @@ def enhance_travel_survey(input_hh_folder, input_persons_folder, input_trips_fol
         - The ids of households, persons and trips must be unique within the population sample (e.g. MiD)
         (MiD: H_ID, HP_ID, and a previously added HPW_ID for legs)
     """
-    print("test")
     logger.info(f"Starting enhance_travel_survey module")
+
+    output_dir = h.make_path_absolute(output_dir)
+    os.mkdir(output_dir)
 
     # Create unique leg ids in the leg input file if necessary
     # df = h.read_csv(h.get_files(s.MiD_TRIPS_FOLDER))
@@ -76,10 +80,12 @@ def enhance_travel_survey(input_hh_folder, input_persons_folder, input_trips_fol
 
     # Add/edit trip-specific rule-based attributes
     # logger.info(f"Population df after applying L row rules: \n{population.df.head()}")
+    population.df[s.LEG_NON_UNIQUE_ID_COL] = pd.to_numeric(population.df[s.LEG_NON_UNIQUE_ID_COL], errors='coerce')
     population.df = h.generate_unique_leg_id(population.df)
 
     population.add_from_activity()
-    population.filter_home_to_home_legs()  # should be early (but after adding from activity)
+    # population.filter_home_to_home_legs()  Home-to-home should be dealt with in placement itself. Also, removing it
+    # here may cause issues because it may remove the first leg.
     population.update_number_of_legs()
 
     population.convert_minutes_to_seconds(s.LEG_DURATION_MINUTES_COL, s.LEG_DURATION_SECONDS_COL)
@@ -126,7 +132,6 @@ def enhance_travel_survey(input_hh_folder, input_persons_folder, input_trips_fol
     logger.info(f"Final population df: \n{population.df.head()}")
 
     # population.write_overview()
-
     population.df.to_csv(os.path.join(output_dir, s.ENHANCED_MID_FILE), index=False)
     logger.info(f"Wrote population output file.")
 

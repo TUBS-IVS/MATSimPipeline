@@ -15,6 +15,7 @@ from shapely import Point
 
 from utils.stats_tracker import stats_tracker
 from utils.pipeline_setup import OUTPUT_DIR
+from utils.pipeline_setup import PROJECT_ROOT
 from utils import settings as s
 from utils.logger import logging
 
@@ -102,36 +103,55 @@ def read_csv(csv_path: str, test_col=None, use_cols=None):
     return df
 
 
-def convert_to_shapely_point(point_input):
+def convert_to_point(point_input, target='Point'):
     """
-    Needed when loading a point from a csv file, because it is loaded as a string.
+    Forces all weird location representations to either Point or array.
     :param point_input: String input of the format 'x,y' or '[x,y]', a list [x, y], or a Shapely Point
-    :return: Shapely Point
+    :param target: Desired output format, either 'Point' or 'array'
+    :return: Shapely Point or numpy array
     """
     if point_input is None:
         return None
     if isinstance(point_input, Point):
+        if target == 'array':
+            return np.array([point_input.x, point_input.y])
         return point_input
     if isinstance(point_input, list) or isinstance(point_input, np.ndarray):
         if len(point_input) == 0:
             return None
         elif len(point_input) == 2 and all(isinstance(coord, (int, float)) for coord in point_input):
+            if target == 'array':
+                return np.array([point_input[0], point_input[1]])
             return Point(point_input)
         else:
             raise ValueError("List or array input must be of the form [x, y] with numeric coordinates")
+    if isinstance(point_input, float):
+        if np.isnan(point_input):
+            return None
     if isinstance(point_input, str):
+        # Remove brackets if present
+        while True:
+            if point_input.startswith("[") and point_input.endswith("]"):
+                point_input = point_input[1:-1]
+            else:
+                break
+        if len(point_input) == 0:
+            return None
 
         # Use a regular expression to extract numbers from a string
         matches = re.findall(r"[-+]?\d*\.\d+|\d+", point_input)
 
-        # Convert the extracted strings to float and create a Shapely Point
+        # Convert the extracted strings to float and create a Shapely Point or numpy array
         if len(matches) == 2:
             x, y = map(float, matches)
+            if target == 'array':
+                return np.array([x, y])
             return Point(x, y)
         else:
-            raise ValueError("Invalid point string format")
+            raise ValueError(f"Invalid point input format: {point_input}")
 
-    raise ValueError("Invalid point input format")
+    raise ValueError(f"Incompatible input: {type(point_input)}, {point_input}")
+
 
 def seconds_from_datetime(datetime):
     """
@@ -1124,7 +1144,8 @@ def add_from_coord(df):
     logger.info("Done.")
     return df
 
-def add_from_location(df, col_to, col_from, backup_existing_from_col = False):
+
+def add_from_location(df, col_to, col_from, backup_existing_from_col=False):
     """
     Add a 'from_activity' column to the DataFrame, which is the to_activity of the previous leg.
     For the first leg of each person, set 'from_activity' based on 'starts_at_home' (-> home or unspecified).
@@ -1408,15 +1429,20 @@ def estimate_length_with_slack(length1, length2, slack_factor=2, min_slack_lower
 
 
 def get_files(path: str, get_all: bool = False) -> Union[str, List[str]]:
+    path = make_path_absolute(path)
+
     # Normalize the path to handle different OS path conventions
     normalized_path = os.path.normpath(path)
 
+    # Correcting the path for glob usage
+    glob_path = os.path.join(normalized_path, '*')
+
     # Check if the provided path is a file
-    if "." in os.path.basename(normalized_path):
+    if os.path.isfile(normalized_path):
         return normalized_path
 
     # Get all files in the folder
-    files = glob.glob(os.path.join(normalized_path, '*'))
+    files = glob.glob(glob_path)
 
     if not files:
         raise FileNotFoundError(f'No files found in the folder: {normalized_path}')
@@ -1435,6 +1461,15 @@ def get_files(path: str, get_all: bool = False) -> Union[str, List[str]]:
         # Get the newest file among the remaining files
         newest_file = max(filtered_files, key=os.path.getctime)
         return newest_file
+
+
+def make_path_absolute(path):
+    """
+    Make a file or folder path absolute if it isn't.
+    """
+    if not os.path.isabs(path):
+        return os.path.join(PROJECT_ROOT, path)
+    return path
 
 
 def euclidean_distance(start: np.ndarray, end: np.ndarray) -> float:
@@ -1467,6 +1502,7 @@ def get_min_max_distance(arr):
     min_diff = min(total_sum - 2 * s for s in possible_sums)
 
     return min_diff, total_sum
+
 
 def spread_distances(distance1, distance2, iteration=0, first_step=20):
     """Increases the difference between two distances, keeping them positive."""

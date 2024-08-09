@@ -23,7 +23,7 @@ class MiDDataEnhancer(DataFrameProcessor):
         super().__init__(df, id_column)
         # self.sf = h.SlackFactors(s.SLACK_FACTORS_FILE)
 
-    def filter_home_to_home_legs(self):
+    def filter_home_to_home_legs(self):  # TODO: remove?
         """
         Filters out 'home to home' legs from the DataFrame.
         """
@@ -32,6 +32,16 @@ class MiDDataEnhancer(DataFrameProcessor):
                                  (self.df[s.ACT_TO_INTERNAL_COL] == s.ACT_HOME)
         self.df = self.df[~home_to_home_condition].reset_index(drop=True)
         logger.info(f"Filtered out 'home to home' legs. {len(self.df)} rows remaining.")
+
+    def reset_leg_ids(self):
+        """
+        Resets the leg ids to start from 1 for each person.
+        """
+        logger.info("Resetting leg ids...")
+        # Sort by person id and leg id
+        self.df.sort_values(by=[s.PERSON_ID_COL, s.LEG_NON_UNIQUE_ID_COL], inplace=True, ignore_index=True)
+        self.df[s.LEG_NON_UNIQUE_ID_COL] = self.df.groupby(s.PERSON_ID_COL).cumcount() + 1
+        logger.info("Reset leg ids.")
 
     def convert_minutes_to_seconds(self, minute_col, seconds_col):
         logger.info(f"Converting {minute_col} to seconds...")
@@ -64,6 +74,8 @@ class MiDDataEnhancer(DataFrameProcessor):
 
     def convert_kilometers_to_meters(self, km_col, m_col):
         logger.info(f"Converting {km_col} to meters...")
+        # Needed for string replacement
+        self.df[km_col] = self.df[km_col].astype(str)
         # Replace commas with dots for decimal conversion
         self.df[km_col] = self.df[km_col].str.replace(',', '.')
         self.df[km_col] = pd.to_numeric(self.df[km_col], errors='coerce')
@@ -839,118 +851,6 @@ class MiDDataEnhancer(DataFrameProcessor):
 
         logger.info("Marked mirroring main.")
 
-    # def find_home_to_main_time(self):
-    #     """
-    #     Determines the time (and distance) between home and main activity for each person in the DataFrame.
-    #     It may not look it, but this was a pain to write.
-    #     Main directly after home: Leg distance of main leg
-    #     Main directly before home: Leg distance of home leg
-    #     :return: Adds column with the distance to the DataFrame.
-    #     """
-    #
-    #     logger.info("Determining home to main activity times/distances...")
-    #
-    #     persons = self.df.groupby(s.UNIQUE_P_ID_COL)
-    #     distances = {}
-    #     times = {}
-    #     is_estimated = {}
-    #
-    #     for pid, person in persons:
-    #         # Extract the indices for main activity, mirroring main and home activities
-    #         main_activity_idx = np.where(person[s.IS_MAIN_ACTIVITY_COL])[0]  # where returns a tuple. Legs to main
-    #         mirroring_main_idx = np.where(person[s.MIRRORS_MAIN_ACTIVITY_COL])[0]  # Legs to mirrored main
-    #         home_indices = np.where(person[s.ACT_TO_INTERNAL_COL] == s.ACT_HOME)[0]  # legs to home
-    #
-    #         if main_activity_idx.size == 0:
-    #             logger.warning(f"Person {pid} has no main activity. Skipping this person.")
-    #             continue
-    #         if main_activity_idx.size > 1:  # should not happen but still works
-    #             logger.warning(f"Person {pid} has more than one main activity. Using the first one.")
-    #
-    #         if home_indices.size == 0:
-    #             logger.debug(f"Person {pid} has no home activities. Using the first activity instead.")
-    #             closest_home_idx = -1
-    #             closest_home_row = person.index[0] - 1
-    #         else:
-    #
-    #             idx_distances_to_main = np.abs(home_indices - main_activity_idx[0])
-    #             closest_to_main = np.min(idx_distances_to_main)
-    #
-    #             # If there is a mirroring main activity, calculate the distance to that as well
-    #             if not mirroring_main_idx.size == 0:
-    #                 idx_distances_to_mirroring = np.abs(home_indices - mirroring_main_idx[0])
-    #                 closest_to_mirroring = np.min(idx_distances_to_mirroring)
-    #                 if closest_to_mirroring < closest_to_main:
-    #                     main_activity_idx = mirroring_main_idx
-    #                     idx_distances_to_main = idx_distances_to_mirroring
-    #
-    #             # Determine the closest home activity by number of legs
-    #             if (person.at[person.index[0], s.FIRST_LEG_STARTS_AT_HOME_COL] == s.FIRST_LEG_STARTS_AT_HOME and
-    #                     main_activity_idx[0] < np.min(
-    #                         idx_distances_to_main)):  # This means starting home is same or closer than any other home to main
-    #                 closest_home_idx = -1
-    #                 closest_home_row = person.index[0] - 1
-    #             else:
-    #                 closest_home_idx = home_indices[np.argmin(idx_distances_to_main)]
-    #                 closest_home_row = person.index[closest_home_idx]
-    #
-    #         main_activity_row = person.index[main_activity_idx[0]]
-    #
-    #         # Calculate the distance between home and main activity
-    #         if closest_home_idx == main_activity_idx[0] or closest_home_row == main_activity_row:
-    #             logger.error(
-    #                 f"Person {pid} has a home activity marked as main activity. This should never be the case. "
-    #                 f"time/distance cannot be determined and are arbitrarily set to 1.")
-    #             home_to_main_distance = 1
-    #             home_to_main_time = 1
-    #             time_is_estimated = 1
-    #
-    #         elif closest_home_idx - main_activity_idx[0] == 1:  # Main to home
-    #             logger.debug(f"Person {pid} has a home activity directly after main. ")
-    #             home_to_main_distance = person.at[closest_home_row, s.LEG_DISTANCE_COL]
-    #             home_to_main_time = person.at[closest_home_row, s.LEG_DURATION_MINUTES_COL]
-    #             time_is_estimated = 0
-    #         elif closest_home_idx - main_activity_idx[0] == -1:  # Home to main
-    #             logger.debug(f"Person {pid} has a home activity directly before main. ")
-    #             home_to_main_distance = person.at[main_activity_row, s.LEG_DISTANCE_COL]
-    #             home_to_main_time = person.at[main_activity_row, s.LEG_DURATION_MINUTES_COL]
-    #             time_is_estimated = 0
-    #
-    #         else:
-    #             logger.debug(f"Person {pid} has a main activity and home activity more than one leg apart. "
-    #                          f"Distance will be estimated.")
-    #             # Get all legs between home and main activity (thus exclude leg towards first activity)
-    #             if closest_home_row < main_activity_row:  # Home to main
-    #                 legs = person.loc[closest_home_row + 1:main_activity_row]
-    #
-    #                 updated_legs, level = self.sf.get_all_estimated_times_with_slack(legs)
-    #                 home_to_main_time = updated_legs[f"level_{level}"].dropna().iloc[0]
-    #                 home_to_main_distance = None  # We cannot correctly determine this without an own function (yes, really)
-    #                 # and it's not needed nor worth the effort here. Also, this serves as a marker for estimated time.
-    #                 time_is_estimated = 1
-    #
-    #             else:  # Main to home
-    #                 legs = person.loc[main_activity_row + 1:closest_home_row]
-    #
-    #                 updated_legs, level = self.sf.get_all_estimated_times_with_slack(legs)
-    #                 home_to_main_time = updated_legs[f"level_{level}"].dropna().iloc[0]
-    #                 home_to_main_distance = None
-    #                 time_is_estimated = 1
-    #
-    #         distances[pid] = home_to_main_distance
-    #         times[pid] = home_to_main_time
-    #         is_estimated[pid] = time_is_estimated
-    #
-    #     self.df[s.HOME_TO_MAIN_DIST_COL] = self.df[s.UNIQUE_P_ID_COL].map(distances)
-    #     self.df[s.HOME_TO_MAIN_TIME_COL] = self.df[s.UNIQUE_P_ID_COL].map(times)
-    #     self.df[s.HOME_TO_MAIN_TIME_ESTIMATED_COL] = self.df[s.UNIQUE_P_ID_COL].map(is_estimated)
-    #
-    #     # Set the distance to NaN for all rows except the first one for each person
-    #     # mask = self.df.groupby(UNIQUE_P_ID_COL).cumcount() == 0
-    #     # self.df['HOME_TO_MAIN_DISTANCE'] = self.df['HOME_TO_MAIN_DISTANCE'].where(mask, np.nan)
-    #
-    #     logger.info("Determining home to main activity distances/times completed.")
-
     def find_home_to_main_time_and_distance(self):
         """
         Determines the time (and distance) between home and main activity for each person in the DataFrame.
@@ -982,6 +882,9 @@ class MiDDataEnhancer(DataFrameProcessor):
                     logger.debug(f"Person {pid} has no activities. Skipping.")
                     continue
                 elif rows > 1:
+                    if home_indices.size == len(person):
+                        logger.info(f"Person {pid} has several legs, but only home activities. Skipping.")
+                        continue
                     raise ValueError(f"Person {pid} has activities, but no main activity.")
                 else:
                     raise ValueError(f"Person {pid} has {rows} rows. This should be impossible.")
@@ -1099,6 +1002,10 @@ class MiDDataEnhancer(DataFrameProcessor):
             try:
                 main_activity_idx = person[person[s.IS_MAIN_ACTIVITY_COL] == 1].index[0]
             except IndexError:
+                if person[s.ACT_TO_INTERNAL_COL].eq(s.ACT_HOME).all():
+                    # If all activities are home, there is no main activity
+                    logger.debug(f"Person {pid} has only home activities. Skipping...")
+                    continue
                 logger.warning(f"Person {pid} has no main activity for unknown reasons. Skipping this person.")
                 continue
 
@@ -1242,8 +1149,8 @@ class MiDDataEnhancer(DataFrameProcessor):
         def find_main_activity(person):
             is_main_activity_series = pd.Series(0, index=person.index)  # Initialize all values to 0
 
-            #TODO: REMOVE
-            if person[s.UNIQUE_P_ID_COL].iloc[0] == "89847850_1355_89847854":
+            # TODO: REMOVE
+            if person[s.UNIQUE_P_ID_COL].iloc[0] == "69808010_817_69808012":
                 print("HI")
 
             # Filter out home activities (home must not be the main activity)
@@ -1286,7 +1193,8 @@ class MiDDataEnhancer(DataFrameProcessor):
             # If the person has no work or education activity, the main activity is the longest activity
             if group[act_dur_seconds_col].isna().all():
                 # If all activities have no duration, pick the middle one
-                main_act_idx = group.index[len(group) // 2]  # Integer division (within the filtered group so we don't pick home)
+                main_act_idx = group.index[
+                    len(group) // 2]  # Integer division (within the filtered group so we don't pick home)
                 is_main_activity_series[main_act_idx] = 1
                 assert is_main_activity_series.sum() == 1
                 logger.debug(

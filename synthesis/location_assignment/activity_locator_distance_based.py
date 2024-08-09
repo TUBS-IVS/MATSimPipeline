@@ -422,7 +422,9 @@ class AdvancedPetreAlgorithm:
 
     def run(self):
         placed_dict = {}
-        for person_id, segments in tqdm(self.segmented_dict.items(), desc="Processing segments"):
+        for person_id, segments in tqdm(self.segmented_dict.items(), desc="Processing persons"):
+            if person_id == "10076300_11628_10076301":
+                print("fghfg")
             placed_dict[person_id] = []
             for segment in segments:
                 placed_segment, _ = self.solve_segment(segment, number_of_branches=self.number_of_branches,
@@ -440,6 +442,9 @@ class AdvancedPetreAlgorithm:
         if len(segment) == 0:
             raise ValueError("No legs in segment.")
         elif len(segment) == 1:
+            if not (segment[0]['from_location'].size > 0 and segment[0][
+                'to_location'].size > 0):
+                print("gdfgd")
             assert segment[0]['from_location'].size > 0 and segment[0][
                 'to_location'].size > 0, "Both start and end locations must be known for a single leg."
             return segment, 0
@@ -544,6 +549,7 @@ class AdvancedPetreAlgorithm:
             branch_scores = []
             for i in range(len(selected_coords)):
                 subsegment1[-1]['to_location'] = selected_coords[i]
+                subsegment1[-1]['to_act_identifier'] = selected_identifiers[i]
                 subsegment2[0]['from_location'] = selected_coords[i]
 
                 located_seg1, score1 = self.solve_segment(subsegment1, number_of_branches, max_candidates,
@@ -835,7 +841,7 @@ class SimpleLelkeAlgorithm:
         self.c_i = CircleIntersection(target_locations)
 
     def run(self):
-        for person_id, segments in tqdm(self.segmented_dict.items(), desc="Processing segments"):
+        for person_id, segments in tqdm(self.segmented_dict.items(), desc="Processing persons"):
             for segment in segments:
                 self.simple_locate_segment(segment)  # In-place
         return segmented_dict
@@ -934,15 +940,14 @@ class SimpleMainLocationAlgorithm:
     """
     Since the algorithm is targeted for solving just the main location, the "segment" is usually the whole trip.
     """
-    def __init__(self, target_locations: TargetLocations, segmented_dict: Dict[str, list[list[dict[str, Any]]]]):
+    def __init__(self, target_locations: TargetLocations, legs_dict: Dict[str, list[dict[str, Any]]]):
         self.target_locations = target_locations
-        self.segmented_dict = segmented_dict
+        self.legs_dict = legs_dict
 
     def run(self):
-        for person_id, segments in tqdm(self.segmented_dict.items(), desc="Processing segments"):
-            for segment in segments:
-                self.locate_main(segment)  # In-place
-        return segmented_dict
+        for person_id, person_legs in tqdm(self.legs_dict.items(), desc="Processing persons"):
+            self.locate_main(person_legs)  # In-place
+        return self.legs_dict
 
     def locate_main(self, person_legs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Gets a person's main activity and locates it.
@@ -1089,9 +1094,9 @@ class EvaluationFunction:
             logger.warning("Negative scores detected. Setting them to zero.")
             sscores = np.maximum(0.001, sscores)
             sscores = sscores / np.sum(sscores)
-        # if sum(sscores) != 1:
-        #     logger.warning("Scores do not sum to 1. Normalizing.")
-        #     sscores = sscores / sum(sscores)
+        if not np.isclose(np.sum(sscores), 1):
+            logger.warning("Scores do not sum to 1. Renormalizing.")
+            sscores = sscores / sum(sscores)
 
         chosen_index = np.random.choice(len(sscores), p=sscores)
 
@@ -1363,6 +1368,10 @@ def prepare_population_df_for_location_assignment(df, filter_max_distance=None, 
     # Split persons with no leg ID into a separate DataFrame
     no_leg_df = df[df[s.LEG_ID_COL].isna()].copy()
     df = df.dropna(subset=[s.LEG_ID_COL])
+    # TEMP: Remove persons that have no leg 1 (it has by accident been removed by enhancer)
+    # TODO: Remove lines below again
+    mobile_persons_with_leg_1 = df[df[s.UNIQUE_LEG_ID_COL].str.contains("_1.0")][s.UNIQUE_P_ID_COL].unique()
+    df = df[df[s.UNIQUE_P_ID_COL].isin(mobile_persons_with_leg_1)]
 
     logger.debug(f"People with no legs: {no_leg_df.shape[0]}")
 
@@ -1391,7 +1400,7 @@ def prepare_population_df_for_location_assignment(df, filter_max_distance=None, 
     # Add random home locations for each person
     # TODO: write function that properly assigns homes (very similar to now, from popsim)
     df[s.HOME_LOC_COL] = None
-    for person_id, group in df.groupby(s.PERSON_ID_COL):
+    for person_id, group in df.groupby(s.UNIQUE_P_ID_COL):
         home_location = generate_random_location_within_hanover()
         for i in group.index:
             df.at[i, s.HOME_LOC_COL] = home_location
@@ -1794,7 +1803,7 @@ def write_hoerl_df_to_big_df(hoerl_df, big_df):  # TODO: write main stuff (somew
     return merged_df
 
 
-def write_placement_results_dict_to_big_df(placement_results_dict, big_df):  # TODO: finish
+def write_placement_results_dict_to_population_df(placement_results_dict, population_df):  # TODO: finish
     """Writes the placement results from the dictionary to the big DataFrame."""
     records = []
     for person_id, segments in placement_results_dict.items():
@@ -1803,10 +1812,20 @@ def write_placement_results_dict_to_big_df(placement_results_dict, big_df):  # T
                 records.append(leg)
 
     data_df = pd.DataFrame(records)
-    # Merge without suffixes
-    merged_df = big_df.merge(
-        data_df[[s.UNIQUE_LEG_ID_COL, 'from_location', 'to_location', 'to_act_identifier', 'to_act_name']],
-        on=s.UNIQUE_LEG_ID_COL, how='left')
+
+    # Check columns
+    mandatory_columns = [s.UNIQUE_LEG_ID_COL, 'from_location', 'to_location', 'to_act_identifier']
+    optional_columns = ['to_act_name', 'to_act_potential']
+
+    for col in mandatory_columns:
+        if col not in data_df.columns:
+            raise ValueError(f"Mandatory column '{col}' is missing in data_df.")
+
+    existing_optional_columns = [col for col in optional_columns if col in data_df.columns]
+    existing_columns = mandatory_columns + existing_optional_columns
+
+    # Perform the merge with the existing columns
+    merged_df = population_df.merge(data_df[existing_columns], on=s.UNIQUE_LEG_ID_COL, how='left')
 
     # Combine columns to prioritize non-NaN values from data_df
     merged_df['from_location'] = merged_df['from_location_x'].combine_first(merged_df['from_location_y'])
@@ -1870,7 +1889,7 @@ if __name__ == '__main__':
     # result = myhoerl.process(reformatted_locations_data, segmented_dict)
 
     # df = update_dataframe(df, segmented_dict) DONT USE
-    df = write_placement_results_dict_to_big_df(all_dict, df)
+    df = write_placement_results_dict_to_population_df(all_dict, df)
 
     segmented_dict = flatten_segmented_dict(all_dict)
     # for person_id, segment in segmented_dict.items():

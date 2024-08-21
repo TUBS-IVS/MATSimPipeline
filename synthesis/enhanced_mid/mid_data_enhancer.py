@@ -3,8 +3,9 @@ from collections import deque
 
 import numpy as np
 import pandas as pd
-# from tqdm import tqdm
 from os import path
+
+from tqdm import tqdm
 
 from utils import settings as s, pipeline_setup, helpers as h
 from utils.data_frame_processor import DataFrameProcessor
@@ -334,8 +335,8 @@ class MiDDataEnhancer(DataFrameProcessor):
         Corrects the times in the dataframe for each person's legs.
         Identifies and fixes any NaN times by finding similar persons' activities.
         """
-
-        for person in self.df[s.UNIQUE_P_ID_COL].unique():
+        # use tdqm for progress bar
+        for person in tqdm(self.df[s.UNIQUE_P_ID_COL].unique(), desc="Correcting times"):
             person_legs = self.df[self.df[s.UNIQUE_P_ID_COL] == person]
 
             # Skip person with no mobility

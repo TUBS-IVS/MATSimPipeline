@@ -1841,74 +1841,74 @@ def write_placement_results_dict_to_population_df(placement_results_dict, popula
 
 
 
-
-if __name__ == '__main__':
-    os.chdir(pipeline_setup.PROJECT_ROOT)
-    # with open('locations_data_with_potentials.pkl', 'rb') as file:
-    #     locations_data = pickle.load(file)
-    # reformatted_locations_data = reformat_locations(locations_data)
-    json_data_path = r"C:\Users\petre\Documents\GitHub\MATSimPipeline\playground\json_locations"
-    # MyTargetLocations = TargetLocations(json_data_path)
-    #
-    df = h.read_csv(h.get_files(s.ENHANCED_MID_FOLDER))
-    df, _ = prepare_population_df_for_location_assignment(df, number_of_persons=100, filter_max_distance=30000)
-    logger.debug("df prepared.")
-    dictu = populate_legs_dict_from_df(df)
-    logger.debug("dict populated.")
-    with_main_dict = locate_main_activities(dictu)
-    segmented_dict = segment_legs(with_main_dict)
-    logger.debug("dict segmented.")
-    pprint.pprint(segmented_dict)
-    pickle.dump(segmented_dict,
-                open(r'C:\Users\petre\Documents\GitHub\MATSimPipeline\data\segmented_dict_ohne_pendler.pkl', 'wb'))
-    segmented_dict = pickle.load(
-        open(r'C:\Users\petre\Documents\GitHub\MATSimPipeline\data\segmented_dict_ohne_pendler.pkl', 'rb'))
-    start_time = time.time()
-    # Advanced petre locator # TODO: REMOVE commented out
-    # all_dict = {}
-    # for person_id, segments in segmented_dict.items():
-    #     all_dict[person_id] = []  # Initialize an empty list for each person_id
-    #     for segment in segments:
-    #         placed_segment, _ = solve_segment(segment, number_of_branches=100, max_candidates=None,
-    #                                           anchor_strategy="start")
-    #         with_from_segment = add_from_locations(placed_segment)
-    #         with_all_segment = insert_placed_distances(with_from_segment)
-    #         all_dict[person_id].append(with_all_segment)
-    # Greedy petre locator
-    # for person_id, segments in segmented_dict.items():
-    #     for segment in segments:
-    #         segment = greedy_locate_segment(segment)
-    #         segment = insert_placed_distances(segment)  # Just for analysis
-
-    # Simple locator
-    # for person_id, person_legs in dictu.items():
-    #     person_legs = simple_locate_segment(person_legs)
-    #     person_legs = insert_placed_distances(person_legs)
-
-    # (slightly modified) Hörl locator
-    # result = myhoerl.process(reformatted_locations_data, segmented_dict)
-
-    # df = update_dataframe(df, segmented_dict) DONT USE
-    df = write_placement_results_dict_to_population_df(all_dict, df)
-
-    segmented_dict = flatten_segmented_dict(all_dict)
-    # for person_id, segment in segmented_dict.items():
-    #     logger.debug(f"Person ID: {person_id}")
-    #     for leg in segment:
-    #         logger.debug(leg)
-
-    # assert not df['to_location'].isnull().any(), "Some to_locations are missing."
-    #
-    df.to_csv(os.path.join(pipeline_setup.OUTPUT_DIR, 'located_activities.csv'), index=False)
-
-    summarize_placement_results(segmented_dict)
-
-    stats_tracker.print_stats()
-
-    end_time = time.time()
-    logger.info(f"Execution time: {end_time - start_time} seconds.")
-
-    logger.debug("done")
+#
+# if __name__ == '__main__':
+#     os.chdir(pipeline_setup.PROJECT_ROOT)
+#     # with open('locations_data_with_potentials.pkl', 'rb') as file:
+#     #     locations_data = pickle.load(file)
+#     # reformatted_locations_data = reformat_locations(locations_data)
+#     json_data_path = r"C:\Users\petre\Documents\GitHub\MATSimPipeline\playground\json_locations"
+#     # MyTargetLocations = TargetLocations(json_data_path)
+#     #
+#     df = h.read_csv(h.get_files(s.ENHANCED_MID_FOLDER))
+#     df, _ = prepare_population_df_for_location_assignment(df, number_of_persons=100, filter_max_distance=30000)
+#     logger.debug("df prepared.")
+#     dictu = populate_legs_dict_from_df(df)
+#     logger.debug("dict populated.")
+#     with_main_dict = locate_main_activities(dictu)
+#     segmented_dict = segment_legs(with_main_dict)
+#     logger.debug("dict segmented.")
+#     pprint.pprint(segmented_dict)
+#     pickle.dump(segmented_dict,
+#                 open(r'C:\Users\petre\Documents\GitHub\MATSimPipeline\data\segmented_dict_ohne_pendler.pkl', 'wb'))
+#     segmented_dict = pickle.load(
+#         open(r'C:\Users\petre\Documents\GitHub\MATSimPipeline\data\segmented_dict_ohne_pendler.pkl', 'rb'))
+#     start_time = time.time()
+#     # Advanced petre locator # TODO: REMOVE commented out
+#     # all_dict = {}
+#     # for person_id, segments in segmented_dict.items():
+#     #     all_dict[person_id] = []  # Initialize an empty list for each person_id
+#     #     for segment in segments:
+#     #         placed_segment, _ = solve_segment(segment, number_of_branches=100, max_candidates=None,
+#     #                                           anchor_strategy="start")
+#     #         with_from_segment = add_from_locations(placed_segment)
+#     #         with_all_segment = insert_placed_distances(with_from_segment)
+#     #         all_dict[person_id].append(with_all_segment)
+#     # Greedy petre locator
+#     # for person_id, segments in segmented_dict.items():
+#     #     for segment in segments:
+#     #         segment = greedy_locate_segment(segment)
+#     #         segment = insert_placed_distances(segment)  # Just for analysis
+#
+#     # Simple locator
+#     # for person_id, person_legs in dictu.items():
+#     #     person_legs = simple_locate_segment(person_legs)
+#     #     person_legs = insert_placed_distances(person_legs)
+#
+#     # (slightly modified) Hörl locator
+#     # result = myhoerl.process(reformatted_locations_data, segmented_dict)
+#
+#     # df = update_dataframe(df, segmented_dict) DONT USE
+#     df = write_placement_results_dict_to_population_df(all_dict, df)
+#
+#     segmented_dict = flatten_segmented_dict(all_dict)
+#     # for person_id, segment in segmented_dict.items():
+#     #     logger.debug(f"Person ID: {person_id}")
+#     #     for leg in segment:
+#     #         logger.debug(leg)
+#
+#     # assert not df['to_location'].isnull().any(), "Some to_locations are missing."
+#     #
+#     df.to_csv(os.path.join(pipeline_setup.OUTPUT_DIR, 'located_activities.csv'), index=False)
+#
+#     summarize_placement_results(segmented_dict)
+#
+#     stats_tracker.print_stats()
+#
+#     end_time = time.time()
+#     logger.info(f"Execution time: {end_time - start_time} seconds.")
+#
+#     logger.debug("done")
 #
 # else:
 #     os.chdir(pipeline_setup.PROJECT_ROOT)

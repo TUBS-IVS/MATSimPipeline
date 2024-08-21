@@ -23,7 +23,7 @@ def enhance_travel_survey(input_hh_folder, input_persons_folder, input_trips_fol
     logger.info(f"Starting enhance_travel_survey module")
 
     output_dir = h.make_path_absolute(output_dir)
-    os.mkdir(output_dir)
+    # os.mkdir(output_dir)
 
     # Create unique leg ids in the leg input file if necessary
     # df = h.read_csv(h.get_files(s.MiD_TRIPS_FOLDER))

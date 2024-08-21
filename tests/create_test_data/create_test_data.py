@@ -44,9 +44,9 @@ def create_test_data(root, test_data_dir, hh_dir, person_dir, leg_dir):
         difficult_hhs_one_leg_person)
 
     # Sample households
-    difficult_hh_sample = np.random.choice(difficult_hhs, 1000, replace=False)
+    difficult_hh_sample = np.random.choice(difficult_hhs, 100, replace=False)
     remaining_hhs = set(hh_df[s.HOUSEHOLD_MID_ID_COL]) - set(difficult_hhs)
-    random_hh_sample = np.random.choice(list(remaining_hhs), 1000, replace=False)
+    random_hh_sample = np.random.choice(list(remaining_hhs), 100, replace=False)
 
     sampled_hhs = np.concatenate([difficult_hh_sample, random_hh_sample])
 
@@ -66,7 +66,7 @@ def create_test_data(root, test_data_dir, hh_dir, person_dir, leg_dir):
 root = pipeline_setup.PROJECT_ROOT
 create_test_data(
     root=root,
-    test_data_dir='tests/',
+    test_data_dir='tests/test_data/',
     hh_dir=s.MiD_HH_FOLDER,
     person_dir=s.MiD_PERSONS_FOLDER,
     leg_dir=s.MiD_TRIPS_FOLDER

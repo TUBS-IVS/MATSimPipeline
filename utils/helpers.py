@@ -124,6 +124,9 @@ def convert_to_point(point_input, target='Point'):
                 return np.array([point_input[0], point_input[1]])
             return Point(point_input)
         else:
+            # if point_input.size == 2:
+            #     # Try to unpack seemingly nested arrays
+            #     return convert_to_point(point_input[0], target)
             raise ValueError("List or array input must be of the form [x, y] with numeric coordinates")
     if isinstance(point_input, float):
         if np.isnan(point_input):

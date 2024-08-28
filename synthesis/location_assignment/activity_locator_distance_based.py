@@ -21,6 +21,7 @@ from utils.stats_tracker import stats_tracker
 
 logger = logging.getLogger(__name__)
 
+#TODO: Currently, all outputs ar arrays even if not necessary. Maybe change to single values.
 
 # TODO: place Pendler (persons, definable, that exceed some max trip dist)
 # either near Bahnhof (pt) or according to landuse (car)
@@ -208,37 +209,44 @@ class TargetLocations:
         logger.debug(f"Query Indices: {indices}")
 
         # Get the identifiers, coordinates, and distances for the nearest neighbors
-        candidate_identifiers = np.array(self.data[type]["identifiers"])[indices]
-        candidate_names = np.array(self.data[type]["names"])[indices]
-        candidate_coordinates = np.array(self.data[type]["coordinates"])[indices]
-        candidate_potentials = np.array(self.data[type]["potentials"])[indices]
+        candidate_identifiers = np.atleast_1d(np.array(self.data[type]["identifiers"])[indices].squeeze())
+        candidate_names = np.atleast_1d(np.array(self.data[type]["names"])[indices].squeeze())
+        candidate_coordinates = np.atleast_1d(np.array(self.data[type]["coordinates"])[indices].squeeze())
+        candidate_potentials = np.atleast_1d(np.array(self.data[type]["potentials"])[indices].squeeze())
+
+        # Reshape to 2D arrays so everything is consistent and nicely below each other
+        candidate_identifiers = candidate_identifiers.reshape(-1, 1)
+        candidate_names = candidate_names.reshape(-1, 1)
+        candidate_potentials = candidate_potentials.reshape(-1, 1)
+        # candidate_coordinates = candidate_coordinates.reshape(-1, 2)  # Coordinates stay as 2D
 
         return candidate_identifiers, candidate_names, candidate_coordinates, candidate_potentials, candidate_distances
 
-    def query_within_radius(self, act_type: str, location: np.ndarray, radius: float):
-        """
-        Find the activity locations within a given radius of a location and type.
-        :param act_type: The activity category to query.
-        :param location: A 1D numpy array representing the location to query (coordinates [1.5, 2.5]).
-        :param radius: The maximum distance from the location to search for candidates.
-        :return: A tuple containing four numpy arrays: identifiers, coordinates, distances, and remaining potentials of the nearest candidates.
-        """
-        # Ensure location is a 2D array with a single location
-        location = location.reshape(1, -1)
-
-        # Query the KDTree for locations within radius
-        candidate_indices = self.indices[act_type].query_radius(location, radius)
-        logger.debug(f"Query Indices: {candidate_indices}")
-
-        # Get the identifiers, coordinates, and distances for locations within the radius
-        candidate_identifiers = np.array(self.data[act_type]["identifiers"])[candidate_indices[0]]
-        candidate_names = np.array(self.data[act_type]["names"])[candidate_indices[0]]
-        candidate_coordinates = np.array(self.data[act_type]["coordinates"])[candidate_indices[0]]
-        candidate_potentials = np.array(self.data[act_type]["potentials"])[candidate_indices[0]]
-        # candidate_distances = np.linalg.norm(candidate_coordinates - location, axis=1)
-        candidate_distances = None
-
-        return candidate_identifiers, candidate_names, candidate_coordinates, candidate_potentials, candidate_distances
+    # deprecated
+    # def query_within_radius(self, act_type: str, location: np.ndarray, radius: float):
+    #     """
+    #     Find the activity locations within a given radius of a location and type.
+    #     :param act_type: The activity category to query.
+    #     :param location: A 1D numpy array representing the location to query (coordinates [1.5, 2.5]).
+    #     :param radius: The maximum distance from the location to search for candidates.
+    #     :return: A tuple containing four numpy arrays: identifiers, coordinates, distances, and remaining potentials of the nearest candidates.
+    #     """
+    #     # Ensure location is a 2D array with a single location
+    #     location = location.reshape(1, -1)
+    #
+    #     # Query the KDTree for locations within radius
+    #     candidate_indices = self.indices[act_type].query_radius(location, radius)
+    #     logger.debug(f"Query Indices: {candidate_indices}")
+    #
+    #     # Get the identifiers, coordinates, and distances for locations within the radius
+    #     candidate_identifiers = np.array(self.data[act_type]["identifiers"])[candidate_indices[0]]
+    #     candidate_names = np.array(self.data[act_type]["names"])[candidate_indices[0]]
+    #     candidate_coordinates = np.array(self.data[act_type]["coordinates"])[candidate_indices[0]]
+    #     candidate_potentials = np.array(self.data[act_type]["potentials"])[candidate_indices[0]]
+    #     # candidate_distances = np.linalg.norm(candidate_coordinates - location, axis=1)
+    #     candidate_distances = None
+    #
+    #     return candidate_identifiers, candidate_names, candidate_coordinates, candidate_potentials, candidate_distances
 
     def query_within_ring(self, act_type: str, location: np.ndarray, radius1: float, radius2: float) -> Tuple[
         np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -272,11 +280,17 @@ class TargetLocations:
             return None
 
         # Get the identifiers, coordinates, and distances for locations within the annulus
-        candidate_identifiers = np.array(self.data[act_type]["identifiers"])[annulus_indices]
-        candidate_names = np.array(self.data[act_type]["names"])[annulus_indices]
-        candidate_coordinates = np.array(self.data[act_type]["coordinates"])[annulus_indices]
-        candidate_potentials = np.array(self.data[act_type]["potentials"])[annulus_indices]
+        candidate_identifiers = np.atleast_1d(np.array(self.data[act_type]["identifiers"])[annulus_indices].squeeze())
+        candidate_names = np.atleast_1d(np.array(self.data[act_type]["names"])[annulus_indices].squeeze())
+        candidate_coordinates = np.atleast_1d(np.array(self.data[act_type]["coordinates"])[annulus_indices].squeeze())
+        candidate_potentials = np.atleast_1d(np.array(self.data[act_type]["potentials"])[annulus_indices].squeeze())
         candidate_distances = None
+
+        # Reshape to 2D arrays so everything is consistent and nicely below each other
+        candidate_identifiers = candidate_identifiers.reshape(-1, 1)
+        candidate_names = candidate_names.reshape(-1, 1)
+        candidate_potentials = candidate_potentials.reshape(-1, 1)
+        # candidate_coordinates = candidate_coordinates.reshape(-1, 2)  # Coordinates stay as 2D
 
         return candidate_identifiers, candidate_names, candidate_coordinates, candidate_potentials, candidate_distances
 
@@ -328,9 +342,14 @@ class TargetLocations:
             overlapping_rings_indices = random.sample(overlapping_rings_indices, max_number_of_candidates)
 
         # Get the identifiers, coordinates, and distances for locations within the annulus
-        candidate_identifiers = np.array(self.data[act_type]["identifiers"])[overlapping_rings_indices]
-        candidate_coordinates = np.array(self.data[act_type]["coordinates"])[overlapping_rings_indices]
-        candidate_potentials = np.array(self.data[act_type]["potentials"])[overlapping_rings_indices]
+        candidate_identifiers = np.atleast_1d(np.array(self.data[act_type]["identifiers"])[overlapping_rings_indices].squeeze())
+        candidate_coordinates = np.atleast_1d(np.array(self.data[act_type]["coordinates"])[overlapping_rings_indices].squeeze())
+        candidate_potentials = np.atleast_1d(np.array(self.data[act_type]["potentials"])[overlapping_rings_indices].squeeze())
+
+        # Reshape to 2D arrays so everything is consistent and nicely below each other
+        candidate_identifiers = candidate_identifiers.reshape(-1, 1)
+        candidate_potentials = candidate_potentials.reshape(-1, 1)
+        # candidate_coordinates = candidate_coordinates.reshape(-1, 2)  # Coordinates stay as 2D
 
         return candidate_identifiers, candidate_coordinates, candidate_potentials
 
@@ -423,8 +442,6 @@ class AdvancedPetreAlgorithm:
     def run(self):
         placed_dict = {}
         for person_id, segments in tqdm(self.segmented_dict.items(), desc="Processing persons"):
-            if person_id == "10076300_11628_10076301":
-                print("fghfg")
             placed_dict[person_id] = []
             for segment in segments:
                 placed_segment, _ = self.solve_segment(segment, number_of_branches=self.number_of_branches,
@@ -434,7 +451,7 @@ class AdvancedPetreAlgorithm:
         return placed_dict
 
     def solve_segment(self, in_segment, number_of_branches=1, max_candidates=None, anchor_strategy="lower_middle"):
-        """At each level, find the best n locations, solve n*l subproblems, and choose the best solution.
+        """At each level, find the best n locations, solve subproblems, and choose the best solution.
         -Solve the highest current level with n candidates
         -Place their locations and resegment (split) the segment
         -Feed the new segments back into the solver"""
@@ -457,9 +474,9 @@ class AdvancedPetreAlgorithm:
             segment[0]['to_location'] = act_coord
             segment[1]['from_location'] = act_coord
             segment[0]['to_act_identifier'] = act_identifier
-            segment[0]['to_act_name'] = act_name
-            segment[0]['to_act_cap'] = act_cap
-            segment[0]['to_act_score'] = act_score
+            # segment[0]['to_act_name'] = act_name
+            # segment[0]['to_act_cap'] = act_cap
+            # segment[0]['to_act_score'] = act_score
             return segment, act_score
 
         else:
@@ -549,7 +566,7 @@ class AdvancedPetreAlgorithm:
             branch_scores = []
             for i in range(len(selected_coords)):
                 subsegment1[-1]['to_location'] = selected_coords[i]
-                subsegment1[-1]['to_act_identifier'] = selected_identifiers[i]
+                subsegment1[-1]['to_act_identifier'] = np.array(selected_identifiers[i])
                 subsegment2[0]['from_location'] = selected_coords[i]
 
                 located_seg1, score1 = self.solve_segment(subsegment1, number_of_branches, max_candidates,
@@ -730,9 +747,9 @@ class WeirdPetreAlgorithm:
             segment[0]['to_location'] = act_coord
             segment[-1]['from_location'] = act_coord
             segment[0]['to_act_identifier'] = act_identifier
-            segment[0]['to_act_name'] = act_name
-            segment[0]['to_act_cap'] = act_cap
-            segment[0]['to_act_score'] = act_score
+            # segment[0]['to_act_name'] = act_name
+            # segment[0]['to_act_cap'] = act_cap
+            # segment[0]['to_act_score'] = act_score
             return segment
         else:
             logger.debug(f"Greedy locating. Segment has {len(segment)} legs.")
@@ -844,7 +861,7 @@ class SimpleLelkeAlgorithm:
         for person_id, segments in tqdm(self.segmented_dict.items(), desc="Processing persons"):
             for segment in segments:
                 self.simple_locate_segment(segment)  # In-place
-        return segmented_dict
+        return self.segmented_dict
 
     def simple_locate_segment(self, person_legs):
         """Assumes start and end locations of segment are identical."""
@@ -1047,9 +1064,11 @@ class EvaluationFunction:
         else:
             raise ValueError("Invalid selection strategy. Use 'monte_carlo' or 'top_n'.")
 
-        selected_candidates = tuple(arr[chosen_indices] if arr is not None else None for arr in candidates)
+        selected_candidates = tuple(
+            np.atleast_1d(arr[chosen_indices].squeeze()) if arr is not None else None for arr in candidates
+        )
 
-        return selected_candidates, scores[chosen_indices]
+        return selected_candidates, np.atleast_1d(scores[chosen_indices].squeeze())
 
     @staticmethod
     def evaluate_candidates(potentials: np.ndarray = None, distances: np.ndarray = None,
@@ -1125,7 +1144,9 @@ class CircleIntersection:
 
         if intersect2 is not None:
             candidates2 = self.target_locations.query_closest(type, intersect2, num_candidates)
-            combined_candidates = tuple(np.concatenate((arr1, arr2)) for arr1, arr2 in zip(candidates1, candidates2))
+            combined_candidates = tuple(
+                np.vstack((np.atleast_1d(arr1), np.atleast_1d(arr2))) for arr1, arr2 in zip(candidates1, candidates2))
+
         else:
             combined_candidates = candidates1
 
@@ -1216,7 +1237,7 @@ class CircleIntersection:
                                               distance_start_to_act: float, distance_act_to_end: float,
                                               num_candidates: int):
         """Place a single activity at one of the closest locations."""
-
+        # TODO: Maybe depreciate returning potential, name and score
         # Home locations aren't among the targets and are for now replaced by the start location
         if act_type == s.ACT_HOME:
             logger.info(
@@ -1827,15 +1848,30 @@ def write_placement_results_dict_to_population_df(placement_results_dict, popula
     # Perform the merge with the existing columns
     merged_df = population_df.merge(data_df[existing_columns], on=s.UNIQUE_LEG_ID_COL, how='left')
 
-    # Combine columns to prioritize non-NaN values from data_df
-    merged_df['from_location'] = merged_df['from_location_x'].combine_first(merged_df['from_location_y'])
-    merged_df['to_location'] = merged_df['to_location_x'].combine_first(merged_df['to_location_y'])
-    # merged_df['to_act_identifier'] = merged_df['to_act_identifier_y'].combine_first(merged_df['to_act_identifier_x'])
-    # merged_df['to_act_name'] = merged_df['to_act_name_y'].combine_first(merged_df['to_act_name_x'])
-
-    # Drop the temporary columns
+    # Combine columns to prioritize non-NaN values from data_df (_x is the original column, _y is the new one)
+    # From and to location are always expected to be present (even before placement, there will be home locations)
+    merged_df['from_location'] = merged_df['from_location_y'].combine_first(merged_df['from_location_x'])
+    merged_df['to_location'] = merged_df['to_location_y'].combine_first(merged_df['to_location_x'])
     merged_df = merged_df.drop(columns=['from_location_x', 'from_location_y', 'to_location_x', 'to_location_y'])
 
+    try:
+        merged_df['to_act_identifier'] = merged_df['to_act_identifier_y'].combine_first(merged_df['to_act_identifier_x'])
+        merged_df = merged_df.drop(columns=['to_act_identifier_x', 'to_act_identifier_y'])
+    except KeyError:
+        pass
+    try:
+        merged_df['to_act_name'] = merged_df['to_act_name_y'].combine_first(merged_df['to_act_name_x'])
+        merged_df = merged_df.drop(columns=['to_act_name_x', 'to_act_name_y'])
+    except KeyError:
+        pass
+    try:
+        merged_df['to_act_potential'] = merged_df['to_act_potential_y'].combine_first(merged_df['to_act_potential_x'])
+        merged_df = merged_df.drop(columns=['to_act_potential_x', 'to_act_potential_y'])
+    except KeyError:
+        pass
+
+    # Make sure no merge postfixes are left
+    assert not any([col.endswith('_x') or col.endswith('_y') for col in merged_df.columns]), "Postfixes left."
     return merged_df
 
 

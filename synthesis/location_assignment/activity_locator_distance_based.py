@@ -28,7 +28,8 @@ logger = logging.getLogger(__name__)
 
 def place_commuter():
     """
-    Place commuters near a Bahnhof or according to land use.
+    Place commuters (defined by a matrix and the home-main distance) near a train station or according to land use.
+    Run this before the main activity locator (so likely before anything else).
     """
     raise NotImplementedError
 
@@ -552,6 +553,21 @@ class AdvancedPetreAlgorithm:
 
                 local_scores = EvaluationFunction.evaluate_candidates(candidate_potentials, None,
                                                                       len(candidate_coordinates))
+
+            # >Randomly< sample down to number_of_branches if there are too many candidates with the same score
+            # This creates a roughly equal spacial distribution of candidates
+            if len(local_scores) > number_of_branches:
+                # Calculate the index of the (number_of_branches-1)-highest score (partition is ascending)
+                k = len(local_scores) - number_of_branches
+                kth_highest_value = np.partition(local_scores, k)[k]
+
+                highest_value = np.max(local_scores)
+
+                if np.isclose(highest_value, kth_highest_value):
+                    selected_indices = np.random.choice(len(local_scores), number_of_branches, replace=False)
+                    candidates = candidate_identifiers[selected_indices], candidate_coordinates[selected_indices], \
+                                         candidate_potentials[selected_indices]
+                    local_scores = local_scores[selected_indices]
 
             # Select the n best candidates
             selected_candidates, scores = EvaluationFunction.select_candidates(candidates, local_scores,

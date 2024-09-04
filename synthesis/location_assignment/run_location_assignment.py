@@ -8,6 +8,7 @@ from utils import pipeline_setup
 from utils.logger import logging
 from synthesis.location_assignment import activity_locator_distance_based as al
 from synthesis.location_assignment import myhoerl
+from utils.stats_tracker import stats_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,7 @@ def run_location_assignment():
     """Runs the location assignment algorithm(s) on the given population and locations CSV files."""
     population_df = h.read_csv(h.get_files(r"data/mid/enhanced"))
     locations_json_path = r"playground/reformatted_data2.json"
-    algorithms_to_run = ['main', 'advanced_petre']  # prepend "load_" to load intermediate results
+    algorithms_to_run = ['load_main', 'advanced_petre']  # prepend "load_" to load intermediate results
     save_intermediate_results = True
     assert_no_missing_locations = True
 
@@ -33,9 +34,10 @@ def run_location_assignment():
     target_locations = al.TargetLocations(locations_json_path)
 
     # Prepare the population dataframe, split off non-mobile persons
-    mobile_population_df, non_mobile_population_df = al.prepare_population_df_for_location_assignment(population_df,
-                                                                                                      number_of_persons=100,
-                                                                                                      filter_max_distance=10000)
+    mobile_population_df, non_mobile_population_df = (al.prepare_population_df_for_location_assignment
+                                                      (population_df,
+                                                       number_of_persons=1000,
+                                                       filter_max_distance=20000))
 
     for algorithm in algorithms_to_run:
         if algorithm.startswith("load"):
@@ -54,9 +56,17 @@ def run_location_assignment():
             mobile_population_df = run_main(
                 mobile_population_df, target_locations)
         elif algorithm == 'advanced_petre':
+            number_of_branches = 100
+            max_candidates = None
+            anchor_strategy = "lower_middle"
+
+            stats_tracker.log("number_of_branches", number_of_branches)
+            stats_tracker.log("max_candidates", max_candidates)
+            stats_tracker.log("anchor_strategy", anchor_strategy)
+
             mobile_population_df = run_advanced_petre(
-                mobile_population_df, target_locations, number_of_branches=100, max_candidates=None,
-                anchor_strategy="lower_middle")
+                mobile_population_df, target_locations, number_of_branches=number_of_branches,
+                max_candidates=max_candidates, anchor_strategy=anchor_strategy)
         else:
             raise ValueError("Invalid algorithm.")
 
@@ -77,14 +87,19 @@ def run_location_assignment():
     result_df.sort_values(by=[s.UNIQUE_HH_ID_COL, s.UNIQUE_P_ID_COL, s.UNIQUE_LEG_ID_COL], ascending=[True, True, True],
                           inplace=True)
     algos_string = "_".join(algorithms_to_run)
-    result_df.to_csv(os.path.join(pipeline_setup.OUTPUT_DIR, f"location_assignment_result_{algos_string}.csv"), index=False)
+    if "advanced_petre" in algorithms_to_run:
+        num_branches_string = f"_{number_of_branches}-branches"
+    else:
+        num_branches_string = ""
+    result_df.to_csv(os.path.join(pipeline_setup.OUTPUT_DIR, f"location_assignment_result_{algos_string}"
+                                                             f"{num_branches_string}.csv"),
+                     index=False)
     logger.info(f"Wrote location assignment result to {pipeline_setup.OUTPUT_DIR}.")
-
+    stats_tracker.write_stats_to_file(os.path.join(pipeline_setup.OUTPUT_DIR, "location_assignment_stats.txt"))
 
 def load_intermediate(algorithm: str):
     intermediate_to_load = algorithm[len("load_"):]
-    mobile_population_df = h.read_csv(
-        os.path.join(pipeline_setup.PROJECT_ROOT, f"data\\intermediates\\mobile_population_{intermediate_to_load}.csv"))
+    mobile_population_df = h.read_csv(f"data\\intermediates\\mobile_population_{intermediate_to_load}.csv")
     if "to_location" in mobile_population_df.columns:
         mobile_population_df["to_location"] = mobile_population_df["to_location"].apply(
             lambda x: h.convert_to_point(x, target='array'))

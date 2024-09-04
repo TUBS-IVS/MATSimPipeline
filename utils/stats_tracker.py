@@ -38,7 +38,7 @@ class StatsTracker:
             for stat, value in self.stats.items():
                 f.write(f"{stat}: {value}\n")
         logging.info(f"Stats written to {file_path}")
+        self.reset()
 
 
 stats_tracker = StatsTracker()  # Global singleton instance
-

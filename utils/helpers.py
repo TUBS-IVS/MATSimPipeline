@@ -79,6 +79,7 @@ def read_csv(csv_path: str, test_col=None, use_cols=None):
     :param test_col: Column name that should be present in the file.
     :param use_cols: List of columns to use from the file. Defaults to all columns.
     """
+    csv_path = make_path_absolute(csv_path)
     try:
         if csv_path.endswith('.gz'):
             df = pd.read_csv(gzip.open(csv_path), sep=',', usecols=use_cols)
@@ -1517,3 +1518,10 @@ def spread_distances(distance1, distance2, iteration=0, first_step=20):
         distance1 -= step
         distance2 += step
     return max(0, distance1), max(0, distance2)
+
+
+def get_abs_distance_deviations(candidate_coordinates, location, wanted_distance):
+    # Ensure candidate_coordinates is 2D, even if it contains only one coordinate
+    candidate_coordinates = np.atleast_2d(candidate_coordinates)
+    candidate_distances = np.linalg.norm(candidate_coordinates - location, axis=1)
+    return np.abs(candidate_distances - wanted_distance)

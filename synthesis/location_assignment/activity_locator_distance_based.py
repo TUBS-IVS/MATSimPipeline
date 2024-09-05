@@ -16,6 +16,7 @@ import pandas as pd
 from sklearn.neighbors import KDTree
 
 from utils import settings as s, helpers as h, pipeline_setup
+from utils.types import PlanLeg, PlanSegment, SegmentedPlan, SegmentedPlans, UnSegmentedPlan, UnSegmentedPlans
 from utils.logger import logging
 from utils.stats_tracker import stats_tracker
 
@@ -26,90 +27,98 @@ logger = logging.getLogger(__name__)
 
 # TODO: place Pendler (persons, definable, that exceed some max trip dist)
 # either near Bahnhof (pt) or according to landuse (car)
-
-def place_commuter():
+class CommuterPlacer:
     """
-    Place commuters (defined by a matrix and the home-main distance) near a train station or according to land use.
-    Run this before the main activity locator (so likely before anything else).
+    Place commuters (defined by a commuter matrix and the home-main distance) near a train station or according to land use.
+    Use before the main activity locator.
     """
-    raise NotImplementedError
+    #TODO: get station data from all of germany
+    # TODO: same for land use(?)
+    # Build KDTrees from stations and from land use centroids
+
+    # def __init__(self, target_locations: TargetLocations, legs_dict: Dict[str, list[dict[str, Any]]]):
+    #     self.target_locations = target_locations
+    #     self.legs_dict = legs_dict
+
+    def place_commuter(self):
+        """
+        Place commuters (defined by a matrix and the home-main distance) near a train station or according to land use.
+        Run this before the main activity locator (so likely before anything else).
+        """
+        # for unsegmented_plan in unsegmented_plans.values():
+        #     unsegmented_plan: UnSegmentedPlan
 
 
-def place_commuter_near_bahnhof():
-    raise NotImplementedError
+    def place_commuters_at_stations(self, target_cell, commuters: SegmentedPlans):
+        """
+        We don't care about the exact traffic in outside cells. But we do want commuters that use pt to keep using it.
+        """
 
+        #TODO: DO we really?
+        raise NotImplementedError
 
-def place_commuter_by_landuse():
-    raise NotImplementedError
+    def place_commuter_by_landuse(self, target_cell, commuters):
+        raise NotImplementedError
 
+    def run(self):
+        for person_id, person_legs in tqdm(self.legs_dict.items(), desc="Processing persons"):
+            self.locate_main(person_legs)  # In-place
+        return self.legs_dict
 
-# class DistanceBasedMainActivityLocator:
-#     """
-#     DISTANCE-based localizer.
-#     Normalizing the potentials according to the total main activity demand means that persons will be assigned to the activity
-#     locations exactly proportional to the location potentials. This also means that secondary activities will have to make do
-#     with the remaining potential.
-#     :param legs_dict: Dict of persons with their legs data
-#     :param target_locations: TargetLocations object that provides query_within_radius method
-#     :param radius: Search radius for locating activities
-#     """
-# 
-#     def __init__(self, legs_dict: Dict[str, List[Dict[str, Any]]], target_locations, radius: float):
-#         self.legs_dict = legs_dict
-#         self.target_locations = target_locations  # TargetLocations object
-#         self.radius = radius  # Radius for the search
-#         self.located_main_activities_for_current_population = False
-# 
-#     def locate_main_activity(self, person_id: str):
-#         """
-#         Locates the main activity location for each person based on Euclidean distances,
-#         normalized potentials, and the desired activity type. Uses the unsegmented legs dict.
-#         :param person_id: Identifier for the person to locate main activity for
-#         :return:
-#         """
-#         person_legs = self.legs_dict[person_id]
-# 
-#         if not person_legs:
-#             # Person doesn't seem to have legs (no mobility). This is fine.
-#             return
-# 
-#         home_location = person_legs[0]['from_location']
-# 
-#         main_activity_leg = None
-#         for leg in person_legs:
-#             if leg['to_act_type'] == 'main_activity':
-#                 main_activity_leg = leg
-#                 break
-# 
-#         if not main_activity_leg:
-#             return
-# 
-#         target_activity = main_activity_leg['to_act_type']
-# 
-#         identifiers, names, coordinates, potentials, distances = find_ring_candidates(
-#             home_location, target_activity, self.radius, self.target_locations)
-# 
-#         if len(identifiers) == 0:
-#             # If no candidates are found within the radius, assign a random location
-#             all_coords = self.target_locations.data[target_activity]['coordinates']
-#             main_activity_leg['to_location'] = rnd.choice(all_coords)
-#             return
-# 
-#         # Calculate attractiveness using the provided score_locations function
-#         attractiveness = score_locations(potentials, distances)
-# 
-#         total_weight = np.sum(attractiveness)
-#         if total_weight > 0:
-#             selected_index = np.random.choice(len(attractiveness), p=attractiveness / total_weight)
-#         else:
-#             selected_index = np.random.choice(len(attractiveness))
-# 
-#         main_activity_leg['to_location'] = coordinates[selected_index]
-# 
-#     def locate_activities(self):
-#         for person_id in self.legs_dict.keys():
-#             self.locate_main_activity(person_id)
-#         return self.legs_dict
+    def is_commuter(self, person_legs: List[Dict[str, Any]]) -> bool:
+        """Check if a person is a commuter based on their legs."""
+        raise NotImplementedError
+        # PreFilter by existing work or education or business legs
+        # Sort first up to wanted number+some by distance home-to-main
+        # Remove the rest
+        # Do more precise check.
+
+    def locate_commuter(self, person_legs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        pass
+
+    def locate_main(self, person_legs: UnSegmentedPlan) -> UnSegmentedPlan:
+        """Gets a person's main activity and locates it.
+        Currently just uses the Euclidean distance and potentials.
+        Planned to also use O-D matrices.
+        :return: Updated list of legs with located main activities.
+        """
+        main_activity_index, main_activity_leg = h.get_main_activity_leg(person_legs)
+        if main_activity_leg is None:
+            return person_legs
+
+        # Skip if main already located
+        to_location = main_activity_leg.get('to_location')
+        assert isinstance(to_location, np.ndarray), "Bad location format."
+        if to_location.size != 0:
+            return person_legs
+
+        # TODO go from here
+        target_activity = main_activity_leg['to_act_type']
+        home_location = person_legs[0]['from_location']
+        estimated_distance_home_to_main = person_legs[0]['home_to_main_distance']
+
+        # Radii are iteratively spread by find_ring_candidates until a candidate is found
+        radius1, radius2 = h.spread_distances(estimated_distance_home_to_main,
+                                              estimated_distance_home_to_main)  # Initial
+        candidates = self.target_locations.find_ring_candidates(target_activity, home_location, radius1=radius1,
+                                                                radius2=radius2)
+        scores = EvaluationFunction.evaluate_candidates(candidates[-2], None, len(candidates[-2]))
+        chosen_candidate, score = (
+            EvaluationFunction.select_candidates(candidates, scores, 1, 'monte_carlo'))
+
+        act_identifier, act_name, act_coord, act_pot, act_dist = chosen_candidate
+
+        # Update the main activity leg and the subsequent leg
+        person_legs[main_activity_index]['to_location'] = act_coord
+        person_legs[main_activity_index]['to_act_identifier'] = act_identifier
+        person_legs[main_activity_index]['to_act_name'] = act_name
+        person_legs[main_activity_index]['to_act_cap'] = act_pot
+        person_legs[main_activity_index]['to_act_score'] = score
+
+        if main_activity_index + 1 < len(person_legs):  # Set from location if there is a subsequent leg
+            person_legs[main_activity_index + 1]['from_location'] = act_coord
+
+        return person_legs
 
 
 def reformat_locations(locations_data: Dict[str, Dict[str, Dict[str, Any]]]) -> Dict[str, Dict[str, np.ndarray]]:
@@ -173,14 +182,15 @@ class TargetLocations:
     #         self.indices[type] = KDTree(pdata["coordinates"])
 
     def __init__(self, json_folder_path: str):
-        self.data: Dict[str, Dict[str, np.ndarray]] = self.load_reformatted_data(h.get_files(json_folder_path))
+        self.data: Dict[str, Dict[str, np.ndarray]] = self.load_reformatted_osmox_data(h.get_files(json_folder_path))
         self.indices: Dict[str, KDTree] = {}
 
         for type, pdata in self.data.items():
             logger.info(f"Constructing spatial index for {type} ...")
             self.indices[type] = KDTree(pdata["coordinates"])
 
-    def load_reformatted_data(self, file_path: str):
+    @staticmethod
+    def load_reformatted_osmox_data(file_path: str):
         with open(file_path, 'r') as f:
             data = json.load(f)
         # Convert lists back to numpy arrays
@@ -437,8 +447,9 @@ class AdvancedPetreAlgorithm:
     """
 
     def __init__(self, target_locations: TargetLocations, segmented_dict: Dict[str, list[list[dict[str, Any]]]],
-                 number_of_branches: int = 10, min_candidates: int = None, max_candidates: int = None, anchor_strategy: Literal[
-                "lower_middle", "upper_middle", "start", "end"] = "start"):
+                 number_of_branches: int = 10, min_candidates: int = None, max_candidates: int = None,
+                 anchor_strategy: Literal[
+                     "lower_middle", "upper_middle", "start", "end"] = "start"):
         self.target_locations = target_locations
         self.segmented_dict = segmented_dict
         self.number_of_branches = number_of_branches
@@ -462,7 +473,7 @@ class AdvancedPetreAlgorithm:
         return placed_dict
 
     def solve_segment(self, in_segment, number_of_branches=1, max_candidates=None, anchor_strategy="lower_middle",
-                      min_candidates = None):
+                      min_candidates=None):
         """At each level, find the best n locations, solve subproblems, and choose the best solution.
         -Solve the highest current level with n candidates
         -Place their locations and resegment (split) the segment
@@ -550,9 +561,11 @@ class AdvancedPetreAlgorithm:
                 candidate_deviations = np.zeros(len(candidate_coordinates))
                 # We only count deviations of lowest-level legs to avoid double counting
                 if len(distances_start_to_act) == 1:
-                    candidate_deviations += h.get_abs_distance_deviations(candidate_coordinates, location1, distances_start_to_act)
+                    candidate_deviations += h.get_abs_distance_deviations(candidate_coordinates, location1,
+                                                                          distances_start_to_act)
                 if len(distances_act_to_end) == 1:
-                    candidate_deviations += h.get_abs_distance_deviations(candidate_coordinates, location2, distances_act_to_end)
+                    candidate_deviations += h.get_abs_distance_deviations(candidate_coordinates, location2,
+                                                                          distances_act_to_end)
 
                 local_scores = EvaluationFunction.evaluate_candidates(candidate_potentials, candidate_deviations)
 
@@ -569,9 +582,11 @@ class AdvancedPetreAlgorithm:
 
                 candidate_deviations = np.zeros(len(candidate_coordinates))
                 if len(distances_start_to_act) == 1:
-                    candidate_deviations += h.get_abs_distance_deviations(candidate_coordinates, location1, distances_start_to_act)
+                    candidate_deviations += h.get_abs_distance_deviations(candidate_coordinates, location1,
+                                                                          distances_start_to_act)
                 if len(distances_act_to_end) == 1:
-                    candidate_deviations += h.get_abs_distance_deviations(candidate_coordinates, location2, distances_act_to_end)
+                    candidate_deviations += h.get_abs_distance_deviations(candidate_coordinates, location2,
+                                                                          distances_act_to_end)
 
                 if np.any(candidate_deviations != 0):
                     raise ValueError("Total deviations should be zero.")
@@ -897,6 +912,7 @@ class WeirdPetreAlgorithm:
 class SimpleLelkeAlgorithm:
     """
     Since the algorithm is targeted for solving the whole closed trip, the "segment" is usually the whole trip.
+    Skips persons where the main location is already set.
     """
 
     def __init__(self, target_locations: TargetLocations, segmented_dict: Dict[str, list[list[dict[str, Any]]]]):
@@ -1021,16 +1037,14 @@ class SimpleMainLocationAlgorithm:
         :return: Updated list of legs with located main activities.
         """
 
-        main_activity_leg = None
-        main_activity_index = None
-        for i, leg in enumerate(person_legs):
-            if leg['is_main_activity']:
-                main_activity_leg = leg
-                main_activity_index = i
-                break
+        main_activity_index, main_activity_leg = h.get_main_activity_leg(person_legs)
+        if main_activity_leg is None:
+            return person_legs
 
-        if not main_activity_leg:
-            assert len(person_legs) <= 1, "Person has no main activity but has multiple legs."
+        # Skip if main already located
+        to_location = main_activity_leg.get('to_location')
+        assert isinstance(to_location, np.ndarray), "Bad location format."
+        if to_location.size != 0:
             return person_legs
 
         target_activity = main_activity_leg['to_act_type']
@@ -1042,17 +1056,20 @@ class SimpleMainLocationAlgorithm:
                                               estimated_distance_home_to_main)  # Initial
         candidates = self.target_locations.find_ring_candidates(target_activity, home_location, radius1=radius1,
                                                                 radius2=radius2)
-        act_identifier, act_name, act_coord, act_cap, act_dist, act_score = (
-            EvaluationFunction.monte_carlo_select_candidate(candidates))
+        scores = EvaluationFunction.evaluate_candidates(candidates[-2], None, len(candidates[-2]))
+        chosen_candidate, score = (
+            EvaluationFunction.select_candidates(candidates, scores, 1, 'monte_carlo'))
+
+        act_identifier, act_name, act_coord, act_pot, act_dist = chosen_candidate
 
         # Update the main activity leg and the subsequent leg
         person_legs[main_activity_index]['to_location'] = act_coord
         person_legs[main_activity_index]['to_act_identifier'] = act_identifier
         person_legs[main_activity_index]['to_act_name'] = act_name
-        person_legs[main_activity_index]['to_act_cap'] = act_cap
-        person_legs[main_activity_index]['to_act_score'] = act_score
+        person_legs[main_activity_index]['to_act_cap'] = act_pot
+        person_legs[main_activity_index]['to_act_score'] = score
 
-        if main_activity_index + 1 < len(person_legs):
+        if main_activity_index + 1 < len(person_legs):  # Set from location if there is a subsequent leg
             person_legs[main_activity_index + 1]['from_location'] = act_coord
 
         return person_legs
@@ -1108,7 +1125,8 @@ class EvaluationFunction:
 
         if strategy == 'monte_carlo':
             stats_tracker.increment("Scoring runs (Monte Carlo)")
-            m_scores = scores / np.sum(scores)
+            a_scores = np.array(scores, dtype=np.float64)  # Make floating-point array
+            m_scores = a_scores / np.sum(a_scores)
             chosen_indices = np.random.choice(len(m_scores), num_candidates, p=m_scores, replace=False)
 
         elif strategy == 'top_n':
@@ -1334,10 +1352,12 @@ class CircleIntersection:
                                                               distance_act_to_end, num_candidates)
         candidate_potentials = candidates[-2]
         candidate_coords = candidates[-3]
-        candidate_distance_deviations = h.get_abs_distance_deviations(candidate_coords, start_coord, distance_start_to_act)
+        candidate_distance_deviations = h.get_abs_distance_deviations(candidate_coords, start_coord,
+                                                                      distance_start_to_act)
         candidate_distance_deviations += h.get_abs_distance_deviations(candidate_coords, end_coord, distance_act_to_end)
 
-        scores = EvaluationFunction.evaluate_candidates(candidate_potentials, candidate_distance_deviations, num_candidates)
+        scores = EvaluationFunction.evaluate_candidates(candidate_potentials, candidate_distance_deviations,
+                                                        num_candidates)
         candidate, score = EvaluationFunction.select_candidates(candidates, scores, 1, 'top_n')
 
         identifier, name, coord, potential, distance = candidate
@@ -1533,9 +1553,9 @@ def prepare_population_df_for_location_assignment(df, filter_max_distance=None, 
     return df, no_leg_df
 
 
-def segment_legs(nested_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List[List[Dict[str, Any]]]]:
+def segment_plans(nested_dict: UnSegmentedPlans) -> SegmentedPlans:
     """
-    Segment the legs of each person into separate trips where only the start and end locations are known.
+    Segment the plan of each person into separate trips where only the start and end locations are known.
     :param nested_dict:
     :return:
     Example output:
@@ -1831,4 +1851,3 @@ def write_placement_results_dict_to_population_df(placement_results_dict, popula
     # Make sure no merge postfixes are left
     assert not any([col.endswith('_x') or col.endswith('_y') for col in merged_df.columns]), "Postfixes left."
     return merged_df
-

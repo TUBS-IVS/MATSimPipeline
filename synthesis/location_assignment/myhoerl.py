@@ -677,7 +677,7 @@ def run_hoerl():
     with_main_dict = locate_main_activities(dictu)
     main_placement_end = time.time()
     segmenting_start = time.time()
-    segmented_dict = segment_legs(with_main_dict)
+    segmented_dict = segment_plans(with_main_dict)
     segmenting_end = time.time()
     pickle.dump(segmented_dict, open(r'C:\Users\petre\Documents\GitHub\MATSimPipeline\data\segmented_dict_ohne_pendler.pkl', 'wb'))
     segmented_dict = pickle.load(

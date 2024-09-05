@@ -17,6 +17,7 @@ from utils.stats_tracker import stats_tracker
 from utils.pipeline_setup import OUTPUT_DIR
 from utils.pipeline_setup import PROJECT_ROOT
 from utils import settings as s
+from utils.types import PlanLeg, PlanSegment, SegmentedPlan, SegmentedPlans, UnSegmentedPlan, UnSegmentedPlans
 from utils.logger import logging
 
 logger = logging.getLogger(__name__)
@@ -1525,3 +1526,26 @@ def get_abs_distance_deviations(candidate_coordinates, location, wanted_distance
     candidate_coordinates = np.atleast_2d(candidate_coordinates)
     candidate_distances = np.linalg.norm(candidate_coordinates - location, axis=1)
     return np.abs(candidate_distances - wanted_distance)
+
+
+def get_main_activity_leg(person_legs: UnSegmentedPlan):
+    main_activity_leg = None
+    main_activity_index = None
+    for i, leg in enumerate(person_legs):
+        if leg['is_main_activity']:
+            main_activity_leg = leg
+            main_activity_index = i
+            break
+
+    if not main_activity_leg:
+        to_activities = [leg['to_act_type'] for leg in person_legs]
+        if isinstance(to_activities, list):
+            assert all(act == s.ACT_HOME for act in to_activities), (
+                "Person has no main activity but has non-home legs."
+            )
+        else:
+            assert to_activities == s.ACT_HOME, (
+                "Person has no main activity but has non-home legs."
+            )
+        return None, None
+    return main_activity_index, main_activity_leg

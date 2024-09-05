@@ -91,7 +91,13 @@ def test_enhance_travel_survey(setup_test_environment):
     grouped = output_df.groupby(s.PERSON_ID_COL)
 
     for person_id, group in grouped:
-        if len(group) > 1:
+        # Non-mobile person
+        if pd.isna(group.at[group.index[0], s.LEG_NON_UNIQUE_ID_COL]):
+            assert len(group) == 1, (
+                f"Person {person_id} has multiple rows but no NON_UNIQUE_LEG_ID values."
+            )
+        # Mobile person
+        else:
             # Ensure start_time and end_time columns are in datetime format
             assert group[s.LEG_START_TIME_COL].apply(is_convertible_to_datetime).all()
             assert group[s.LEG_END_TIME_COL].apply(is_convertible_to_datetime).all()
@@ -144,4 +150,4 @@ def test_enhance_travel_survey(setup_test_environment):
                     f"Person {person_id} has only home-to-home legs but also has a main activity."
                 )
 
-    # Additional content verification can be added here
+            # Additional content verification can be added here

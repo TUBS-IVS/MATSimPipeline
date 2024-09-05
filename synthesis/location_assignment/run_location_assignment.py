@@ -17,9 +17,9 @@ def run_location_assignment():
     """Runs the location assignment algorithm(s) on the given population and locations CSV files."""
     population_df = h.read_csv(h.get_files(r"data/mid/enhanced"))
     locations_json_path = r"playground/reformatted_data2.json"
-    algorithms_to_run = ['load_main', 'advanced_petre']  # prepend "load_" to load intermediate results
+    algorithms_to_run = ['main']  # prepend "load_" to load intermediate results
     save_intermediate_results = True
-    assert_no_missing_locations = True
+    assert_no_missing_locations = False
 
     # Early check if all algorithms are valid
     valid_algorithms = ['hoerl', 'simple_lelke', 'greedy_petre', 'main', 'advanced_petre']
@@ -114,7 +114,7 @@ def run_hoerl(population_df, target_locations):
     logger.info("Starting Hoerl algorithm.")
     legs_dict = al.populate_legs_dict_from_df(population_df)
     logger.info("Dict populated.")
-    segmented_dict = al.segment_legs(legs_dict)
+    segmented_dict = al.segment_plans(legs_dict)
     logger.info("Dict segmented.")
     df_location, df_convergence = myhoerl.process(target_locations, segmented_dict)
     population_df['to_location'] = population_df['to_location'].apply(
@@ -131,7 +131,7 @@ def run_greedy_petre(population_df, target_locations):
     logger.info("Starting Greedy Petre algorithm.")
     legs_dict = al.populate_legs_dict_from_df(population_df)
     logger.info("Dict populated.")
-    segmented_dict = al.segment_legs(legs_dict)
+    segmented_dict = al.segment_plans(legs_dict)
     logger.info("Dict segmented.")
     greedy_petre_algorithm = al.WeirdPetreAlgorithm(target_locations, segmented_dict, variant="greedy")
     result_dict = greedy_petre_algorithm.run()
@@ -144,7 +144,7 @@ def run_simple_lelke(population_df, target_locations):
     logger.info("Starting Simple Lelke algorithm.")
     legs_dict = al.populate_legs_dict_from_df(population_df)
     logger.info("Dict populated.")
-    segmented_dict = al.segment_legs(legs_dict)
+    segmented_dict = al.segment_plans(legs_dict)
     logger.info("Dict segmented.")
     lelke_algorithm = al.SimpleLelkeAlgorithm(target_locations, segmented_dict)
     result_dict = lelke_algorithm.run()
@@ -159,7 +159,7 @@ def run_main(population_df, target_locations):
     logger.info("Dict populated.")
     simple_main_algorithm = al.SimpleMainLocationAlgorithm(target_locations, legs_dict)  # It wants unsegmented legs
     result_dict = simple_main_algorithm.run()
-    result_dict = al.segment_legs(result_dict)  # Needed as writer expects segmented legs
+    result_dict = al.segment_plans(result_dict)  # Needed as writer expects segmented legs
     population_df = al.write_placement_results_dict_to_population_df(result_dict, population_df)
     return h.add_from_location(population_df, 'to_location', 'from_location')
 
@@ -170,7 +170,7 @@ def run_advanced_petre(population_df, target_locations, number_of_branches: int 
     logger.info("Starting Advanced Petre algorithm.")
     legs_dict = al.populate_legs_dict_from_df(population_df)
     logger.info("Dict populated.")
-    segmented_dict = al.segment_legs(legs_dict)
+    segmented_dict = al.segment_plans(legs_dict)
     logger.info("Dict segmented.")
     advance_petre_algorithm = al.AdvancedPetreAlgorithm(target_locations, segmented_dict,
                                                         number_of_branches=number_of_branches,

@@ -23,15 +23,26 @@ from utils.stats_tracker import stats_tracker
 logger = logging.getLogger(__name__)
 
 
-# TODO: Currently, all outputs ar arrays even if not necessary. Maybe change to single values.
+# TODO: Currently, all outputs are arrays even if not necessary. Maybe change to single values.
 
-# TODO: place Pendler (persons, definable, that exceed some max trip dist)
 # either near Bahnhof (pt) or according to landuse (car)
 class CommuterPlacer:
     """
     Place commuters (defined by a commuter matrix and the home-main distance) near a train station or according to land use.
     Use before the main activity locator.
+
+    Currently:
+    - Sample n (given by matrix) commuters from whole region to another cell using distances
+        - Get all distances of all persons to all cell centroids (takes 2 seconds)
+        - Place all
+    - Place them near a train station or randomly
+
+    Possibilities:
+    - Search for commuters more carefully using boundary intersection test
+    - Apply commuters internally (within region)
     """
+
+
     #TODO: get station data from all of germany
     # TODO: same for land use(?)
     # Build KDTrees from stations and from land use centroids

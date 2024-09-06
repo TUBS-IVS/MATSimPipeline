@@ -9,7 +9,7 @@ import numpy.linalg as la
 import os
 import folium
 
-from synthesis.enhanced_mid.mid_data_enhancer import MiDDataEnhancer
+from synthesis.data_prep.mid_data_enhancer import MiDDataEnhancer
 from utils import helpers as h
 from utils import pipeline_setup
 from utils import data_frame_processor as dfp

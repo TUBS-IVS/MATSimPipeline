@@ -25,6 +25,12 @@ logger = logging.getLogger(__name__)
 
 # TODO: Currently, all outputs are arrays even if not necessary. Maybe change to single values.
 
+class GermanPopulationDensity:
+    pass
+
+class GermanTrainStations:
+    pass
+
 # either near Bahnhof (pt) or according to landuse (car)
 class CommuterPlacer:
     """
@@ -42,6 +48,9 @@ class CommuterPlacer:
     - Apply commuters internally (within region)
     """
 
+    # Values are 1.: in meters, 2.: guessed
+    p_hat_zweitwohnung = {0: 0, 50000: 0.1, 100000: 0.4, 150000: 0.7, 200000: 0.8, 250000: 0.9, 300000: 0.9,
+                          350000: 0.9, 400000: 1}
 
     #TODO: get station data from all of germany
     # TODO: same for land use(?)
@@ -84,10 +93,7 @@ class CommuterPlacer:
         # Remove the rest
         # Do more precise check.
 
-    def locate_commuter(self, person_legs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        pass
-
-    def locate_main(self, person_legs: UnSegmentedPlan) -> UnSegmentedPlan:
+    def locate_commuter(self, person_legs: UnSegmentedPlan) -> UnSegmentedPlan:
         """Gets a person's main activity and locates it.
         Currently just uses the Euclidean distance and potentials.
         Planned to also use O-D matrices.

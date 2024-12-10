@@ -10,6 +10,7 @@ import json
 from tqdm import tqdm
 from collections import defaultdict
 from typing import List, Dict, Any, Tuple, Literal
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
@@ -23,13 +24,32 @@ from utils.stats_tracker import stats_tracker
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class Leg:
+    __slots__ = (
+        'leg_id', 'to_act_type', 'distance', 'from_location',
+        'to_location', 'mode', 'is_main_activity', 'home_to_main_distance'
+    )
+    leg_id: str
+    to_act_type: str
+    distance: float
+    from_location: np.ndarray
+    to_location: np.ndarray
+    mode: str
+    is_main_activity: int
+    home_to_main_distance: float
+
+
 # TODO: Currently, all outputs are arrays even if not necessary. Maybe change to single values.
+# TODO: Medium Term replace Type Aliases with Data Classes
 
 class GermanPopulationDensity:
     pass
 
+
 class GermanTrainStations:
     pass
+
 
 # either near Bahnhof (pt) or according to landuse (car)
 class CommuterPlacer:
@@ -52,7 +72,7 @@ class CommuterPlacer:
     p_hat_zweitwohnung = {0: 0, 50000: 0.1, 100000: 0.4, 150000: 0.7, 200000: 0.8, 250000: 0.9, 300000: 0.9,
                           350000: 0.9, 400000: 1}
 
-    #TODO: get station data from all of germany
+    # TODO: get station data from all of germany
     # TODO: same for land use(?)
     # Build KDTrees from stations and from land use centroids
 
@@ -68,13 +88,12 @@ class CommuterPlacer:
         # for unsegmented_plan in unsegmented_plans.values():
         #     unsegmented_plan: UnSegmentedPlan
 
-
     def place_commuters_at_stations(self, target_cell, commuters: SegmentedPlans):
         """
         We don't care about the exact traffic in outside cells. But we do want commuters that use pt to keep using it.
         """
 
-        #TODO: DO we really?
+        # TODO: DO we really?
         raise NotImplementedError
 
     def place_commuter_by_landuse(self, target_cell, commuters):
@@ -485,12 +504,13 @@ class AdvancedPetreAlgorithm:
             for segment in segments:
                 placed_segment, _ = self.solve_segment(segment, number_of_branches=self.number_of_branches,
                                                        max_candidates=self.max_candidates,
-                                                       anchor_strategy=self.anchor_strategy)
+                                                       anchor_strategy=self.anchor_strategy,
+                                                       min_candidates=self.min_candidates)
                 placed_dict[person_id].append(placed_segment)
         return placed_dict
 
     def solve_segment(self, in_segment, number_of_branches=1, max_candidates=None, anchor_strategy="lower_middle",
-                      min_candidates=None):
+                      min_candidates=1):
         """At each level, find the best n locations, solve subproblems, and choose the best solution.
         -Solve the highest current level with n candidates
         -Place their locations and resegment (split) the segment
@@ -575,15 +595,14 @@ class AdvancedPetreAlgorithm:
                 #
                 # total_deviations = upper_deviations1 + lower_deviations1 + upper_deviations2 + lower_deviations2
 
-                candidate_deviations = np.zeros(len(candidate_coordinates))
+                candidate_deviations = np.zeros(len(candidate_identifiers))
                 # We only count deviations of lowest-level legs to avoid double counting
                 if len(distances_start_to_act) == 1:
                     candidate_deviations += h.get_abs_distance_deviations(candidate_coordinates, location1,
                                                                           distances_start_to_act)
-                if len(distances_act_to_end) == 1:
+                elif len(distances_act_to_end) == 1:
                     candidate_deviations += h.get_abs_distance_deviations(candidate_coordinates, location2,
                                                                           distances_act_to_end)
-
                 local_scores = EvaluationFunction.evaluate_candidates(candidate_potentials, candidate_deviations)
 
             else:  # No distance deviations expected, just score by potentials
@@ -597,7 +616,7 @@ class AdvancedPetreAlgorithm:
                 # upper_deviations2 = np.maximum(0, candidate_distances_to_end - max_possible_distance2)
                 # lower_deviations2 = np.maximum(0, min_possible_distance2 - candidate_distances_to_end)
 
-                candidate_deviations = np.zeros(len(candidate_coordinates))
+                candidate_deviations = np.zeros(len(candidate_identifiers))
                 if len(distances_start_to_act) == 1:
                     candidate_deviations += h.get_abs_distance_deviations(candidate_coordinates, location1,
                                                                           distances_start_to_act)
@@ -610,7 +629,7 @@ class AdvancedPetreAlgorithm:
                 # # /'DEBUG'
 
                 local_scores = EvaluationFunction.evaluate_candidates(candidate_potentials, None,
-                                                                      len(candidate_coordinates))
+                                                                      len(candidate_identifiers))
 
             stats_tracker.log(f"AdvancedPetreAlgorithm: Number of candidates at segment length {len(segment)}:",
                               len(local_scores))
@@ -643,10 +662,15 @@ class AdvancedPetreAlgorithm:
 
             full_segs = []
             branch_scores = []
-            for i in range(len(selected_coords)):
-                subsegment1[-1]['to_location'] = selected_coords[i]
-                subsegment1[-1]['to_act_identifier'] = np.array(selected_identifiers[i])
-                subsegment2[0]['from_location'] = selected_coords[i]
+            for i in range(len(selected_identifiers)):
+                if len(selected_identifiers) == 1:
+                    subsegment1[-1]['to_location'] = selected_coords
+                    subsegment1[-1]['to_act_identifier'] = np.array(selected_identifiers[i])
+                    subsegment2[0]['from_location'] = selected_coords
+                else:
+                    subsegment1[-1]['to_location'] = selected_coords[i]
+                    subsegment1[-1]['to_act_identifier'] = np.array(selected_identifiers[i])
+                    subsegment2[0]['from_location'] = selected_coords[i]
 
                 located_seg1, score1 = self.solve_segment(subsegment1, number_of_branches, max_candidates,
                                                           anchor_strategy)
@@ -1135,6 +1159,8 @@ class EvaluationFunction:
             - A tuple of arrays with the selected candidates.
             - A 1D array of the scores corresponding to the selected candidates.
         """
+        if len(candidates[0]) != len(scores):
+            print("hi")
         assert len(candidates[0]) == len(scores), "The number of candidates and scores must match."
         if num_candidates >= len(candidates[0]):
             stats_tracker.increment("Select_candidates: All candidates selected")
@@ -1570,10 +1596,10 @@ def prepare_population_df_for_location_assignment(df, filter_max_distance=None, 
     return df, no_leg_df
 
 
-def segment_plans(nested_dict: UnSegmentedPlans) -> SegmentedPlans:
+def segment_plans(plans: UnSegmentedPlans) -> SegmentedPlans:
     """
     Segment the plan of each person into separate trips where only the start and end locations are known.
-    :param nested_dict:
+    :param plans:
     :return:
     Example output:
     data = {
@@ -1670,10 +1696,10 @@ def segment_plans(nested_dict: UnSegmentedPlans) -> SegmentedPlans:
 }
 
     """
-    logger.debug(f"Segmenting legs for {len(nested_dict)} persons.")
+    logger.debug(f"Segmenting legs for {len(plans)} persons.")
     segmented_dict = defaultdict(list)
 
-    for person_id, legs in nested_dict.items():
+    for person_id, legs in plans.items():
         segment = []
         for leg in legs:
             segment.append(leg)

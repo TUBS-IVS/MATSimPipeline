@@ -72,18 +72,22 @@ def create_leg_ids(legs_file):
     return legs_file
 
 
-def read_csv(csv_path: str, test_col=None, use_cols=None):
+def read_csv(csv_path: str, test_col=None, use_cols=None) -> pd.DataFrame:
     """
     Read a csv file with unknown separator and return a dataframe.
     Also works for gzipped files.
-    :param csv_path: Path to csv file.
-    :param test_col: Column name that should be present in the file.
+
+    :param csv_path: Path to the CSV file.
+    :param test_col: Column name that should be present in the file for validation.
     :param use_cols: List of columns to use from the file. Defaults to all columns.
+    :return: DataFrame with the contents of the CSV file.
+    :raises: KeyError, ValueError if `test_col` is not found after attempting to read the file.
     """
     csv_path = make_path_absolute(csv_path)
     try:
         if csv_path.endswith('.gz'):
-            df = pd.read_csv(gzip.open(csv_path), sep=',', usecols=use_cols)
+            with gzip.open(csv_path, 'rt') as f:
+                df = pd.read_csv(f, sep=',', usecols=use_cols)
         else:
             df = pd.read_csv(csv_path, sep=',', usecols=use_cols)
         if test_col is not None:
@@ -92,7 +96,8 @@ def read_csv(csv_path: str, test_col=None, use_cols=None):
             ValueError):  # Sometimes also throws without test_col, when the file is not comma-separated. This is good.
         logger.info(f"ID column '{test_col}' not found in {csv_path}, trying to read as ';' separated file...")
         if csv_path.endswith('.gz'):
-            df = pd.read_csv(gzip.open(csv_path), sep=';', usecols=use_cols)
+            with gzip.open(csv_path, 'rt') as f:
+                df = pd.read_csv(f, sep=';', usecols=use_cols)
         else:
             df = pd.read_csv(csv_path, sep=';', usecols=use_cols)
         try:
@@ -1466,7 +1471,6 @@ def get_files(path: str, get_all: bool = False) -> Union[str, List[str]]:
         # Get the newest file among the remaining files
         newest_file = max(filtered_files, key=os.path.getctime)
         return newest_file
-
 
 def make_path_absolute(path):
     """

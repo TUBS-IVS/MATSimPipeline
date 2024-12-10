@@ -17,7 +17,7 @@ def run_location_assignment():
     """Runs the location assignment algorithm(s) on the given population and locations CSV files."""
     population_df = h.read_csv(h.get_files(r"data/mid/enhanced"))
     locations_json_path = r"playground/reformatted_data2.json"
-    algorithms_to_run = ['main']  # prepend "load_" to load intermediate results
+    algorithms_to_run = ['load_main','advanced_petre']  # prepend "load_" to load intermediate results
     save_intermediate_results = True
     assert_no_missing_locations = False
 
@@ -59,6 +59,7 @@ def run_location_assignment():
             number_of_branches = 100
             max_candidates = None
             anchor_strategy = "lower_middle"
+            min_candidates = 100
 
             stats_tracker.log("number_of_branches", number_of_branches)
             stats_tracker.log("max_candidates", max_candidates)
@@ -66,7 +67,7 @@ def run_location_assignment():
 
             mobile_population_df = run_advanced_petre(
                 mobile_population_df, target_locations, number_of_branches=number_of_branches,
-                max_candidates=max_candidates, anchor_strategy=anchor_strategy)
+                max_candidates=max_candidates, anchor_strategy=anchor_strategy, min_candidates=min_candidates)
         else:
             raise ValueError("Invalid algorithm.")
 
@@ -165,7 +166,7 @@ def run_main(population_df, target_locations):
 
 
 def run_advanced_petre(population_df, target_locations, number_of_branches: int = 10, max_candidates=None,
-                       anchor_strategy: Literal["lower_middle", "upper_middle", "start", "end"] = "lower_middle"):
+                       anchor_strategy: Literal["lower_middle", "upper_middle", "start", "end"] = "lower_middle", min_candidates=None):
     """Runs the Advanced Petre algorithm on the given population and locations CSV files."""
     logger.info("Starting Advanced Petre algorithm.")
     legs_dict = al.populate_legs_dict_from_df(population_df)
@@ -175,7 +176,8 @@ def run_advanced_petre(population_df, target_locations, number_of_branches: int 
     advance_petre_algorithm = al.AdvancedPetreAlgorithm(target_locations, segmented_dict,
                                                         number_of_branches=number_of_branches,
                                                         max_candidates=max_candidates,
-                                                        anchor_strategy=anchor_strategy)
+                                                        anchor_strategy=anchor_strategy,
+                                                        min_candidates=min_candidates)
     result_dict = advance_petre_algorithm.run()
     population_df = al.write_placement_results_dict_to_population_df(result_dict, population_df)
     return h.add_from_location(population_df, 'to_location', 'from_location')

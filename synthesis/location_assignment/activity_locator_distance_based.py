@@ -529,7 +529,11 @@ class AdvancedPetreAlgorithm:
                 'to_location'].size > 0, "Both start and end locations must be known for a single leg."
             return segment, 0
         # if there are only two legs, we can find the loc immediately
+        # TODO there is a massive error here when looking at two identical circles i think
         elif len(segment) == 2:
+            # DEBUG--------------------------------
+            if segment[0]['unique_leg_id'].startswith("10298230_11857_10298232"):
+                print("gdfgd")
             stats_tracker.increment("AdvancedPetreAlgorithm: 2-leg segments")
             act_identifier, act_name, act_coord, act_cap, act_dist, act_score = self.c_i.get_best_circle_intersection_location(
                 segment[0]['from_location'], segment[1]['to_location'], segment[0]['to_act_type'],
@@ -1380,6 +1384,7 @@ class CircleIntersection:
 
         return intersect1, intersect2
 
+    # TODO: There is a massive error here regarding identical circles, i think (or maybe worse)
     def get_best_circle_intersection_location(self, start_coord: np.ndarray, end_coord: np.ndarray, act_type: str,
                                               distance_start_to_act: float, distance_act_to_end: float,
                                               num_candidates: int):

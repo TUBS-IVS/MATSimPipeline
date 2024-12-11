@@ -832,12 +832,14 @@ class MiDDataEnhancer(DataFrameProcessor):
         # Time threshold for the in-between activity
         short_duration_condition = (self.df['next_act_dur'] < duration_threshold_seconds)
 
-        # Candidate activity must be the same as the main activity
-        same_activity_condition = (self.df['next_next_activity'] == self.df[s.ACT_TO_INTERNAL_COL])
+        # Candidate activity must be the same as the main activity, or a return journey
+        same_activity_condition = (self.df['next_next_activity'] == self.df[s.ACT_TO_INTERNAL_COL]) | \
+                                  (self.df['next_next_activity'] == s.ACT_RETURN_JOURNEY)
 
         # Leg distance to the in-between activity and from it to the candidate activity must be the same
         same_leg_distance_condition = (self.df['next_leg_distance'] == self.df['next_next_leg_distance'])
 
+        # Mark the mirroring main activity
         self.df[s.MIRRORS_MAIN_ACTIVITY_COL] = (
             (
                     person_id_condition & short_duration_condition & same_activity_condition & same_leg_distance_condition).shift(

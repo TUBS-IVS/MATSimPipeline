@@ -17,26 +17,26 @@ from synthesis.location_assignment.activity_locator_distance_based import *
 # COMPONENTS
 
 # For retrieving locations quickly
-class CandidateIndex:
-    def __init__(self, data):
-        self.data = data
-        self.indices = {}
-
-        for purpose, pdata in self.data.items():
-            print("Constructing spatial index for %s ..." % purpose)
-            self.indices[purpose] = sklearn.neighbors.KDTree(pdata["coordinates"])
-
-    def query(self, purpose, location):
-        index = self.indices[purpose].query(location.reshape(1, -1), return_distance=False)[0][0]
-        identifier = self.data[purpose]["identifiers"][index]
-        location = self.data[purpose]["coordinates"][index]
-        return identifier, location
-
-    def sample(self, purpose, random):
-        index = random.randint(0, len(self.data[purpose]["locations"]))
-        identifier = self.data[purpose]["identifiers"][index]
-        location = self.data[purpose]["coordinates"][index]
-        return identifier, location
+# class CandidateIndex:
+#     def __init__(self, data):
+#         self.data = data
+#         self.indices = {}
+#
+#         for purpose, pdata in self.data.items():
+#             print("Constructing spatial index for %s ..." % purpose)
+#             self.indices[purpose] = sklearn.neighbors.KDTree(pdata["coordinates"])
+#
+#     def query(self, purpose, location):
+#         index = self.indices[purpose].query(location.reshape(1, -1), return_distance=False)[0][0]
+#         identifier = self.data[purpose]["identifiers"][index]
+#         location = self.data[purpose]["coordinates"][index]
+#         return identifier, location
+#
+#     def sample(self, purpose, random):
+#         index = random.randint(0, len(self.data[purpose]["locations"]))
+#         identifier = self.data[purpose]["identifiers"][index]
+#         location = self.data[purpose]["coordinates"][index]
+#         return identifier, location
 
 
 # Simply gets the closest location

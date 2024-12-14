@@ -1513,9 +1513,9 @@ def get_min_max_distance(arr):
     return min_diff, total_sum
 
 
-def spread_distances(distance1, distance2, iteration=0, first_step=20):
+def spread_distances(distance1, distance2, iteration=0, first_step=20, base=1.5):
     """Increases the difference between two distances, keeping them positive."""
-    step = first_step * (2 ** iteration)
+    step = first_step * (base ** iteration)
     if distance1 > distance2:
         distance1 += step
         distance2 -= step

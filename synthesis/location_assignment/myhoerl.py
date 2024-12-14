@@ -166,9 +166,14 @@ def process(my_target_locations, segmented_dict):
 
     # Set up assignment solver
     thresholds = dict(
-        car=200.0, car_passenger=200.0, pt=200.0,
-        bike=100.0, walk=100.0
+        car=1.0, car_passenger=1.0, pt=1.0,
+        bike=1.0, walk=1.0
     )
+
+#    thresholds = dict(
+ #       car=200.0, car_passenger=200.0, pt=200.0,
+  #      bike=100.0, walk=100.0
+   # )
 
     assignment_objective = DiscretizationErrorObjective(thresholds=thresholds)
     assignment_solver = AssignmentSolver(
@@ -176,7 +181,7 @@ def process(my_target_locations, segmented_dict):
         relaxation_solver=relaxation_solver,
         discretization_solver=discretization_solver,
         objective=assignment_objective,
-        maximum_iterations=min(20, maximum_iterations)
+        maximum_iterations=min(1000, maximum_iterations) # was 20
     )
 
     df_locations = []

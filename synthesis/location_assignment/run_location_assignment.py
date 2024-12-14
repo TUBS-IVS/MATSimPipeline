@@ -17,12 +17,13 @@ def run_location_assignment():
     """Runs the location assignment algorithm(s) on the given population and locations CSV files."""
     population_df = h.read_csv(h.get_files(r"data/mid/enhanced"))
     locations_json_path = r"playground/reformatted_data2.json"
-    algorithms_to_run = ['load_main','advanced_petre']  # prepend "load_" to load intermediate results
+    algorithms_to_run = ['load_main', 'filter', 'advanced_petre']  # prepend "load_" to load intermediate results
     save_intermediate_results = True
     assert_no_missing_locations = False
+    filter_by_person = "10474610_12005_10474614"
 
     # Early check if all algorithms are valid
-    valid_algorithms = ['hoerl', 'simple_lelke', 'greedy_petre', 'main', 'advanced_petre']
+    valid_algorithms = ['hoerl', 'simple_lelke', 'greedy_petre', 'main', 'advanced_petre', 'filter']
     algos_to_check = [
         algorithm[len("load_"):] if algorithm.startswith("load_") else algorithm
         for algorithm in algorithms_to_run
@@ -43,6 +44,8 @@ def run_location_assignment():
         if algorithm.startswith("load"):
             mobile_population_df = load_intermediate(algorithm)
             non_mobile_population_df = pd.DataFrame()
+        elif algorithm == 'filter':
+            mobile_population_df = mobile_population_df[mobile_population_df[s.UNIQUE_P_ID_COL] == filter_by_person]
         elif algorithm == 'hoerl':
             mobile_population_df = run_hoerl(
                 mobile_population_df, target_locations)
@@ -59,7 +62,7 @@ def run_location_assignment():
             number_of_branches = 100
             max_candidates = None
             anchor_strategy = "lower_middle"
-            min_candidates = 100
+            min_candidates = 1
 
             stats_tracker.log("number_of_branches", number_of_branches)
             stats_tracker.log("max_candidates", max_candidates)
@@ -90,10 +93,13 @@ def run_location_assignment():
     algos_string = "_".join(algorithms_to_run)
     if "advanced_petre" in algorithms_to_run:
         num_branches_string = f"_{number_of_branches}-branches"
+        min_candidates_string = f"_{min_candidates}-min-candidates"
     else:
         num_branches_string = ""
+        min_candidates_string = ""
     result_df.to_csv(os.path.join(pipeline_setup.OUTPUT_DIR, f"location_assignment_result_{algos_string}"
-                                                             f"{num_branches_string}.csv"),
+                                                             f"{num_branches_string}.csv"
+                                                             f"{min_candidates_string}"),
                      index=False)
     logger.info(f"Wrote location assignment result to {pipeline_setup.OUTPUT_DIR}.")
     stats_tracker.write_stats_to_file(os.path.join(pipeline_setup.OUTPUT_DIR, "location_assignment_stats.txt"))

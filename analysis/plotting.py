@@ -57,7 +57,8 @@ def plot_person_plan(person_id, hoerl_df=None, petre_df=None):
                     f"Leg ID: {row['unique_leg_id']}<br>Activity Type: {row['activity_to_internal']}<br>"
                     f"From Activity: {row['activity_from_internal']}<br>Home Loc: {row['home_location']}<br>"
                     f"From Location: {row['from_location']}<br>To Location: {row['to_location']}<br>"
-                    f"Coords: {from_loc}<br>Main Activity: {row['is_main_activity']}",
+                    f"Coords: {from_loc}<br>Main Activity: {row['is_main_activity']}"
+                    f"Mirrors main activity: {row['mirrors_main_activity']}",
                     "blue",
                     "info-sign"
                 )
@@ -101,7 +102,8 @@ def plot_person_plan(person_id, hoerl_df=None, petre_df=None):
                     f"Leg ID: {row['unique_leg_id']}<br>Activity Type: {row['activity_to_internal']}<br>"
                     f"From Activity: {row['activity_from_internal']}<br>Home Loc: {row['home_location']}<br>"
                     f"From Location: {row['from_location']}<br>To Location: {row['to_location']}<br>"
-                    f"Coords: {from_loc}<br>Main Activity: {row['is_main_activity']}",
+                    f"Coords: {from_loc}<br>Main Activity: {row['is_main_activity']}"
+                    f"Mirrors main activity: {row['mirrors_main_activity']}",
                     "green",
                     "info-sign"
                 )

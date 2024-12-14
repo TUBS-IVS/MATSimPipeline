@@ -451,14 +451,73 @@ class TargetLocations:
             if i > max_iterations:
                 raise ValueError(f"Not enough candidates found after {max_iterations} iterations.")
 
+    def ensure_overlap(self, location1, location2, r1a, r1b, r2a, r2b):
+        """
+        Ensure that two annuli (rings) defined by:
+          - Ring 1: radii [r1a, r1b] around location1
+          - Ring 2: radii [r2a, r2b] around location2
+
+        If no overlap exists, we minimally adjust the radii so that they at least
+        just touch or overlap.
+
+        Parameters
+        ----------
+        location1 : np.ndarray
+            Center of the first annulus.
+        location2 : np.ndarray
+            Center of the second annulus.
+        r1a : float
+            Inner radius of the first annulus.
+        r1b : float
+            Outer radius of the first annulus.
+        r2a : float
+            Inner radius of the second annulus.
+        r2b : float
+            Outer radius of the second annulus.
+
+        Returns
+        -------
+        r1a, r1b, r2a, r2b : float
+            Adjusted annulus radii ensuring at least a degenerate overlap.
+        """
+        D = np.linalg.norm(location2 - location1)
+        changed_radii = False
+        # Condition 1: Too far apart -> make them just touch at outer edges
+        if D > (r1b + r2b):
+            changed_radii = True
+            logger.debug(f"Locations too far apart. Increasing radii to touch.")
+            # Increase sum of outer radii to D
+            delta = D - (r1b + r2b)
+            r1b += delta / 2.0
+            r2b += delta / 2.0
+
+        # Check if one ring is fully inside the other:
+        # Ring1 fully inside Ring2 if r1b < r2a
+        # Ring2 fully inside Ring1 if r2b < r1a
+        elif r1b < r2a:
+            logger.debug(f"Ring 1 fully inside Ring 2. Adjusting radii.")
+            #changed_radii = True
+# TODO - use midpoint formula
+
+        elif r2b < r1a:
+            logger.debug(f"Ring 2 fully inside Ring 1. Adjusting radii.")
+            #changed_radii = True
+
+        return r1a, r1b, r2a, r2b, changed_radii
+
     def find_overlapping_rings_candidates(self, act_type: str, location1: np.ndarray, location2: np.ndarray,
                                           radius1a: float, radius1b: float, radius2a: float, radius2b: float,
                                           min_candidates=1, max_candidates=None, max_iterations=15):
-        """Find candidates within two overlapping rings around two center points.
+        """Find candidates within two overlapping rings (donuts) around two center points.
         Iteratively increase the radii until a sufficient number of candidates is found.
         """
         # original_ring_width1 = abs(radius1b - radius1a)
         # original_ring_width2 = abs(radius2b - radius2a)
+
+        # First, ensure there's at least some initial overlap.
+        #radius1a, radius1b, radius2a, radius2b, changed_radii = self.ensure_overlap(location1, location2, radius1a, radius1b, radius2a,
+                                                              #  radius2b)
+
         i = 0
         while True:
             candidates = self.query_within_two_overlapping_rings(
@@ -522,22 +581,17 @@ class AdvancedPetreAlgorithm:
             raise ValueError("No legs in segment.")
         elif len(segment) == 1:
             stats_tracker.increment("AdvancedPetreAlgorithm: 1-leg segments")
-            if not (segment[0]['from_location'].size > 0 and segment[0][
-                'to_location'].size > 0):
-                print("gdfgd")
             assert segment[0]['from_location'].size > 0 and segment[0][
                 'to_location'].size > 0, "Both start and end locations must be known for a single leg."
             return segment, 0
         # if there are only two legs, we can find the loc immediately
-        # TODO there is a massive error here when looking at two identical circles i think
         elif len(segment) == 2:
-            # DEBUG--------------------------------
-            if segment[0]['unique_leg_id'].startswith("10298230_11857_10298232"):
-                print("gdfgd")
-            stats_tracker.increment("AdvancedPetreAlgorithm: 2-leg segments")
-            act_identifier, act_name, act_coord, act_cap, act_dist, act_score = self.c_i.get_best_circle_intersection_location(
-                segment[0]['from_location'], segment[1]['to_location'], segment[0]['to_act_type'],
-                segment[0]['distance'], segment[1]['distance'], 1)
+            stats_tracker.increment(f"AdvancedPetreAlgorithm: 2-leg segments")
+            logger.debug(f"Advanced locating. Segment has 2 legs. leg ID:{segment[0]['unique_leg_id']}")
+            act = self.c_i.get_best_circle_intersection_location(segment[0]['from_location'], segment[1]['to_location'],
+                                                                 segment[0]['to_act_type'], segment[0]['distance'],
+                                                                 segment[1]['distance'], 1)
+            act_identifier, act_name, act_coord, act_cap, act_dist, act_score = act
             segment[0]['to_location'] = act_coord
             segment[1]['from_location'] = act_coord
             segment[0]['to_act_identifier'] = act_identifier
@@ -547,7 +601,7 @@ class AdvancedPetreAlgorithm:
             return segment, act_score
 
         else:
-            logger.debug(f"Advanced locating. Segment has {len(segment)} legs.")
+            logger.debug(f"Advanced locating. Segment has {len(segment)} legs. leg ID:{segment[0]['unique_leg_id']}")
             stats_tracker.increment(f"AdvancedPetreAlgorithm: {len(segment)}-leg segments")
             if anchor_strategy == "lower_middle":
                 anchor_idx = len(segment) // 2 - 1
@@ -637,6 +691,7 @@ class AdvancedPetreAlgorithm:
 
             stats_tracker.log(f"AdvancedPetreAlgorithm: Number of candidates at segment length {len(segment)}:",
                               len(local_scores))
+            logger.debug(f"Advanced locating. Found {len(local_scores)} candidates at segment length {len(segment)}.")
 
             # # >Randomly< sample down to number_of_branches if there are too many candidates with the same score
             # # This creates a roughly equal spacial distribution of candidates
@@ -677,9 +732,9 @@ class AdvancedPetreAlgorithm:
                     subsegment2[0]['from_location'] = selected_coords[i]
 
                 located_seg1, score1 = self.solve_segment(subsegment1, number_of_branches, max_candidates,
-                                                          anchor_strategy)
+                                                          anchor_strategy, min_candidates)
                 located_seg2, score2 = self.solve_segment(subsegment2, number_of_branches, max_candidates,
-                                                          anchor_strategy)
+                                                          anchor_strategy, min_candidates)
 
                 total_branch_score = score1 + score2 + scores[i]
                 branch_scores.append(total_branch_score)
@@ -1292,9 +1347,10 @@ class CircleIntersection:
                                                                 distance_act_to_end)
 
         candidates1 = self.target_locations.query_closest(type, intersect1, num_candidates)
-
+        logger.debug(f"Candidates 1: {candidates1}")
         if intersect2 is not None:
             candidates2 = self.target_locations.query_closest(type, intersect2, num_candidates)
+            logger.debug(f"Candidates 2: {candidates2}")
             combined_candidates = tuple(
                 np.vstack((np.atleast_1d(arr1), np.atleast_1d(arr2))) for arr1, arr2 in zip(candidates1, candidates2))
 
@@ -1316,6 +1372,7 @@ class CircleIntersection:
         :param radius2: The radius of the second circle.
         :return: A tuple containing one or two intersection points (each as a np.ndarray).
         """
+
         x1, y1 = center1
         x2, y2 = center2
         r1 = radius1
@@ -1327,17 +1384,18 @@ class CircleIntersection:
         logger.debug(f"Center 1: {center1}, Radius 1: {radius1}, Center 2: {center2}, Radius 2: {radius2}")
 
         # Handle non-intersection conditions:
-        if d == 0:
-            if abs(r1 - r2) < 1e-4:
-                logger.debug("Infinite intersections: The start and end points and radii are identical.")
-                logger.debug("Choosing a point on the perimeter of the circles.")
-                intersect = np.array([x1 + r1, y1])
-                return intersect, None
-            else:
-                logger.debug("No intersection: The circles are identical but have different radii.")
-                logger.debug("Choosing a point on the perimeter of the circles.")
-                intersect = np.array([x1 + r1, y1])
-                return intersect, None
+        if d < 1e-4:
+            raise RuntimeError("The case of identical start and end should be handled by the donut-function.")
+            # if abs(r1 - r2) < 1e-4:
+            #     logger.debug("Infinite intersections: The start and end points and radii are identical.")
+            #     logger.debug("Choosing a point on the perimeter of the circles.")
+            #     intersect = np.array([x1 + r1, y1])
+            #     return intersect, None
+            # else:
+            #     logger.debug("No intersection: The circles are identical but have different radii.")
+            #     logger.debug("Choosing a point on the perimeter of the circles.")
+            #     intersect = np.array([x1 + r1, y1])
+            #     return intersect, None
 
         if d > (r1 + r2):
             logger.debug("No direct intersection: The circles are too far apart.")
@@ -1348,16 +1406,25 @@ class CircleIntersection:
 
             return point_on_line, None
 
+        # One circle inside the other with no intersection
         if d < abs(r1 - r2):
-            logger.debug("No direct intersection: One circle is contained within the other.")
-            logger.debug("Returning closest point on the circumference of the inner circle.")
+            logger.debug("No intersection: One circle is fully inside the other.")
 
+            # Identify which circle is larger
             if r1 > r2:
-                closest_point = center2 + r2 * (center1 - center2) / d
-                return closest_point, None
+                larger_center, larger_radius = center1, r1
+                smaller_center, smaller_radius = center2, r2
             else:
-                closest_point = center1 + r1 * (center2 - center1) / d
-                return closest_point, None
+                larger_center, larger_radius = center2, r2
+                smaller_center, smaller_radius = center1, r1
+
+            # Find a point on the line connecting the centers
+            # I used my brain for this. AI failed me (I did use my brain for other parts too lol)
+            proportional_distance=(d+smaller_radius+0.5*(larger_radius-smaller_radius-d))/d
+            midpoint = larger_center + proportional_distance * (smaller_center - larger_center)
+
+            logger.debug(f"Midpoint: {midpoint}")
+            return midpoint, None
 
         if d == (r1 + r2) or d == abs(r1 - r2):
             logger.info("Whaaat? Tangential circles: The circles touch at exactly one point.")
@@ -1384,7 +1451,6 @@ class CircleIntersection:
 
         return intersect1, intersect2
 
-    # TODO: There is a massive error here regarding identical circles, i think (or maybe worse)
     def get_best_circle_intersection_location(self, start_coord: np.ndarray, end_coord: np.ndarray, act_type: str,
                                               distance_start_to_act: float, distance_act_to_end: float,
                                               num_candidates: int):
@@ -1396,8 +1462,15 @@ class CircleIntersection:
                 "Home activity detected. Secondary locator shouldn't be used for that. Returning start location.")
             return None, "home", start_coord, None, None, None
 
-        candidates = self.find_circle_intersection_candidates(start_coord, end_coord, act_type, distance_start_to_act,
-                                                              distance_act_to_end, num_candidates)
+        if h.euclidean_distance(start_coord, end_coord) < 1e-4:
+            # Identical start and end
+            radius1, radius2 = h.spread_distances(distance_start_to_act, distance_act_to_end)  # Initial
+            candidates = self.target_locations.find_ring_candidates(act_type, start_coord, radius1, radius2,
+                                                                    min_candidates=1)
+        else:
+            candidates = self.find_circle_intersection_candidates(start_coord, end_coord, act_type,
+                                                                  distance_start_to_act,
+                                                                  distance_act_to_end, num_candidates)
         candidate_potentials = candidates[-2]
         candidate_coords = candidates[-3]
         candidate_distance_deviations = h.get_abs_distance_deviations(candidate_coords, start_coord,
@@ -1611,7 +1684,7 @@ def segment_plans(plans: UnSegmentedPlans) -> SegmentedPlans:
     '10000290_11563_10000291': [
         [
             {
-                'leg_id': '10000290_11563_10000291_1.0',
+                'unique_leg_id': '10000290_11563_10000291_1.0',
                 'to_act_type': 'shopping',
                 'distance': 950.0,
                 'from_location': np.array([552452.11071084, 5807493.538159]),
@@ -1621,7 +1694,7 @@ def segment_plans(plans: UnSegmentedPlans) -> SegmentedPlans:
                 'home_to_main_distance': 120.0
             },
             {
-                'leg_id': '10000290_11563_10000291_2.0',
+                'unique_leg_id': '10000290_11563_10000291_2.0',
                 'to_act_type': 'home',
                 'distance': 1430.0,
                 'from_location': np.array([], dtype=float64),
@@ -1633,7 +1706,7 @@ def segment_plans(plans: UnSegmentedPlans) -> SegmentedPlans:
         ],
         [
             {
-                'leg_id': '10000290_11563_10000291_3.0',
+                'unique_leg_id': '10000290_11563_10000291_3.0',
                 'to_act_type': 'work',
                 'distance': 500.0,
                 'from_location': np.array([552452.11071084, 5807493.538159]),
@@ -1643,7 +1716,7 @@ def segment_plans(plans: UnSegmentedPlans) -> SegmentedPlans:
                 'home_to_main_distance': 100.0
             },
             {
-                'leg_id': '10000290_11563_10000291_4.0',
+                'unique_leg_id': '10000290_11563_10000291_4.0',
                 'to_act_type': 'home',
                 'distance': 1000.0,
                 'from_location': np.array([], dtype=float64),

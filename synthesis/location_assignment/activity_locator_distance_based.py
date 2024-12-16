@@ -14,7 +14,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
-from sklearn.neighbors import KDTree
+# from sklearn.neighbors import KDTree
+from scipy.spatial import KDTree
 
 from utils import settings as s, helpers as h, pipeline_setup
 from utils.types import PlanLeg, PlanSegment, SegmentedPlan, SegmentedPlans, UnSegmentedPlan, UnSegmentedPlans
@@ -285,7 +286,7 @@ class TargetLocations:
     #     location = location.reshape(1, -1)
     #
     #     # Query the KDTree for locations within radius
-    #     candidate_indices = self.indices[act_type].query_radius(location, radius)
+    #     candidate_indices = self.indices[act_type].query_ball_point(location, radius)
     #     logger.debug(f"Query Indices: {candidate_indices}")
     #
     #     # Get the identifiers, coordinates, and distances for locations within the radius
@@ -314,13 +315,13 @@ class TargetLocations:
         outer_radius = max(radius1, radius2)
         inner_radius = min(radius1, radius2)
 
-        outer_indices = self.indices[act_type].query_radius(location, outer_radius)
+        outer_indices = self.indices[act_type].query_ball_point(location, outer_radius)
         if outer_indices is None:
             return None
         if len(outer_indices[0]) == 0:
             return None
 
-        inner_indices = self.indices[act_type].query_radius(location, inner_radius)
+        inner_indices = self.indices[act_type].query_ball_point(location, inner_radius)
 
         outer_indices_set = set(outer_indices[0])
         inner_indices_set = set(inner_indices[0])
@@ -368,15 +369,15 @@ class TargetLocations:
         outer_radius2 = max(radius2a, radius2b)
         inner_radius2 = min(radius2a, radius2b)
 
-        outer_indices1 = self.indices[act_type].query_radius(location1, outer_radius1)
-        outer_indices2 = self.indices[act_type].query_radius(location2, outer_radius2)
+        outer_indices1 = self.indices[act_type].query_ball_point(location1, outer_radius1)
+        outer_indices2 = self.indices[act_type].query_ball_point(location2, outer_radius2)
         if outer_indices1 is None or outer_indices2 is None:
             return None
         if len(outer_indices1[0]) == 0 or len(outer_indices2[0]) == 0:
             return None
 
-        inner_indices1 = self.indices[act_type].query_radius(location1, inner_radius1)
-        inner_indices2 = self.indices[act_type].query_radius(location2, inner_radius2)
+        inner_indices1 = self.indices[act_type].query_ball_point(location1, inner_radius1)
+        inner_indices2 = self.indices[act_type].query_ball_point(location2, inner_radius2)
 
         outer_indices_set1 = set(outer_indices1[0])
         inner_indices_set1 = set(inner_indices1[0])
@@ -496,12 +497,12 @@ class TargetLocations:
         # Ring2 fully inside Ring1 if r2b < r1a
         elif r1b < r2a:
             logger.debug(f"Ring 1 fully inside Ring 2. Adjusting radii.")
-            #changed_radii = True
-# TODO - use midpoint formula
+            # changed_radii = True
+        # TODO - use midpoint formula
 
         elif r2b < r1a:
             logger.debug(f"Ring 2 fully inside Ring 1. Adjusting radii.")
-            #changed_radii = True
+            # changed_radii = True
 
         return r1a, r1b, r2a, r2b, changed_radii
 
@@ -515,8 +516,8 @@ class TargetLocations:
         # original_ring_width2 = abs(radius2b - radius2a)
 
         # First, ensure there's at least some initial overlap.
-        #radius1a, radius1b, radius2a, radius2b, changed_radii = self.ensure_overlap(location1, location2, radius1a, radius1b, radius2a,
-                                                              #  radius2b)
+        # radius1a, radius1b, radius2a, radius2b, changed_radii = self.ensure_overlap(location1, location2, radius1a, radius1b, radius2a,
+        #  radius2b)
 
         i = 0
         while True:
@@ -590,7 +591,7 @@ class AdvancedPetreAlgorithm:
             logger.debug(f"Advanced locating. Segment has 2 legs. leg ID:{segment[0]['unique_leg_id']}")
             act = self.c_i.get_best_circle_intersection_location(segment[0]['from_location'], segment[1]['to_location'],
                                                                  segment[0]['to_act_type'], segment[0]['distance'],
-                                                                 segment[1]['distance'], 1)
+                                                                 segment[1]['distance'])
             act_identifier, act_name, act_coord, act_cap, act_dist, act_score = act
             segment[0]['to_location'] = act_coord
             segment[1]['from_location'] = act_coord
@@ -1420,7 +1421,7 @@ class CircleIntersection:
 
             # Find a point on the line connecting the centers
             # I used my brain for this. AI failed me (I did use my brain for other parts too lol)
-            proportional_distance=(d+smaller_radius+0.5*(larger_radius-smaller_radius-d))/d
+            proportional_distance = (d + smaller_radius + 0.5 * (larger_radius - smaller_radius - d)) / d
             midpoint = larger_center + proportional_distance * (smaller_center - larger_center)
 
             logger.debug(f"Midpoint: {midpoint}")
@@ -1453,7 +1454,7 @@ class CircleIntersection:
 
     def get_best_circle_intersection_location(self, start_coord: np.ndarray, end_coord: np.ndarray, act_type: str,
                                               distance_start_to_act: float, distance_act_to_end: float,
-                                              num_candidates: int):
+                                              num_candidates=None):
         """Place a single activity at one of the closest locations."""
         # TODO: Maybe depreciate returning potential, name and score
         # Home locations aren't among the targets and are for now replaced by the start location
@@ -1462,17 +1463,37 @@ class CircleIntersection:
                 "Home activity detected. Secondary locator shouldn't be used for that. Returning start location.")
             return None, "home", start_coord, None, None, None
 
-        if h.euclidean_distance(start_coord, end_coord) < 1e-4:
+        if h.euclidean_distance(start_coord, end_coord) < 1e-4:  # TODO: Remove True (debug)
             # Identical start and end
             radius1, radius2 = h.spread_distances(distance_start_to_act, distance_act_to_end)  # Initial
             candidates = self.target_locations.find_ring_candidates(act_type, start_coord, radius1, radius2,
                                                                     min_candidates=1)
-        else:
+            candidate_potentials = candidates[-2]
+            candidate_coords = candidates[-3]
+        else:  # Might not find true optimum because of circle around optimum -> thus 30 candidates
             candidates = self.find_circle_intersection_candidates(start_coord, end_coord, act_type,
                                                                   distance_start_to_act,
-                                                                  distance_act_to_end, num_candidates)
-        candidate_potentials = candidates[-2]
-        candidate_coords = candidates[-3]
+                                                                  distance_act_to_end, num_candidates=40)
+
+            candidate_identifiers, candidate_names, candidate_coords, candidate_potentials, candidate_distances = candidates
+            candidates = candidate_identifiers, candidate_names, candidate_coords, candidate_potentials, None
+        """
+        else: #TODO: debug test
+            candidates, iterations = self.target_locations.find_overlapping_rings_candidates(act_type,
+                                                                                             start_coord, end_coord,
+                                                                                             distance_start_to_act,
+                                                                                             distance_start_to_act,
+                                                                                             distance_act_to_end,
+                                                                                             distance_act_to_end,
+                                                                                             min_candidates=20,
+                                                                                             max_candidates=None,
+                                                                                             max_iterations=15)
+        
+        candidate_identifiers, candidate_coords, candidate_potentials = candidates
+        # For compatibility
+        candidates = candidate_identifiers, None, candidate_coords, candidate_potentials, None
+        """
+
         candidate_distance_deviations = h.get_abs_distance_deviations(candidate_coords, start_coord,
                                                                       distance_start_to_act)
         candidate_distance_deviations += h.get_abs_distance_deviations(candidate_coords, end_coord, distance_act_to_end)

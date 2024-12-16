@@ -17,7 +17,7 @@ def run_location_assignment():
     """Runs the location assignment algorithm(s) on the given population and locations CSV files."""
     population_df = h.read_csv(h.get_files(r"data/mid/enhanced"))
     locations_json_path = r"playground/reformatted_data2.json"
-    algorithms_to_run = ['load_main', 'filter', 'advanced_petre']  # prepend "load_" to load intermediate results
+    algorithms_to_run = ['load_main', 'advanced_petre']  # prepend "load_" to load intermediate results
     save_intermediate_results = True
     assert_no_missing_locations = False
     filter_by_person = "10474610_12005_10474614"
@@ -59,10 +59,10 @@ def run_location_assignment():
             mobile_population_df = run_main(
                 mobile_population_df, target_locations)
         elif algorithm == 'advanced_petre':
-            number_of_branches = 100
+            number_of_branches = 300
             max_candidates = None
             anchor_strategy = "lower_middle"
-            min_candidates = 1
+            min_candidates = 100
 
             stats_tracker.log("number_of_branches", number_of_branches)
             stats_tracker.log("max_candidates", max_candidates)
@@ -98,8 +98,8 @@ def run_location_assignment():
         num_branches_string = ""
         min_candidates_string = ""
     result_df.to_csv(os.path.join(pipeline_setup.OUTPUT_DIR, f"location_assignment_result_{algos_string}"
-                                                             f"{num_branches_string}.csv"
-                                                             f"{min_candidates_string}"),
+                                                             f"{num_branches_string}"
+                                                             f"{min_candidates_string}.csv"),
                      index=False)
     logger.info(f"Wrote location assignment result to {pipeline_setup.OUTPUT_DIR}.")
     stats_tracker.write_stats_to_file(os.path.join(pipeline_setup.OUTPUT_DIR, "location_assignment_stats.txt"))

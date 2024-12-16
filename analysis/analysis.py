@@ -9,8 +9,7 @@ import numpy.linalg as la
 import os
 import folium
 
-from synthesis.data_prep.mid_data_enhancer import MiDDataEnhancer
-from utils import helpers as h
+
 from utils import pipeline_setup
 from utils import data_frame_processor as dfp
 from utils import settings as s
@@ -305,43 +304,6 @@ def analyze_influence_on_slack(df):
     model = sm.OLS(y, X).fit()
 
     return model.summary()
-
-def weirdstuff():
-    # df = h.read_csv("data/MiD2017_Wege_edited.csv")
-    # # analysis = DataframeAnalysis(df)
-    # columns_to_plot = []
-    # # columns_to_plot.extend(s.L_COLUMNS.values())
-    # columns_to_plot.extend(s.P_COLUMNS.values())
-    # columns_to_plot.extend(s.HH_COLUMNS.values())
-    # # analysis.plot_valid_vs_anomalous(columns_to_plot)
-    # for col in s.L_COLUMNS.values():
-    #     h.plot_column(df, col)
-
-    # slack_df = h.read_csv("data/slack_factors_raw.csv")
-    # persons_df = h.read_csv(s.MiD_PERSONS_FILE)
-    # slack_df = slack_df.merge(persons_df, on=s.PERSON_ID_COL, how='left')
-    # print(analyze_influence_on_slack(slack_df))
-
-    # ttdf1 = h.read_csv("data/TTmatrices/hour_Min_0_Max 1car_travel_times.csv" )
-    # ttdf2 = h.read_csv("data/TTmatrices/hour_Min_4_Max 5car_distances.csv", "FROM")
-    # ttdf3= h.read_csv("data/TTmatrices/hour_Min_4_Max 5car_travel_times.csv", "FROM")
-    # connections_df = h.read_csv("output/20240103_020348/leg_connections_logs.csv")  # TODO:repeat and check.
-    enhanced_mid_df = h.read_csv("output/enhanced_frame_final.csv")
-    #  mid_df = h.read_csv(s.MiD_TRIPS_FILE)  # TODO: check num of rows (enh: 999803)
-    logger.info("Loaded DataFrame")
-    # Filter out where time and distance are False
-    # connections_df = connections_df[(connections_df['mode_match'] != False) & (connections_df["activity_match"] != False)]
-    # Add a col that is true when all four comparisons are true
-    # connections_df['all_match'] = connections_df[['mode_match', 'activity_match', 'time_match', 'dist_match']].all(axis=1)
-
-    pop = MiDDataEnhancer(enhanced_mid_df)
-    pop.check_for_merge_suffixes()
-
-    ana = DataframeAnalysis(enhanced_mid_df)
-    logger.info(f"Rows: {len(enhanced_mid_df)} Columns: {len(enhanced_mid_df.columns)}")
-    vc_df = ana.df_value_counts()
-    vc_df.to_csv("testdata/analyze/enhanced_final_mid_analysis.csv", index=False)
-    logger.info("Done")
 
 
 def plot_sigmoid():

@@ -139,7 +139,7 @@ def process(my_target_locations, segmented_dict):
     # random = np.random.RandomState(context.config("random_seed"))
     random = np.random.RandomState()
     # maximum_iterations = context.config("secloc_maximum_iterations")
-    maximum_iterations = 1000
+    maximum_iterations = 10
 
     # Set up discretization solver
     # candidate_index = CandidateIndex(destinations)

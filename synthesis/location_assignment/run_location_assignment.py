@@ -13,14 +13,19 @@ from utils.stats_tracker import stats_tracker
 logger = logging.getLogger(__name__)
 
 
-def run_location_assignment():
-    """Runs the location assignment algorithm(s) on the given population and locations CSV files."""
-    population_df = h.read_csv(h.get_files(r"data/mid/enhanced"))
-    locations_json_path = r"playground/reformatted_data2.json"
-    algorithms_to_run = ['load_main', 'advanced_petre']  # prepend "load_" to load intermediate results
-    save_intermediate_results = True
-    assert_no_missing_locations = False
-    filter_by_person = "10474610_12005_10474614"
+def run_location_assignment(configs):
+    logger.info("Starting location assignment.")
+    for config in configs.items():
+        logger.info(f"{config}")
+
+    locations_json_folder = configs["general"]["locations_json_folder"]
+    algorithms_to_run = configs["general"]["algorithms_to_run"]
+
+    save_intermediate_results = configs["general"]["save_intermediate_results"]
+    assert_no_missing_locations = configs["general"]["assert_no_missing_locations"]
+    filter_max_distance = configs["general"]["filter_max_distance"]
+    filter_number_of_persons = configs["general"]["filter_number_of_persons"]
+    filter_by_person = configs["general"]["filter_by_person"]
 
     # Early check if all algorithms are valid
     valid_algorithms = ['hoerl', 'simple_lelke', 'greedy_petre', 'main', 'advanced_petre', 'filter']
@@ -32,13 +37,16 @@ def run_location_assignment():
         raise ValueError(f"Invalid algorithm. Valid algorithms are: {valid_algorithms}")
 
     # Build the common KDTree for the locations
-    target_locations = al.TargetLocations(locations_json_path)
+    target_locations = al.TargetLocations(h.get_files(locations_json_folder))
+
+    # Load the population dataframe
+    population_df = h.read_csv(h.get_files(configs["general"]["population_df_folder"]))
 
     # Prepare the population dataframe, split off non-mobile persons
     mobile_population_df, non_mobile_population_df = (al.prepare_population_df_for_location_assignment
                                                       (population_df,
-                                                       number_of_persons=1000,
-                                                       filter_max_distance=20000))
+                                                       number_of_persons=filter_number_of_persons,
+                                                       filter_max_distance=filter_max_distance))
 
     for algorithm in algorithms_to_run:
         if algorithm.startswith("load"):
@@ -59,18 +67,8 @@ def run_location_assignment():
             mobile_population_df = run_main(
                 mobile_population_df, target_locations)
         elif algorithm == 'advanced_petre':
-            number_of_branches = 300
-            max_candidates = None
-            anchor_strategy = "lower_middle"
-            min_candidates = 100
-
-            stats_tracker.log("number_of_branches", number_of_branches)
-            stats_tracker.log("max_candidates", max_candidates)
-            stats_tracker.log("anchor_strategy", anchor_strategy)
-
             mobile_population_df = run_advanced_petre(
-                mobile_population_df, target_locations, number_of_branches=number_of_branches,
-                max_candidates=max_candidates, anchor_strategy=anchor_strategy, min_candidates=min_candidates)
+                mobile_population_df, target_locations, configs.get("advanced_petre"))
         else:
             raise ValueError("Invalid algorithm.")
 
@@ -92,17 +90,21 @@ def run_location_assignment():
                           inplace=True)
     algos_string = "_".join(algorithms_to_run)
     if "advanced_petre" in algorithms_to_run:
-        num_branches_string = f"_{number_of_branches}-branches"
-        min_candidates_string = f"_{min_candidates}-min-candidates"
+        num_branches_string = f"_{configs['advanced_petre']['number_of_branches']}-branches"
+        min_candidates_complex_string = f"_{configs['advanced_petre']['min_candidates_complex_case']}-min-cand-complex"
+        candidates_two_leg_string = f"_{configs['advanced_petre']['candidates_two_leg_case']}-min-cand-two-leg"
     else:
         num_branches_string = ""
-        min_candidates_string = ""
+        candidates_two_leg_string = ""
+        min_candidates_complex_string = ""
     result_df.to_csv(os.path.join(pipeline_setup.OUTPUT_DIR, f"location_assignment_result_{algos_string}"
                                                              f"{num_branches_string}"
-                                                             f"{min_candidates_string}.csv"),
+                                                             f"{candidates_two_leg_string}"
+                                                             f"{min_candidates_complex_string}.csv"),
                      index=False)
     logger.info(f"Wrote location assignment result to {pipeline_setup.OUTPUT_DIR}.")
     stats_tracker.write_stats_to_file(os.path.join(pipeline_setup.OUTPUT_DIR, "location_assignment_stats.txt"))
+
 
 def load_intermediate(algorithm: str):
     intermediate_to_load = algorithm[len("load_"):]
@@ -171,23 +173,53 @@ def run_main(population_df, target_locations):
     return h.add_from_location(population_df, 'to_location', 'from_location')
 
 
-def run_advanced_petre(population_df, target_locations, number_of_branches: int = 10, max_candidates=None,
-                       anchor_strategy: Literal["lower_middle", "upper_middle", "start", "end"] = "lower_middle", min_candidates=None):
+def run_advanced_petre(population_df, target_locations, config):
     """Runs the Advanced Petre algorithm on the given population and locations CSV files."""
     logger.info("Starting Advanced Petre algorithm.")
-    legs_dict = al.populate_legs_dict_from_df(population_df)
+    legs_dict = al.convert_to_segmented_plans(population_df)
     logger.info("Dict populated.")
-    segmented_dict = al.segment_plans(legs_dict)
+    segmented_dict = al.new_segment_plans(legs_dict)
     logger.info("Dict segmented.")
-    advance_petre_algorithm = al.AdvancedPetreAlgorithm(target_locations, segmented_dict,
-                                                        number_of_branches=number_of_branches,
-                                                        max_candidates=max_candidates,
-                                                        anchor_strategy=anchor_strategy,
-                                                        min_candidates=min_candidates)
+    advance_petre_algorithm = al.AdvancedPetreAlgorithm(target_locations, segmented_dict, config)
     result_dict = advance_petre_algorithm.run()
     population_df = al.write_placement_results_dict_to_population_df(result_dict, population_df)
     return h.add_from_location(population_df, 'to_location', 'from_location')
 
+def main():
+    configs = {
+        "general": {
+            "population_df_folder": r"data/mid/enhanced",
+            "locations_json_folder": r"data/locations",
+            "algorithms_to_run": ['load_main', 'advanced_petre'],  # prepend "load_" to load intermediate results
+            "save_intermediate_results": False,
+            "assert_no_missing_locations": True,
+            "filter_by_person": "10474610_12005_10474614",
+            "filter_number_of_persons": 1000,
+            "filter_max_distance": 20000,
+        },
+        "advanced_petre": {
+            "number_of_branches": 100,
+            "min_candidates_complex_case": 10,  # Candidates for evaluation (higher = more accurate, slower)
+            "candidates_two_leg_case": 20,
+            "max_candidates": None,
+            # If more candidates are found, gets a random sample of this size, only these are evaluated. (negligible speedup, should be None)
+            "anchor_strategy": "lower_middle",
+            "selection_strategy_complex_case": "mixed",
+            "selection_strategy_two_leg_case": "top_n",
+            "max_radius_reduction_factor": None,
+            "max_iterations_complex_case": 15,
+            # How long rings are expanded before raising error (as this points to data issues)
+        },
+    }
+    run_location_assignment(configs)
 
 if __name__ == "__main__":
-    run_location_assignment()
+    import cProfile
+    import pstats
+
+    # Wrap the function call with arguments in a lambda
+    cProfile.run('main()', r'C:\Users\petre\Documents\GitHub\MATSimPipeline\output\profile_stats')
+
+    # Read the stats
+    # stats = pstats.Stats('profile_stats')
+    # stats.strip_dirs().sort_stats('cumulative').print_stats(10)

@@ -1363,7 +1363,7 @@ class MatrixMainLocationAlgorithm:
 
 class EvaluationFunction:
     @staticmethod
-    def select_candidates(
+    def select_candidates_old(
             candidates: Tuple[np.ndarray, ...],
             scores: np.ndarray,
             num_candidates: int,
@@ -1441,7 +1441,7 @@ class EvaluationFunction:
         return selected_candidates, np.atleast_1d(scores[chosen_indices].squeeze())
 
     @staticmethod
-    def select_candidate_indices(
+    def select_candidate_indices_old(
             scores: np.ndarray,
             num_candidates: int,
             strategy: str = 'monte_carlo',
@@ -1560,6 +1560,177 @@ class EvaluationFunction:
 
         return chosen_candidate
 
+    @classmethod
+    def select_candidate_indices(
+            cls,
+            scores: np.ndarray,
+            num_candidates: int,
+            strategy: str = 'monte_carlo',
+            top_portion: float = 0.5,
+            coords: np.ndarray = None,
+            num_cells_x: int = 20,
+            num_cells_y: int = 20
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Select the indices of candidates based on their normalized scores using Monte Carlo sampling,
+        a top-n strategy, a mixed strategy, or spatial downsampling.
+
+        :param scores: A 1D numpy array of scores corresponding to candidates.
+        :param num_candidates: The number of candidates to select.
+        :param strategy: Selection strategy ('monte_carlo', 'top_n', 'mixed', or 'spatial_downsample').
+        :param top_portion: Portion of candidates to select from the top scores when using the 'mixed' strategy.
+        :param coords: 2D numpy array of shape (n, 2) with candidate spatial coordinates (required for spatial_downsample).
+        :param num_cells_x: Number of cells along the longitude (spatial_downsample).
+        :param num_cells_y: Number of cells along the latitude (spatial_downsample).
+        :return: A tuple containing:
+                 - The selected indices of the best candidates.
+                 - A 1D array of the scores corresponding to the selected indices.
+        """
+        assert len(scores) > 0, "The scores array cannot be empty."
+        if num_candidates >= len(scores):
+            stats_tracker.increment("Select_candidates_indices: All candidates selected")
+            return np.arange(len(scores)), scores
+
+        if strategy == 'monte_carlo':
+            stats_tracker.increment("Scoring runs (Monte Carlo)")
+            normalized_scores = scores / np.sum(scores, dtype=np.float64)
+            chosen_indices = np.random.choice(len(scores), num_candidates, p=normalized_scores, replace=False)
+
+        elif strategy == 'top_n':
+            stats_tracker.increment("Scoring runs (Top N)")
+            chosen_indices = np.argsort(scores)[-num_candidates:][::-1]  # Top scores in descending order
+
+        elif strategy == 'mixed':
+            stats_tracker.increment("Scoring runs (Mixed)")
+            num_top = int(np.ceil(num_candidates * top_portion))
+            num_monte_carlo = num_candidates - num_top
+
+            sorted_indices = np.argsort(scores)[-num_top:][::-1]
+            remaining_indices = np.setdiff1d(np.arange(len(scores)), sorted_indices)
+
+            if len(remaining_indices) > 0 and num_monte_carlo > 0:
+                remaining_scores = scores[remaining_indices]
+                normalized_remaining_scores = remaining_scores / np.sum(remaining_scores, dtype=np.float64)
+                monte_carlo_indices = np.random.choice(remaining_indices, num_monte_carlo,
+                                                       p=normalized_remaining_scores, replace=False)
+                chosen_indices = np.concatenate((sorted_indices, monte_carlo_indices))
+            else:
+                chosen_indices = sorted_indices
+
+        elif strategy == 'spatial_downsample':
+            assert coords is not None, "Coordinates (coords) are required for spatial_downsample strategy."
+            stats_tracker.increment("Scoring runs (Spatial Downsample)")
+            chosen_indices = cls.even_spatial_downsample(
+                (coords,), num_cells_x=num_cells_x, num_cells_y=num_cells_y
+            )[:num_candidates]
+
+        else:
+            raise ValueError(
+                "Invalid selection strategy. Use 'monte_carlo', 'top_n', 'mixed', or 'spatial_downsample'.")
+
+        chosen_scores = scores[chosen_indices]
+        return chosen_indices, chosen_scores
+
+    @classmethod
+    def select_candidates(
+            cls,
+            candidates: Tuple[np.ndarray, ...],
+            scores: np.ndarray,
+            num_candidates: int,
+            strategy: str = 'monte_carlo',
+            top_portion: float = 0.5,
+            coords: np.ndarray = None,
+            num_cells_x: int = 20,
+            num_cells_y: int = 20
+    ) -> Tuple[Tuple[np.ndarray, ...], np.ndarray]:
+        """
+        Selects a specified number of candidates based on their scores using various strategies.
+
+        :param candidates: A tuple of arrays with the candidates.
+        :param scores: A 1D array of scores corresponding to the candidates.
+        :param num_candidates: The number of candidates to select.
+        :param strategy: Selection strategy ('monte_carlo', 'top_n', 'mixed', or 'spatial_downsample').
+        :param top_portion: Portion of candidates to select from the top scores when using the 'mixed' strategy.
+        :param coords: 2D numpy array of candidate spatial coordinates (required for 'spatial_downsample').
+        :param num_cells_x: Number of cells along the longitude (spatial_downsample).
+        :param num_cells_y: Number of cells along the latitude (spatial_downsample).
+        :return: A tuple containing:
+            - A tuple of arrays with the selected candidates.
+            - A 1D array of the scores corresponding to the selected candidates.
+        """
+        assert len(candidates[0]) == len(scores), "The number of candidates and scores must match."
+
+        chosen_indices, chosen_scores = cls.select_candidate_indices(
+            scores, num_candidates, strategy, top_portion, coords, num_cells_x, num_cells_y
+        )
+
+        selected_candidates = tuple(
+            np.atleast_1d(arr[chosen_indices].squeeze()) if arr is not None else None for arr in candidates
+        )
+
+        return selected_candidates, chosen_scores
+
+    @staticmethod
+    def select_candidates_on_indices(candidates: Tuple[np.ndarray, ...], indices: np.ndarray):
+        """
+        Select candidates based on provided indices.
+
+        :param candidates: A tuple of arrays with the candidates.
+        :param indices: A 1D array of indices corresponding to the selected candidates.
+        :return: A tuple containing the selected candidates.
+        """
+        assert len(indices) > 0, "Indices array cannot be empty."
+
+        selected_candidates = tuple(
+            np.atleast_1d(arr[indices].squeeze()) if arr is not None else None for arr in candidates
+        )
+
+        return selected_candidates
+
+    @staticmethod
+    def even_spatial_downsample(coords, num_cells_x=20, num_cells_y=20):
+        """
+        Downsample points and return indices of the kept points.
+
+        Parameters:
+        - coords: 2D coordinates array (n, 2)
+        - num_cells_x: Number of cells along the longitude.
+        - num_cells_y: Number of cells along the latitude.
+
+        Returns:
+        - A list of indices of the points that are kept after downsampling.
+        """
+        lats = coords[:, 0]
+        lons = coords[:, 1]
+
+        min_lat, max_lat = lats.min(), lats.max()
+        min_lon, max_lon = lons.min(), lons.max()
+
+        lat_range = max_lat - min_lat or 1e-9
+        lon_range = max_lon - min_lon or 1e-9
+
+        lat_step = lat_range / max(num_cells_y, 1)
+        lon_step = lon_range / max(num_cells_x, 1)
+
+        total_cells = num_cells_x * num_cells_y
+        filled_cells = set()
+        kept_indices = []
+
+        for i in range(len(coords)):
+            lat, lon = lats[i], lons[i]
+            cell_x = min(int((lon - min_lon) / lon_step), num_cells_x - 1)
+            cell_y = min(int((lat - min_lat) / lat_step), num_cells_y - 1)
+            cell_id = cell_y * num_cells_x + cell_x
+
+            if cell_id not in filled_cells:
+                kept_indices.append(i)
+                filled_cells.add(cell_id)
+
+            # Stop early if all cells are filled
+            if len(filled_cells) == total_cells:
+                break
+
+        return kept_indices
 
 class CircleIntersection:
     def __init__(self, target_locations: TargetLocations):

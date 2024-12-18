@@ -26,6 +26,7 @@ def run_location_assignment(configs):
     filter_max_distance = configs["general"]["filter_max_distance"]
     filter_number_of_persons = configs["general"]["filter_number_of_persons"]
     filter_by_person = configs["general"]["filter_by_person"]
+    skip_loading_full_population = configs["general"]["skip_loading_full_population"]
 
     # Early check if all algorithms are valid
     valid_algorithms = ['hoerl', 'simple_lelke', 'greedy_petre', 'main', 'advanced_petre', 'filter']
@@ -39,14 +40,15 @@ def run_location_assignment(configs):
     # Build the common KDTree for the locations
     target_locations = al.TargetLocations(h.get_files(locations_json_folder))
 
-    # Load the population dataframe
-    population_df = h.read_csv(h.get_files(configs["general"]["population_df_folder"]))
+    if not skip_loading_full_population:
+        # Load the population dataframe
+        population_df = h.read_csv(h.get_files(configs["general"]["population_df_folder"]))
 
-    # Prepare the population dataframe, split off non-mobile persons
-    mobile_population_df, non_mobile_population_df = (al.prepare_population_df_for_location_assignment
-                                                      (population_df,
-                                                       number_of_persons=filter_number_of_persons,
-                                                       filter_max_distance=filter_max_distance))
+        # Prepare the population dataframe, split off non-mobile persons
+        mobile_population_df, non_mobile_population_df = (al.prepare_population_df_for_location_assignment
+                                                          (population_df,
+                                                           number_of_persons=filter_number_of_persons,
+                                                           filter_max_distance=filter_max_distance))
 
     for algorithm in algorithms_to_run:
         if algorithm.startswith("load"):
@@ -195,7 +197,8 @@ def main():
             "assert_no_missing_locations": True,
             "filter_by_person": "10474610_12005_10474614",
             "filter_number_of_persons": 1000,
-            "filter_max_distance": 20000,
+            "filter_max_distance": 200000,
+            "skip_loading_full_population": True
         },
         "advanced_petre": {
             "number_of_branches": 100,

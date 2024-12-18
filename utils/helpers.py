@@ -1524,13 +1524,14 @@ def spread_distances(distance1, distance2, iteration=0, first_step=20, base=1.5)
         distance2 += step
     return max(0, distance1), max(0, distance2)
 
-
 def get_abs_distance_deviations(candidate_coordinates, location, wanted_distance):
-    # Ensure candidate_coordinates is 2D, even if it contains only one coordinate
-    candidate_coordinates = np.atleast_2d(candidate_coordinates)
+    # Handle single-coordinate case by reshaping
+    if candidate_coordinates.ndim == 1:  # Single coordinate (1D array)
+        candidate_coordinates = candidate_coordinates[np.newaxis, :]  # Make it 2D
+
+    # Calculate distances
     candidate_distances = np.linalg.norm(candidate_coordinates - location, axis=1)
     return np.abs(candidate_distances - wanted_distance)
-
 
 def get_main_activity_leg(person_legs: UnSegmentedPlan):
     main_activity_leg = None

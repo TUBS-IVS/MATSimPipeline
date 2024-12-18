@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 # from sklearn.neighbors import KDTree
-from scipy.spatial import KDTree
+from scipy.spatial import cKDTree
 
 from utils import settings as s, helpers as h, pipeline_setup
 #from utils.types import PlanLeg, PlanSegment, SegmentedPlan, SegmentedPlans, UnSegmentedPlan, UnSegmentedPlans
@@ -251,11 +251,11 @@ class TargetLocations:
 
     def __init__(self, json_folder_path: str):
         self.data: Dict[str, Dict[str, np.ndarray]] = self.load_reformatted_osmox_data(h.get_files(json_folder_path))
-        self.indices: Dict[str, KDTree] = {}
+        self.indices: Dict[str, cKDTree] = {}
 
         for type, pdata in self.data.items():
             logger.info(f"Constructing spatial index for {type} ...")
-            self.indices[type] = KDTree(pdata["coordinates"])
+            self.indices[type] = cKDTree(pdata["coordinates"])
 
     @staticmethod
     def load_reformatted_osmox_data(file_path: str):
@@ -305,7 +305,7 @@ class TargetLocations:
     #
     #     return candidate_identifiers, candidate_names, candidate_coordinates, candidate_potentials, candidate_distances
 
-    def query_closest(self, type: str, location: np.ndarray, num_candidates: int = 1) -> Tuple[
+    def query_closest_old(self, type: str, location: np.ndarray, num_candidates: int = 1) -> Tuple[
         np.ndarray, np.ndarray, np.ndarray]:
         """
         Find the nearest activity locations for a given location and type.
@@ -319,25 +319,46 @@ class TargetLocations:
 
         # Query the KDTree for the nearest locations
         _, indices = self.indices[type].query(location, k=num_candidates)
+        clean_indices = indices.ravel()
 
         # Retrieve data directly without unnecessary copying or reshaping
         data_type = self.data[type]
-        candidate_identifiers = data_type["identifiers"][indices]
-        candidate_coordinates = data_type["coordinates"][indices]
-        candidate_potentials = data_type["potentials"][indices]
+        candidate_identifiers = data_type["identifiers"][clean_indices]
+        candidate_coordinates = data_type["coordinates"][clean_indices]
+        candidate_potentials = data_type["potentials"][clean_indices]
 
         # Return the results as they are (already shaped correctly by KDTree.query)
         return candidate_identifiers, candidate_coordinates, candidate_potentials
 
+    def query_closest(self, type: str, location: np.ndarray, num_candidates: int = 1) -> Tuple[
+        np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Find the nearest activity locations for one or more points.
+        :param type: The type category to query.
+        :param location: A 1D numpy array for a single point (e.g., [1.5, 2.5]) or a 2D numpy array for multiple points (e.g., [[1.5, 2.5], [3.0, 4.0]]).
+        :param num_candidates: The number of nearest candidates to return.
+        :return: A tuple containing numpy arrays: identifiers, coordinates, and potentials of the nearest candidates.
+        """
+        # Query the KDTree directly (handles both 1D and 2D inputs)
+        _, indices = self.indices[type].query(location, k=num_candidates)
+
+        # Retrieve data for the nearest candidates
+        data_type = self.data[type]
+        return (
+            data_type["identifiers"][indices],
+            data_type["coordinates"][indices],
+            data_type["potentials"][indices],
+        )
+
     def query_within_ring(self, act_type: str, location: np.ndarray, radius1: float, radius2: float) -> Tuple[
-        np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        np.ndarray, np.ndarray, np.ndarray]:
         """
         Find the activity locations within a ring defined by two radii around a location and type.
         :param act_type: The activity category to query.
         :param location: A 1D numpy array representing the location to query (coordinates [1.5, 2.5]).
         :param radius1: Any of the two radii defining the ring.
         :param radius2: The other one.
-        :return: A tuple containing four numpy arrays: identifiers, coordinates (2D array), distances, and remaining potentials of the nearest candidates.
+        :return: A tuple containing identifiers, coordinates, and remaining potentials of candidates.
         """
         # Ensure location is a 2D array with a single location
         location = location.reshape(1, -1)
@@ -345,95 +366,111 @@ class TargetLocations:
         outer_radius = max(radius1, radius2)
         inner_radius = min(radius1, radius2)
 
-        outer_indices = self.indices[act_type].query_ball_point(location, outer_radius)
-        if outer_indices is None:
+        # Query points within the outer radius
+        tree: cKDTree = self.indices[act_type]
+        outer_indices = tree.query_ball_point(location, outer_radius)[0]  # Indices of points within the outer radius
+
+        if not outer_indices:
             return None
-        if len(outer_indices[0]) == 0:
-            return None
 
-        inner_indices = self.indices[act_type].query_ball_point(location, inner_radius)
+        # Query points within the inner radius
+        inner_indices = tree.query_ball_point(location, inner_radius)[0]  # Indices of points within the inner radius
 
-        outer_indices_set = set(outer_indices[0])
-        inner_indices_set = set(inner_indices[0])
+        # Filter indices to get only points in the annulus
+        annulus_indices = list(set(outer_indices) - set(inner_indices))
 
-        annulus_indices = list(outer_indices_set - inner_indices_set)
         if not annulus_indices:
             return None
 
-        # Get the identifiers, coordinates, and distances for locations within the annulus
-        candidate_identifiers = np.atleast_1d(np.array(self.data[act_type]["identifiers"])[annulus_indices].squeeze())
-        candidate_names = np.atleast_1d(np.array(self.data[act_type]["names"])[annulus_indices].squeeze())
-        candidate_coordinates = np.atleast_1d(np.array(self.data[act_type]["coordinates"])[annulus_indices].squeeze())
-        candidate_potentials = np.atleast_1d(np.array(self.data[act_type]["potentials"])[annulus_indices].squeeze())
-        candidate_distances = None
+        # Retrieve corresponding activity data
+        data_type = self.data[act_type]
+        identifiers = data_type["identifiers"][annulus_indices]
+        coordinates = data_type["coordinates"][annulus_indices]
+        potentials = data_type["potentials"][annulus_indices]
 
-        # Reshape to 2D arrays so everything is consistent and nicely below each other
-        candidate_identifiers = candidate_identifiers.reshape(-1, 1)
-        candidate_names = candidate_names.reshape(-1, 1)
-        candidate_potentials = candidate_potentials.reshape(-1, 1)
-        # candidate_coordinates = candidate_coordinates.reshape(-1, 2)  # Coordinates stay as 2D
+        return identifiers, coordinates, potentials
 
-        return candidate_identifiers, candidate_names, candidate_coordinates, candidate_potentials, candidate_distances
+    # def query_within_ring(self, act_type: str, location: np.ndarray, radius1: float, radius2: float) -> Tuple[
+    #     np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    #     """
+    #     Find the activity locations within a ring defined by two radii around a location and type.
+    #     :param act_type: The activity category to query.
+    #     :param location: A 1D numpy array representing the location to query (coordinates [1.5, 2.5]).
+    #     :param radius1: Any of the two radii defining the ring.
+    #     :param radius2: The other one.
+    #     :return: A tuple containing four numpy arrays: identifiers, coordinates (2D array), distances, and remaining potentials of the nearest candidates.
+    #     """
+    #     # Ensure location is a 2D array with a single location
+    #     location = location.reshape(1, -1)
+    #
+    #     outer_radius = max(radius1, radius2)
+    #     inner_radius = min(radius1, radius2)
+    #
+    #     outer_indices = self.indices[act_type].query_ball_point(location, outer_radius)
+    #     if outer_indices is None:
+    #         return None
+    #     if len(outer_indices[0]) == 0:
+    #         return None
+    #
+    #     inner_indices = self.indices[act_type].query_ball_point(location, inner_radius)
+    #
+    #     outer_indices_set = set(outer_indices[0])
+    #     inner_indices_set = set(inner_indices[0])
+    #
+    #     annulus_indices = list(outer_indices_set - inner_indices_set)
+    #     if not annulus_indices:
+    #         return None
+    #
+    #     # Get the identifiers, coordinates, and distances for locations within the annulus
+    #     candidate_identifiers = np.atleast_1d(np.array(self.data[act_type]["identifiers"])[annulus_indices].squeeze())
+    #     candidate_names = np.atleast_1d(np.array(self.data[act_type]["names"])[annulus_indices].squeeze())
+    #     candidate_coordinates = np.atleast_1d(np.array(self.data[act_type]["coordinates"])[annulus_indices].squeeze())
+    #     candidate_potentials = np.atleast_1d(np.array(self.data[act_type]["potentials"])[annulus_indices].squeeze())
+    #     candidate_distances = None
+    #
+    #     # Reshape to 2D arrays so everything is consistent and nicely below each other
+    #     candidate_identifiers = candidate_identifiers.reshape(-1, 1)
+    #     candidate_names = candidate_names.reshape(-1, 1)
+    #     candidate_potentials = candidate_potentials.reshape(-1, 1)
+    #     # candidate_coordinates = candidate_coordinates.reshape(-1, 2)  # Coordinates stay as 2D
+    #
+    #     return candidate_identifiers, candidate_names, candidate_coordinates, candidate_potentials, candidate_distances
 
     def query_within_two_overlapping_rings(self, act_type: str, location1: np.ndarray, location2: np.ndarray,
-                                           radius1a: float, radius1b: float, radius2a: float, radius2b: float,
-                                           max_number_of_candidates: int = None):
-        """
-        Find the activity locations within a ring defined by two radii around a location and type.
-        :param act_type: The activity category to query.
-        :param location1: A 1D numpy array representing the first location to query (coordinates [1.5, 2.5]).
-        :param location2: A 1D numpy array representing the second location to query (coordinates [1.5, 2.5]).
-        :param radius1a: One of the two radii defining the first ring.
-        :param radius1b: The other radius defining the first ring.
-        :param radius2a: One of the two radii defining the second ring.
-        :param radius2b: The other radius defining the second ring.
-        :param max_number_of_candidates: Reduces the number of candidates to evaluate, for some small performance gain.
-        :return: A tuple containing three numpy arrays: Identifiers, coordinates (2D array), potentials
-        """
-        # Ensure location is a 2D array with a single location
-        location1 = location1.reshape(1, -1)
-        location2 = location2.reshape(1, -1)
+                                                  radius1a: float, radius1b: float, radius2a: float, radius2b: float,
+                                                  max_number_of_candidates: int = None):
 
-        outer_radius1 = max(radius1a, radius1b)
-        inner_radius1 = min(radius1a, radius1b)
-        outer_radius2 = max(radius2a, radius2b)
-        inner_radius2 = min(radius2a, radius2b)
+        location1 = location1[None, :] if location1.ndim == 1 else location1
+        location2 = location2[None, :] if location2.ndim == 1 else location2
 
-        outer_indices1 = self.indices[act_type].query_ball_point(location1, outer_radius1)
-        outer_indices2 = self.indices[act_type].query_ball_point(location2, outer_radius2)
-        if outer_indices1 is None or outer_indices2 is None:
-            return None
-        if len(outer_indices1[0]) == 0 or len(outer_indices2[0]) == 0:
+        outer_radius1, inner_radius1 = max(radius1a, radius1b), min(radius1a, radius1b)
+        outer_radius2, inner_radius2 = max(radius2a, radius2b), min(radius2a, radius2b)
+
+        outer_indices1 = self.indices[act_type].query_ball_point(location1, outer_radius1)[0]
+        outer_indices2 = self.indices[act_type].query_ball_point(location2, outer_radius2)[0]
+
+        if not outer_indices1 or not outer_indices2:
             return None
 
-        inner_indices1 = self.indices[act_type].query_ball_point(location1, inner_radius1)
-        inner_indices2 = self.indices[act_type].query_ball_point(location2, inner_radius2)
-
-        outer_indices_set1 = set(outer_indices1[0])
-        inner_indices_set1 = set(inner_indices1[0])
-        outer_indices_set2 = set(outer_indices2[0])
-        inner_indices_set2 = set(inner_indices2[0])
-
-        overlapping_rings_indices = list(outer_indices_set1.intersection(outer_indices_set2) -
-                                         inner_indices_set1.union(inner_indices_set2))
-        if not overlapping_rings_indices:
+        outer_intersection = set(outer_indices1).intersection(outer_indices2)
+        if not outer_intersection:
             return None
 
-        if max_number_of_candidates and len(overlapping_rings_indices) > max_number_of_candidates:
-            overlapping_rings_indices = random.sample(overlapping_rings_indices, max_number_of_candidates)
+        inner_indices1 = set(self.indices[act_type].query_ball_point(location1, inner_radius1)[0])
+        inner_indices2 = set(self.indices[act_type].query_ball_point(location2, inner_radius2)[0])
 
-        # Get the identifiers, coordinates, and distances for locations within the annulus
-        candidate_identifiers = np.atleast_1d(
-            np.array(self.data[act_type]["identifiers"])[overlapping_rings_indices].squeeze())
-        candidate_coordinates = np.atleast_1d(
-            np.array(self.data[act_type]["coordinates"])[overlapping_rings_indices].squeeze())
-        candidate_potentials = np.atleast_1d(
-            np.array(self.data[act_type]["potentials"])[overlapping_rings_indices].squeeze())
+        overlapping_indices = list(outer_intersection - (inner_indices1.union(inner_indices2)))
+        if not overlapping_indices:
+            return None
 
-        # Reshape to 2D arrays so everything is consistent and nicely below each other
-        candidate_identifiers = candidate_identifiers.reshape(-1, 1)
-        candidate_potentials = candidate_potentials.reshape(-1, 1)
-        # candidate_coordinates = candidate_coordinates.reshape(-1, 2)  # Coordinates stay as 2D
+        if max_number_of_candidates and len(overlapping_indices) > max_number_of_candidates:
+            overlapping_indices = np.random.choice(overlapping_indices, max_number_of_candidates, replace=False)
+
+        data = self.data[act_type]
+        overlapping_indices = np.array(overlapping_indices)
+        candidate_identifiers = data["identifiers"][overlapping_indices]
+        candidate_coordinates = data["coordinates"][overlapping_indices]
+        candidate_potentials = data["potentials"][overlapping_indices]
 
         return candidate_identifiers, candidate_coordinates, candidate_potentials
 
@@ -451,7 +488,7 @@ class TargetLocations:
 
     def find_ring_candidates(self, act_type: str, center: np.ndarray, radius1: float, radius2: float, max_iterations=15,
                              min_candidates=10, restrict_angle=False, direction_point=None, angle_range=math.pi / 2) -> \
-            Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+            Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Find candidates within a ring around a center point.
         Iteratively increase the radii until a sufficient number of candidates is found."""
         i = 0
@@ -626,7 +663,7 @@ class AdvancedPetreAlgorithm:
                 segment[0].distance, segment[1].distance, self.candidates_two_leg_case,
                 self.selection_strategy_two_leg_case
             )
-            updated_leg1 = segment[0]._replace(to_location=best_loc[1])
+            updated_leg1 = segment[0]._replace(to_location=best_loc[1], to_act_identifier=best_loc[0])
             updated_leg2 = segment[1]._replace(from_location=best_loc[1])
             return (updated_leg1, updated_leg2), best_loc[3]  # act_score
 
@@ -1552,7 +1589,7 @@ class CircleIntersection:
     #     candidate_identifiers, candidate_names, candidate_coordinates, candidate_potentials, candidate_distances = combined_candidates
     #     return candidate_identifiers, candidate_names, candidate_coordinates, candidate_potentials, candidate_distances
 
-    def find_circle_intersection_candidates(self, start_coord: np.ndarray, end_coord: np.ndarray, type: str,
+    def find_circle_intersection_candidates_old(self, start_coord: np.ndarray, end_coord: np.ndarray, type: str,
                                             distance_start_to_act: float, distance_act_to_end: float,
                                             num_candidates: int):
         """
@@ -1561,7 +1598,6 @@ class CircleIntersection:
         """
         intersect1, intersect2 = self.find_circle_intersections(start_coord, distance_start_to_act,
                                                                 end_coord, distance_act_to_end)
-        # TODO: fix formatting/indexes
         # Query candidates for the first intersection point
         candidates1 = self.target_locations.query_closest(type, intersect1, num_candidates)
 
@@ -1576,8 +1612,43 @@ class CircleIntersection:
         else:
             combined_identifiers, combined_coordinates, combined_potentials = candidates1
 
-        # Return only the required data
         return combined_identifiers, combined_coordinates, combined_potentials
+
+    def find_circle_intersection_candidates(self, start_coord: np.ndarray, end_coord: np.ndarray, type: str,
+                                            distance_start_to_act: float, distance_act_to_end: float,
+                                            num_candidates: int):
+        """
+        Find n location candidates for a given activity type between two known locations.
+        Returns two sets of candidates if two intersection points are found, otherwise only one set.
+        """
+        # Find the intersection points
+        intersect1, intersect2 = self.find_circle_intersections(
+            start_coord, distance_start_to_act,
+            end_coord, distance_act_to_end
+        )
+
+        # Handle both intersections in a single batch query if both points exist
+        if intersect2 is not None:
+            # Stack intersection points into a single array
+            locations_to_query = np.array([intersect1, intersect2])
+
+            # Perform a batched query for both intersection points
+            candidate_identifiers, candidate_coordinates, candidate_potentials = self.target_locations.query_closest(
+                type, locations_to_query, num_candidates
+            )
+
+            # Concatenate the results from the batch query
+            combined_identifiers = np.concatenate(candidate_identifiers, axis=0)
+            combined_coordinates = np.concatenate(candidate_coordinates, axis=0)
+            combined_potentials = np.concatenate(candidate_potentials, axis=0)
+        else:
+            # Query only the first intersection point
+            combined_identifiers, combined_coordinates, combined_potentials = self.target_locations.query_closest(
+                type, intersect1, num_candidates
+            )
+
+        return combined_identifiers, combined_coordinates, combined_potentials
+
 
     def find_circle_intersections(self, center1: np.ndarray, radius1: float, center2: np.ndarray, radius2: float) -> \
             Tuple[
@@ -1734,12 +1805,9 @@ class CircleIntersection:
         # If start and end locations are very close, fallback to ring search
         if h.euclidean_distance(start_coord, end_coord) < 1e-4:
             radius1, radius2 = h.spread_distances(distance_start_to_act, distance_act_to_end)
-            candidates = self.target_locations.find_ring_candidates(
+            candidate_ids, candidate_coords, candidate_potentials = self.target_locations.find_ring_candidates(
                 act_type, start_coord, radius1, radius2, min_candidates=1
             )
-            candidate_ids = candidates[0]  # Identifiers
-            candidate_coords = candidates[2]  # Coordinates
-            candidate_potentials = candidates[3]  # Potentials
         else:
             # Find intersection candidates between start and end
             candidate_ids, candidate_coords, candidate_potentials = self.find_circle_intersection_candidates(
@@ -1758,9 +1826,9 @@ class CircleIntersection:
         best_index = EvaluationFunction.select_candidate_indices(scores, 1, selection_strategy)[0]
 
         # Extract the selected candidate's data TODO: fix formatting/indexes
-        best_id = candidate_ids[best_index][0, 0]
-        best_coord = candidate_coords[best_index]
-        best_potential = candidate_potentials[best_index][0, 0]
+        best_id = candidate_ids[best_index][0]
+        best_coord = candidate_coords[best_index][0]
+        best_potential = candidate_potentials[best_index][0]
         best_score = scores[best_index][0]
 
         return best_id, best_coord, best_potential, best_score

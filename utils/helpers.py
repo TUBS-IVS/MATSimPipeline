@@ -1499,10 +1499,10 @@ def get_min_max_distance(arr):
 
     total_sum = sum(arr)
 
+    # Subset sum problem: Find the subset that gets closest to total_sum // 2
     dp = np.zeros(total_sum + 1, dtype=bool)
     dp[0] = True
 
-    # Update dp array for each number in arr using vectorized operations
     for num in arr:
         dp[num:] = dp[num:] | dp[:-num]
 
@@ -1554,3 +1554,64 @@ def get_main_activity_leg(person_legs: UnSegmentedPlan):
             )
         return None, None
     return main_activity_index, main_activity_leg
+
+
+def filter_feasible_data(data):
+    """Only keep persons where all segments are feasible."""
+    filtered_data = {}
+
+    for person_id, trips in data.items():
+        person_feasible = True  # Assume person is feasible until proven otherwise
+
+        for segments in trips:
+            # Extract distances and calculate direct distance for the entire segment
+            distances = np.array([leg['distance'] for leg in segments])
+            first_location = segments[0]['from_location']
+            last_location = segments[-1]['to_location']
+            direct_distance = euclidean_distance(first_location, last_location)
+
+            # Check feasibility of this segment group
+            if not check_feasibility(distances, direct_distance):
+                person_feasible = False
+                break  # No need to check further segments for this person
+
+        # If all segments are feasible, include the person in the output
+        if person_feasible:
+            filtered_data[person_id] = trips
+
+    return filtered_data
+
+def check_feasibility(distances, direct_distance, consider_total_distance=True):
+    """
+    @Author: Hoerl, Sebastian
+    :param distances:
+    :param direct_distance:
+    :param consider_total_distance:
+    :return:
+    """
+    return calculate_feasibility(distances, direct_distance, consider_total_distance) == 0.0
+
+def calculate_feasibility(distances, direct_distance, consider_total_distance=True):
+    """
+    @Author: Hoerl, Sebastian
+    :param distances:
+    :param direct_distance:
+    :param consider_total_distance:
+    :return:
+    """
+    # Really elegant way to calculate the feasibility of any chain
+
+    total_distance = np.sum(distances)
+    delta_distance = 0.0
+
+    # Remaining is the diff between each individual dist and the sum of all dists (so remaining is the sum of all distances except itself)
+    remaining_distance = total_distance - distances
+    # So this checks if we can get "back" to the end if one dist is very large and gets us far away
+    # If delta is larger than one, we can't get back to the end
+    delta = max(distances - direct_distance - remaining_distance)
+
+    # Delta gets positive if the real dist is larger than the sum of all distances
+    if consider_total_distance:
+        delta = max(delta, direct_distance - total_distance)
+
+    return float(max(delta, 0))

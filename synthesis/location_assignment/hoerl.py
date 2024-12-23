@@ -706,60 +706,60 @@ class GravityChainSolver:
         )
 
 
-#
-# class FeasibleDistanceSampler(DistanceSampler):
-#     def __init__(self, random, maximum_iterations = 1000):
-#         self.maximum_iterations = maximum_iterations
-#         self.random = random
-#
-#     def sample_distances(self, problem):
-#         # Return distance chains per row
-#         raise NotImplementedError()
-#
-#     def sample(self, problem):
-#         origin, destination = problem["origin"], problem["destination"]
-#
-#         if origin is None and destination is None: # This is a free chain
-#             distances = self.sample_distances(problem)
-#             return dict(valid = True, distances = distances, iterations = None)
-#
-#         elif origin is None: # This is a left tail
-#             distances = self.sample_distances(problem)
-#             return dict(valid = True, distances = distances, iterations = None)
-#
-#         elif destination is None: # This is a right tail
-#             distances = self.sample_distances(problem)
-#             return dict(valid = True, distances = distances, iterations = None)
-#
-#         direct_distance = la.norm(destination - origin, axis = 1)
-#
-#         # One point and two trips
-#         if direct_distance < 1e-3 and problem["size"] == 1:
-#             distances = self.sample_distances(problem)
-#             distances = np.array([distances[0], distances[0]])
-#
-#             return dict(valid = True, distances = distances, iterations = None)
-#
-#         # This is the general case
-#         best_distances = None
-#         best_delta = None
-#
-#         for k in range(self.maximum_iterations):
-#             distances = self.sample_distances(problem)
-#             delta = calculate_feasibility(distances, direct_distance)
-#
-#             if best_delta is None or delta < best_delta:
-#                 best_delta = delta
-#                 best_distances = distances
-#
-#                 if delta == 0.0:
-#                     break
-#
-#         return dict(
-#             valid = best_delta == 0.0,
-#             distances = best_distances,
-#             iterations = k
-#         )
+
+class FeasibleDistanceSampler(DistanceSampler):
+    def __init__(self, random, maximum_iterations = 1000):
+        self.maximum_iterations = maximum_iterations
+        self.random = random
+
+    def sample_distances(self, problem):
+        # Return distance chains per row
+        raise NotImplementedError()
+
+    def sample(self, problem):
+        origin, destination = problem["origin"], problem["destination"]
+
+        if origin is None and destination is None: # This is a free chain
+            distances = self.sample_distances(problem)
+            return dict(valid = True, distances = distances, iterations = None)
+
+        elif origin is None: # This is a left tail
+            distances = self.sample_distances(problem)
+            return dict(valid = True, distances = distances, iterations = None)
+
+        elif destination is None: # This is a right tail
+            distances = self.sample_distances(problem)
+            return dict(valid = True, distances = distances, iterations = None)
+
+        direct_distance = la.norm(destination - origin, axis = 1)
+
+        # One point and two trips
+        if direct_distance < 1e-3 and problem["size"] == 1:
+            distances = self.sample_distances(problem)
+            distances = np.array([distances[0], distances[0]])
+
+            return dict(valid = True, distances = distances, iterations = None)
+
+        # This is the general case
+        best_distances = None
+        best_delta = None
+
+        for k in range(self.maximum_iterations):
+            distances = self.sample_distances(problem)
+            delta = calculate_feasibility(distances, direct_distance)
+
+            if best_delta is None or delta < best_delta:
+                best_delta = delta
+                best_distances = distances
+
+                if delta == 0.0:
+                    break
+
+        return dict(
+            valid = best_delta == 0.0,
+            distances = best_distances,
+            iterations = k
+        )
 
 # Returns valid if the discretization error is below the threshold
 class DiscretizationErrorObjective(AssignmentObjective):

@@ -379,8 +379,8 @@ class TargetLocations:
         coordinates = self.data[act_type]["coordinates"][index]
         return identifier, coordinates
 
-    def find_ring_candidates(self, act_type: str, center: np.ndarray, radius1: float, radius2: float, max_iterations=15,
-                             min_candidates=10, restrict_angle=False, direction_point=None, angle_range=math.pi / 2) -> \
+    def find_ring_candidates(self, act_type: str, center: np.ndarray, radius1: float, radius2: float, max_iterations=20,
+                             min_candidates=10, restrict_angle=False, direction_point=None, angle_range=math.pi / 1.5) -> \
             Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Find candidates within a ring around a center point.
         Iteratively increase the radii until a sufficient number of candidates is found."""
@@ -393,7 +393,7 @@ class TargetLocations:
                 # Filter candidates by angle
                 if restrict_angle:
                     angle_candidates = []
-                    for j, candidate_location in enumerate(candidates[2]):
+                    for j, candidate_location in enumerate(candidates[1]):
                         if is_within_angle(candidate_location, center, direction_point, angle_range):
                             angle_candidates.append(j)
                     candidates = tuple(
@@ -1115,12 +1115,11 @@ class SimpleLelkeAlgorithm:
             candidates = self.target_locations.find_ring_candidates(person_legs[0]['to_act_type'],
                                                                     person_legs[0]['from_location'], distance1,
                                                                     distance2)
-            act_identifier, act_name, act_coord, act_cap, act_dist, act_score = (
+            act_identifier, act_coord, act_cap, act_score = (
                 EvaluationFunction.monte_carlo_select_candidate(candidates))
             person_legs[0]['to_location'] = act_coord
             person_legs[1]['from_location'] = act_coord
             person_legs[0]['to_act_identifier'] = act_identifier
-            person_legs[0]['to_act_name'] = act_name
             person_legs[0]['to_act_cap'] = act_cap
             person_legs[0]['to_act_score'] = act_score
             return person_legs
@@ -1148,7 +1147,7 @@ class SimpleLelkeAlgorithm:
                             "Selecting location using simple two-leg method.")
                         assert person_legs[-1] == person_legs[
                             i + 1], "Last leg must be the last leg."  # TODO: Remove this line in production
-                        act_identifier, act_name, act_coord, act_cap, act_dist, act_score = \
+                        act_identifier, act_coord, act_cap, act_score = \
                             self.c_i.get_best_circle_intersection_location(person_legs[i]['from_location'],
                                                                            person_legs[-1]['to_location'],
                                                                            person_legs[i]['to_act_type'],
@@ -1164,9 +1163,9 @@ class SimpleLelkeAlgorithm:
                                                                                 person_legs[i]['from_location'],
                                                                                 radius1, radius2, restrict_angle=True,
                                                                                 direction_point=person_legs[-1][
-                                                                                    'to_location'])
+                                                                                    'to_location'], max_iterations= 50)
 
-                        act_identifier, act_name, act_coord, act_cap, act_dist, act_score = (
+                        act_identifier, act_coord, act_cap, act_score = (
                             EvaluationFunction.monte_carlo_select_candidate(candidates))
                 else:
                     if logger.isEnabledFor(logging.DEBUG): logger.debug("Selecting location using ring.")
@@ -1175,13 +1174,12 @@ class SimpleLelkeAlgorithm:
                     candidates = self.target_locations.find_ring_candidates(person_legs[i]['to_act_type'],
                                                                             person_legs[i]['from_location'],
                                                                             radius1, radius2)
-                    act_identifier, act_name, act_coord, act_cap, act_dist, act_score = (
+                    act_identifier, act_coord, act_cap, act_score = (
                         EvaluationFunction.monte_carlo_select_candidate(candidates))
 
                 person_legs[i]['to_location'] = act_coord
                 person_legs[i + 1]['from_location'] = act_coord
                 person_legs[i]['to_act_identifier'] = act_identifier
-                person_legs[i]['to_act_name'] = act_name
                 person_legs[i]['to_act_cap'] = act_cap
                 person_legs[i]['to_act_score'] = act_score
 
@@ -1500,12 +1498,9 @@ class EvaluationFunction:
             return np.full((number_of_candidates,), 1000000)
 
     @classmethod
-    def monte_carlo_select_candidate(cls, candidates, use_distance=True):
+    def monte_carlo_select_candidate(cls, candidates):
         """Depreciated. Use select_candidates instead."""  # TODO: Remove
-        if use_distance:
-            scores = cls.evaluate_candidates(candidates[-2], candidates[-1])
-        else:
-            scores = cls.evaluate_candidates(candidates[-2])
+        scores = cls.evaluate_candidates(candidates[2])
 
         # Normalize scores
         sscores = scores / np.sum(scores)

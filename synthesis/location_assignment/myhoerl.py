@@ -103,9 +103,6 @@ def format_segmented_legs(segmented_dict: Dict[str, List[List[Dict[str, Any]]]])
             number_before_dot = before_dot.split('_')[-1]
             trip_index = int(number_before_dot)
 
-            if person_id == '10556930_12089_10556931':
-                print('here')
-
             problem = {
                 'person_id': person_id,
                 'trip_index': trip_index,
@@ -136,13 +133,13 @@ def format_segmented_legs(segmented_dict: Dict[str, List[List[Dict[str, Any]]]])
 
 # the ooooooverall run function
 # def process(context, arguments):
-def process(my_target_locations, segmented_dict):
+def process(my_target_locations, segmented_dict, config):
     """Destinations is the reformatted version of my locations. Segmented_dict is the reformatted version of my segments."""
     # Set up RNG
     # random = np.random.RandomState(context.config("random_seed"))
     random = np.random.RandomState()
     # maximum_iterations = context.config("secloc_maximum_iterations")
-    maximum_iterations = 100
+    maximum_iterations = config["max_iterations"]
 
     # Set up discretization solver
     # candidate_index = CandidateIndex(destinations)
@@ -167,7 +164,7 @@ def process(my_target_locations, segmented_dict):
 
     relaxation_solver = GeneralRelaxationSolver(chain_solver)
 
-    # Set up assignment solver
+    #Set up assignment solver
     # thresholds = dict(
     #     car=1.0, car_passenger=1.0, pt=1.0,
     #     bike=1.0, walk=1.0
@@ -453,9 +450,6 @@ class AssignmentSolver:
 
     def solve(self, problem):
         best_result = None
-
-        if problem["person_id"] == '10556930_12089_10556931':
-            print('here')
 
         for assignment_iteration in range(self.maximum_iterations):
             distance_result = self.distance_sampler.sample(problem)  # dict mit "distances", "valid", "iterations"

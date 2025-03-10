@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 from shapely import Point
 
-from utils.stats_tracker import stats_tracker
+from utils.stats_tracker import StatsTracker
 from utils.pipeline_setup import OUTPUT_DIR
 from utils.pipeline_setup import PROJECT_ROOT
 from utils import settings as s
@@ -1499,19 +1499,12 @@ def get_min_max_distance(arr):
 
     total_sum = sum(arr)
 
-    # Subset sum problem: Find the subset that gets closest to total_sum // 2
-    dp = np.zeros(total_sum + 1, dtype=bool)
-    dp[0] = True
-
-    for num in arr:
-        dp[num:] = dp[num:] | dp[:-num]
-
-    # Find the minimum difference by checking sums <= total_sum // 2
-    possible_sums = np.nonzero(dp[:total_sum // 2 + 1])[0]
-    min_diff = min(total_sum - 2 * s for s in possible_sums)
+    # Is one leg longer than all others summed?
+    remaining_distances = total_sum - arr
+    single_leg_overshoot = max(arr - remaining_distances)
+    min_diff = max(single_leg_overshoot, 0)
 
     return min_diff, total_sum
-
 
 def spread_distances(distance1, distance2, iteration=0, first_step=20, base=1.5):
     """Increases the difference between two distances, keeping them positive."""
@@ -1615,3 +1608,36 @@ def calculate_feasibility(distances, direct_distance, consider_total_distance=Tr
         delta = max(delta, direct_distance - total_distance)
 
     return float(max(delta, 0))
+
+
+def nest_dict(flat_dict):
+    """
+    Convert a flat dictionary with dot-separated keys into a nested dictionary.
+
+    Example:
+      {
+          "settings.num_cores": 8,
+          "settings.log_level": "INFO",
+          "steps.Population.script": "steps/population/run.py"
+      }
+    becomes:
+      {
+          "settings": {
+              "num_cores": 8,
+              "log_level": "INFO"
+          },
+          "steps": {
+              "Population": {
+                  "script": "steps/population/run.py"
+              }
+          }
+      }
+    """
+    nested = {}
+    for composite_key, value in flat_dict.items():
+        keys = composite_key.split('.')
+        d = nested
+        for key in keys[:-1]:
+            d = d.setdefault(key, {})
+        d[keys[-1]] = value
+    return nested

@@ -7,6 +7,7 @@ import random
 import time
 import json
 
+from build.lib.ivs_helpers import stats_tracker
 from openpyxl.pivot.fields import Boolean
 from tqdm import tqdm
 from collections import defaultdict
@@ -21,7 +22,6 @@ from scipy.spatial import cKDTree
 from utils import settings as s, helpers as h, pipeline_setup
 # from utils.types import PlanLeg, PlanSegment, SegmentedPlan, SegmentedPlans, UnSegmentedPlan, UnSegmentedPlans
 from utils.logger import logging
-from utils.stats_tracker import stats_tracker
 
 from typing import NamedTuple, Tuple
 from frozendict import frozendict
@@ -76,7 +76,6 @@ DetailedSegmentedPlan = Tuple[DetailedSegment, ...]  # A full plan split into se
 DetailedSegmentedPlans = frozendict[str, DetailedSegmentedPlan]  # All agents' plans (person_id -> SegmentedPlan)
 
 
-# TODO: Currently, all outputs are arrays even if not necessary. Maybe change to single values.
 
 class GermanPopulationDensity:
     pass
@@ -1327,146 +1326,6 @@ class MatrixMainLocationAlgorithm:
 #     return 1 / (1 + np.exp(z))
 
 class EvaluationFunction:
-    @staticmethod
-    def select_candidates_old(
-            candidates: Tuple[np.ndarray, ...],
-            scores: np.ndarray,
-            num_candidates: int,
-            strategy: str = 'monte_carlo',
-            top_portion: float = 0.5):
-        """
-        Selects a specified number of candidates based on their normalized scores using Monte Carlo sampling,
-        a top-n strategy, or a mixed strategy combining top scores and Monte Carlo sampling.
-
-        :param candidates: A tuple of arrays with the candidates.
-        :param scores: A 1D array of scores corresponding to the candidates.
-        :param num_candidates: The number of candidates to select.
-        :param strategy: Selection strategy ('monte_carlo', 'top_n', or 'mixed').
-        :param top_portion: Portion of candidates to select from the top scores when using the 'mixed' strategy (default 0.5).
-        :return: A tuple containing:
-            - A tuple of arrays with the selected candidates.
-            - A 1D array of the scores corresponding to the selected candidates.
-        """
-        if len(candidates[0]) != len(scores):
-            print("hi")
-        assert len(candidates[0]) == len(scores), "The number of candidates and scores must match."
-        if num_candidates >= len(candidates[0]):
-            stats_tracker.increment("Select_candidates: All candidates selected")
-            return candidates, scores
-
-        if strategy == 'monte_carlo':
-            stats_tracker.increment("Scoring runs (Monte Carlo)")
-            a_scores = np.array(scores, dtype=np.float64)  # Make floating-point array
-            m_scores = a_scores / np.sum(a_scores)
-            chosen_indices = np.random.choice(len(m_scores), num_candidates, p=m_scores, replace=False)
-
-        elif strategy == 'top_n':
-            stats_tracker.increment("Scoring runs (Top N)")
-            chosen_indices = np.argsort(scores)[-num_candidates:][::-1]
-
-        elif strategy == 'mixed':
-            stats_tracker.increment("Scoring runs (Mixed)")
-            # Determine the number of top candidates to select
-            num_top = int(np.ceil(num_candidates * top_portion))
-            num_monte_carlo = num_candidates - num_top
-
-            # Identify the top score and find all indices with that score
-            highest_value = np.max(scores)
-            highest_indices = np.where(scores == highest_value)[0]
-
-            if len(highest_indices) == len(scores):
-                stats_tracker.increment("Select_candidates: All scores equal")
-                chosen_indices = np.random.choice(len(scores), num_candidates, replace=False)
-            else:
-                if len(highest_indices) > num_top:
-                    stats_tracker.increment("Select_candidates: More top scores than num_top")
-                    top_indices = np.random.choice(highest_indices, num_top, replace=False)
-                else:
-                    stats_tracker.increment("Select_candidates: Fewer or eq top scores than num_top")
-                    top_indices = np.argsort(scores)[-num_top:][::-1]
-
-                # Monte Carlo selection from the remaining candidates
-                remaining_indices = np.setdiff1d(np.arange(len(scores)), top_indices)
-                if len(remaining_indices) > 0 and num_monte_carlo > 0:
-                    m_scores = scores[remaining_indices] / np.sum(scores[remaining_indices])
-                    monte_carlo_indices = np.random.choice(remaining_indices, num_monte_carlo, p=m_scores,
-                                                           replace=False)
-                    chosen_indices = np.concatenate((top_indices, monte_carlo_indices))
-                else:
-                    # If no remaining candidates, fallback to top indices only
-                    chosen_indices = top_indices
-
-        else:
-            raise ValueError("Invalid selection strategy. Use 'monte_carlo', 'top_n', or 'mixed'.")
-
-        selected_candidates = tuple(
-            np.atleast_1d(arr[chosen_indices].squeeze()) if arr is not None else None for arr in candidates
-        )
-
-        return selected_candidates, np.atleast_1d(scores[chosen_indices].squeeze())
-
-    @staticmethod
-    def select_candidate_indices_old(
-            scores: np.ndarray,
-            num_candidates: int,
-            strategy: str = 'monte_carlo',
-            top_portion: float = 0.5
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Select the indices of candidates based on their normalized scores using Monte Carlo sampling,
-        a top-n strategy, or a mixed strategy combining top scores and Monte Carlo sampling.
-
-        :param scores: A 1D numpy array of scores corresponding to candidates.
-        :param num_candidates: The number of candidates to select.
-        :param strategy: Selection strategy ('monte_carlo', 'top_n', or 'mixed').
-        :param top_portion: Portion of candidates to select from the top scores when using the 'mixed' strategy.
-        :return: A tuple containing:
-                 - The selected indices of the best candidates.
-                 - A 1D array of the scores corresponding to the selected indices.
-        """
-        assert len(scores) > 0, "The scores array cannot be empty."
-        if num_candidates >= len(scores):
-            stats_tracker.increment("Select_candidates_indices: All candidates selected")
-            return np.arange(len(scores)), scores
-
-        if strategy == 'monte_carlo':
-            stats_tracker.increment("Scoring runs (Monte Carlo)")
-            normalized_scores = scores / np.sum(scores, dtype=np.float64)
-            chosen_indices = np.random.choice(len(scores), num_candidates, p=normalized_scores, replace=False)
-
-        elif strategy == 'top_n':
-            stats_tracker.increment("Scoring runs (Top N)")
-            chosen_indices = np.argsort(scores)[-num_candidates:][::-1]  # Top scores in descending order
-
-        elif strategy == 'mixed':
-            stats_tracker.increment("Scoring runs (Mixed)")
-            # Number of top candidates and Monte Carlo candidates
-            num_top = int(np.ceil(num_candidates * top_portion))
-            num_monte_carlo = num_candidates - num_top
-
-            # Get indices of the top candidates
-            sorted_indices = np.argsort(scores)[-num_top:][::-1]  # Top portion of candidates
-            remaining_indices = np.setdiff1d(np.arange(len(scores)), sorted_indices)
-
-            if len(remaining_indices) > 0 and num_monte_carlo > 0:
-                stats_tracker.increment("Select_candidates_indices: Monte Carlo selection for remaining candidates")
-                remaining_scores = scores[remaining_indices]
-                normalized_remaining_scores = remaining_scores / np.sum(remaining_scores, dtype=np.float64)
-                monte_carlo_indices = np.random.choice(remaining_indices, num_monte_carlo,
-                                                       p=normalized_remaining_scores,
-                                                       replace=False)
-                chosen_indices = np.concatenate((sorted_indices, monte_carlo_indices))
-            else:
-                stats_tracker.increment("Select_candidates_indices: Fallback to top scores only")
-                chosen_indices = sorted_indices
-
-        else:
-            raise ValueError("Invalid selection strategy. Use 'monte_carlo', 'top_n', or 'mixed'.")
-
-        # Retrieve the scores corresponding to the selected indices
-        chosen_scores = scores[chosen_indices]
-
-        return chosen_indices, chosen_scores
 
     @staticmethod
     def evaluate_candidates(potentials: np.ndarray = None, dist_deviations: np.ndarray = None,
@@ -1480,7 +1339,7 @@ class EvaluationFunction:
         :return: Non-normalized, absolute scores.
         """
         # if distances is not None and potentials is not None:
-        #     return potentials / distances  # TODO: Improve scoring function
+        #     return potentials / distances
         # if potentials is not None:
         #     return potentials
         if dist_deviations is not None:
@@ -2141,27 +2000,19 @@ def convert_to_detailed_segmented_plans(df: pd.DataFrame) -> DetailedSegmentedPl
     return detailed_segmented_plans
 
 
-def generate_random_location_within_hanover():
-    """Generate a random coordinate within Hanover, Germany, in EPSG:25832."""
-    xmin, xmax = 546000, 556000
-    ymin, ymax = 5800000, 5810000
-    x = random.uniform(xmin, xmax)
-    y = random.uniform(ymin, ymax)
-    return np.array([x, y])
 
 
 def prepare_population_df_for_location_assignment(df, filter_max_distance=None, number_of_persons=None) -> (
         pd.DataFrame, pd.DataFrame):
     """Temporarily prepare the MiD DataFrame for the leg dictionary function."""
 
-    # Initialize columns with empty objects to ensure compatibility
     df["from_location"] = None
     df["to_location"] = None
 
     # Split persons with no leg ID into a separate DataFrame
     no_leg_df = df[df[s.LEG_ID_COL].isna()].copy()
     df = df.dropna(subset=[s.LEG_ID_COL])
-    # TEMP: Remove persons that have no leg 1 (it has by accident been removed by enhancer)
+    # TEMP: Remove persons that have no leg 1 (it may have been removed by enhancer)
     # TODO: Remove lines below again
     mobile_persons_with_leg_1 = df[df[s.UNIQUE_LEG_ID_COL].str.contains("_1.0")][s.UNIQUE_P_ID_COL].unique()
     df = df[df[s.UNIQUE_P_ID_COL].isin(mobile_persons_with_leg_1)]
@@ -2191,8 +2042,15 @@ def prepare_population_df_for_location_assignment(df, filter_max_distance=None, 
         person_ids = df[s.PERSON_ID_COL].unique()[:number_of_persons]
         df = df[df[s.PERSON_ID_COL].isin(person_ids)]
 
-    # Add random home locations for each person
-    # TODO: write function that properly assigns homes (very similar to now, from popsim)
+    # Add random home locations for each person for testing
+    def generate_random_location_within_hanover():
+        """Generate a random coordinate within Hanover, Germany, in EPSG:25832."""
+        xmin, xmax = 546000, 556000
+        ymin, ymax = 5800000, 5810000
+        x = random.uniform(xmin, xmax)
+        y = random.uniform(ymin, ymax)
+        return np.array([x, y])
+
     df[s.HOME_LOC_COL] = None
     for person_id, group in df.groupby(s.UNIQUE_P_ID_COL):
         home_location = generate_random_location_within_hanover()
@@ -2336,7 +2194,7 @@ def segment_plans(plans):
 
 def new_segment_plans(plans: SegmentedPlans) -> SegmentedPlans:
     """
-    Segment the plan of each person into separate trips where only the start and end locations are known.
+    Segment the plan of each person into segments where only the start and end locations are known.
     :param plans: SegmentedPlans (frozendict of person_id -> SegmentedPlan).
     :return: SegmentedPlans (frozendict of person_id -> SegmentedPlan).
     """

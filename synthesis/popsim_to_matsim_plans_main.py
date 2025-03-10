@@ -34,39 +34,39 @@ def popsim_to_matsim_plans_main():
     for file in s.EXPANDED_HOUSEHOLDS_FILES:
         population.load_df_from_csv(file, test_col=s.HOUSEHOLD_POPSIM_ID_COL, if_df_exists="concat")
 
-    population.downsample_population(s.SAMPLE_SIZE)
-    # population.apply_row_wise_rules([rules.unique_household_id])
-    # population.generate_unique_household_id()
+    #population.downsample_population(s.SAMPLE_SIZE)
     population.df = h.generate_unique_household_id(population.df)
 
     # Distribute buildings to households (if PopSim assigned hhs to a larger geography)
     weights_df = h.read_csv(s.BUILDINGS_IN_LOWEST_GEOGRAPHY_WITH_WEIGHTS_FILE, s.LOWEST_LEVEL_GEOGRAPHY)
     population.distribute_by_weights(weights_df, s.LOWEST_LEVEL_GEOGRAPHY, True)  # s.HOME_LOC_COL is a col in this file
+    population.df.to_csv("analysis/population_with_buildings.csv", index=False)
 
-    # If s.HOME_LOC_COL is NaN after this, assign a random location within its cell (lowest level of geography)
-    # This is the case for the surrounding region
-    population.df = h.assign_points(population.df, s.REGION_WITHOUT_CITY_GPKG_FILE, s.LOWEST_LEVEL_GEOGRAPHY, "id", s.HOME_LOC_COL)
-
-    population.assign_random_location()  # Creates random location in a new column "random_point" for fallback
-
-    # Where the "hom_loc" is still NaN in the df, take the value from "random_point". This should never happen.
-    nan_count_before = population.df[s.HOME_LOC_COL].isna().sum()
-    population.df[s.HOME_LOC_COL] = population.df[s.HOME_LOC_COL].fillna(population.df["random_point"])
-    nan_count_after = population.df[s.HOME_LOC_COL].isna().sum()
-
-    logger.info(f"Number of NaN home_loc before assigning random points: {nan_count_before}")
-    logger.info(f"Number of NaN home_loc after assigning random points: {nan_count_after}")
+    # # If s.HOME_LOC_COL is NaN after this, assign a random location within its cell (lowest level of geography)
+    # # This is the case for the surrounding region
+    # population.df = h.assign_points(population.df, s.REGION_WITHOUT_CITY_GPKG_FILE, s.LOWEST_LEVEL_GEOGRAPHY, "id", s.HOME_LOC_COL)
+    #
+    # population.assign_random_location()  # Creates random location in a new column "random_point" for fallback
+    #
+    # # Where the "hom_loc" is still NaN in the df, take the value from "random_point". This should never happen.
+    # nan_count_before = population.df[s.HOME_LOC_COL].isna().sum()
+    # population.df[s.HOME_LOC_COL] = population.df[s.HOME_LOC_COL].fillna(population.df["random_point"])
+    # nan_count_after = population.df[s.HOME_LOC_COL].isna().sum()
+    #
+    # logger.info(f"Number of NaN home_loc before assigning random points: {nan_count_before}")
+    # logger.info(f"Number of NaN home_loc after assigning random points: {nan_count_after}")
 
     # Turn the point string at home_loc into a shapely point (this is sometimes necessary)
     # population.apply_row_wise_rules([rules.home_loc])
-    population.df[s.HOME_LOC_COL] = population.df[s.HOME_LOC_COL].apply(h.convert_to_point)
+    #population.df[s.HOME_LOC_COL] = population.df[s.HOME_LOC_COL].apply(h.convert_to_point)
 
     # Add all data of each household (increases the number of rows)
     logger.info("Loading enhanced MiD data")
     population.add_csv_data_on_id(s.ENHANCED_MID_FILE, id_column=s.HOUSEHOLD_MID_ID_COL,
                                   drop_duplicates_from_source=False)
     logger.info(f"Population df after adding detailed data: \n{population.df.head()}")
-
+    population.df.to_csv("analysis/population_with_enhanced_mid.csv", index=False)
+    logger.info("Finished loading enhanced MiD data")
     # Add unique ids for persons and legs
     # apply_me = [rules.unique_person_id, rules.unique_leg_id]
     # population.apply_row_wise_rules(apply_me)
@@ -221,7 +221,6 @@ def parallel_locate_activities(df, num_processes=None):
 
 
 if __name__ == '__main__':
-    output_dir = pipeline_setup.create_output_directory()
     popsim_to_matsim_plans_main()
 
 else:

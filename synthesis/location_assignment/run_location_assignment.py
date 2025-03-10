@@ -1,10 +1,11 @@
 import pandas as pd
 import os
 import time
+import sys
 from typing import Literal
+
 from utils import settings as s
 from utils import helpers as h
-from utils import pipeline_setup
 from utils.logger import logging
 from synthesis.location_assignment import activity_locator_distance_based as al
 from synthesis.location_assignment import myhoerl
@@ -12,6 +13,8 @@ from utils.stats_tracker import stats_tracker
 
 logger = logging.getLogger(__name__)
 
+output_folder = sys.argv[1]
+project_root = sys.argv[2]
 
 def run_location_assignment(configs):
     logger.info("Starting location assignment.")
@@ -88,7 +91,7 @@ def run_location_assignment(configs):
         mobile_population_df['from_location'] = mobile_population_df['from_location'].apply(
             lambda x: h.convert_to_point(x, target='array'))
         if save_intermediate_results:
-            mobile_population_df.to_csv(os.path.join(pipeline_setup.OUTPUT_DIR, f"mobile_population_{algorithm}.csv"),
+            mobile_population_df.to_csv(os.path.join(output_folder, f"mobile_population_{algorithm}.csv"),
                                         index=False)
 
     if assert_no_missing_locations:
@@ -110,13 +113,13 @@ def run_location_assignment(configs):
             num_branches_string = ""
             candidates_two_leg_string = ""
             min_candidates_complex_string = ""
-        result_df.to_csv(os.path.join(pipeline_setup.OUTPUT_DIR, f"location_assignment_result_{algos_string}"
+        result_df.to_csv(os.path.join(output_folder, f"location_assignment_result_{algos_string}"
                                                                  f"{num_branches_string}"
                                                                  f"{candidates_two_leg_string}"
                                                                  f"{min_candidates_complex_string}.csv"),
                          index=False)
-        logger.info(f"Wrote location assignment result to {pipeline_setup.OUTPUT_DIR}.")
-        stats_tracker.write_stats_to_file(os.path.join(pipeline_setup.OUTPUT_DIR, "location_assignment_stats.txt"))
+        logger.info(f"Wrote location assignment result to {output_folder}.")
+        stats_tracker.write_stats_to_file(os.path.join(output_folder, "location_assignment_stats.txt"))
 
     return result_df, algo_time
 
@@ -234,7 +237,7 @@ def main():
         "general": {
             "population_df_folder": r"data/mid/enhanced",
             "locations_json_folder": r"data/locations",
-            "algorithms_to_run": ['load_intermediate', 'hoerl'],
+            "algorithms_to_run": ['load_intermediate', 'advanced_petre'],
             "save_intermediate_results": True,
             "assert_no_missing_locations": True,
             "filter_by_person": "10474610_12005_10474614",

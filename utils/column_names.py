@@ -1,5 +1,5 @@
 """
-Standalone settings configuration for the pipeline.
+MiD and custom column names and value maps.
 """
 
 # Global Settings
@@ -60,9 +60,15 @@ LEG_MAIN_MODE_COL = "hvm_imp"
 LEG_START_TIME_COL = "W_SZ"
 LEG_END_TIME_COL = "W_AZ"
 LEG_DURATION_MINUTES_COL = "wegmin_imp1"
+LEG_DURATION_SECONDS_COL = "leg_duration_seconds" # TODO: Check if this is valid
 LEG_DISTANCE_KM_COL = "wegkm_imp"
+LEG_DISTANCE_METERS_COL = "leg_distance_meters"
 FIRST_LEG_STARTS_AT_HOME_COL = "W_SO1"
 LEG_IS_RBW_COL = "W_RBW"
+HOME_TO_MAIN_METERS_COL = "home_to_main_meters"
+HOME_TO_MAIN_SECONDS_COL = "home_to_main_seconds"
+HOME_TO_MAIN_TIME_IS_ESTIMATED_COL = "home_to_main_time_is_estimated"
+HOME_TO_MAIN_DIST_IS_ESTIMATED_COL = "home_to_main_dist_is_estimated"
 
 # Enhancement Columns
 RANDOM_LOCATION_COL = "random_location"
@@ -77,12 +83,18 @@ UNIQUE_LEG_ID_COL = "unique_leg_id"
 UNIQUE_HH_ID_COL = "unique_household_id"
 UNIQUE_P_ID_COL = "unique_person_id"
 
-# Hardcoded Columns (Unlikely to Change)
 FACILITY_ID_COL = "facility_id"
 FACILITY_X_COL = "facility_x"
 FACILITY_Y_COL = "facility_y"
 FACILITY_ACTIVITIES_COL = "facility_activities"
+IS_MAIN_ACTIVITY_COL = "is_main_activity"
 MIRRORS_MAIN_ACTIVITY_COL = "mirrors_main_activity"
+
+# TODO: Check if this is valid
+CONNECTED_LEGS_COL = "connected_legs"
+TO_ACTIVITY_WITH_CONNECTED_COL = "to_activity_with_connected"
+IS_PROTAGONIST_COL = "is_protagonist"
+
 HH_HAS_CONNECTIONS_COL = "hh_has_connections"
 P_HAS_CONNECTIONS_COL = "p_has_connections"
 NUM_CONNECTED_LEGS_COL = "num_connected_legs"
@@ -92,8 +104,6 @@ COORD_FROM_COL = "coord_from"
 COORD_TO_COL = "coord_to"
 HOME_CELL_COL = "home_cell"
 HOME_LOC_COL = "home_location"
-RANDOM_LOCATION_COL = "random_location"
-ACT_DUR_SECONDS_COL = "activity_duration_seconds"
 MAIN_MODE_TO_MAIN_ACT_TIMEBASED_COL = "main_mode_to_main_act_timebased"
 MAIN_MODE_TO_MAIN_ACT_DISTBASED_COL = "main_mode_to_main_act_distbased"
 
@@ -143,7 +153,3 @@ ADULT_OVER_16_PROXY = 206
 PERSON_UNDER_16 = 403
 
 FIRST_LEG_STARTS_AT_HOME = 1
-
-# Misc
-PLAY_FAILURE_ALERT = 0
-BASE_DATE = "2020-01-01"

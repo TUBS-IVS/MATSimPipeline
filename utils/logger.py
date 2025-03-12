@@ -32,6 +32,7 @@ def setup_logging(output_folder, console_level="DEBUG", file_level="DEBUG"):
                 'level': file_level,
                 'class': 'logging.FileHandler',
                 'filename': log_file_path,
+                'mode': 'a', # Append to the log file
                 'formatter': 'standard',
             },
         },

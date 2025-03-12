@@ -10,7 +10,6 @@ import pandas as pd
 import shapely.geometry as geo
 import sklearn.neighbors
 
-from utils import pipeline_setup
 from synthesis.location_assignment.activity_locator_distance_based import *
 
 
@@ -139,7 +138,7 @@ def process(my_target_locations, segmented_dict, config):
     # random = np.random.RandomState(context.config("random_seed"))
     random = np.random.RandomState()
     # maximum_iterations = context.config("secloc_maximum_iterations")
-    maximum_iterations = config["max_iterations"]
+    maximum_iterations = config.get("location_assignment.hoerl.max_iterations")
 
     # Set up discretization solver
     # candidate_index = CandidateIndex(destinations)

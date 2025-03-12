@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 from datetime import datetime, timedelta
 
-from synthesis.data_prep.run_enhanced_mid import enhance_travel_survey
+from synthesis.enhanced_mid.run_enhanced_mid import enhance_travel_survey
 from utils import settings as s
 
 

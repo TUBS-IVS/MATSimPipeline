@@ -1,17 +1,16 @@
-import os
+import sys
+import logging
 import time
-
 import pandas as pd
 
-from synthesis.data_prep.mid_data_enhancer import MiDDataEnhancer
-from utils import pipeline_setup, settings as s, helpers as h
-from utils.logger import logging
-from utils.stats_tracker import stats_tracker
+from utils import column_names as s
+from utils.helpers import Helpers
+from utils.config import Config
+from utils.logger import setup_logging
+from utils.stats_tracker import StatsTracker
+from synthesis.enhanced_mid.mid_data_enhancer import MiDDataEnhancer
 
-logger = logging.getLogger(__name__)
-
-
-def enhance_travel_survey(input_hh_folder, input_persons_folder, input_trips_folder, output_dir):
+def enhance_travel_survey(config: Config):
     """
     Creates a combined leg file from the MiD-survey household, person and trip files.
     Imputes values, adds attributes.
@@ -20,18 +19,15 @@ def enhance_travel_survey(input_hh_folder, input_persons_folder, input_trips_fol
         - The ids of households, persons and trips must be unique within the population sample (e.g. MiD)
         (MiD: H_ID, HP_ID, and a previously added HPW_ID for legs)
     """
-    logger.info(f"Starting enhance_travel_survey module")
-
-    output_dir = h.make_path_absolute(output_dir)
-    # os.mkdir(output_dir)
 
     # Create unique leg ids in the leg input file if necessary
     # df = h.read_csv(h.get_files(s.MiD_TRIPS_FOLDER))
     # df = h.create_leg_ids(df)
     # df.to_csv(h.get_files(s.MiD_TRIPS_FOLDER), index=False)
 
-    population = MiDDataEnhancer()
-    population.load_df_from_csv(h.get_files(input_hh_folder), test_col=s.HOUSEHOLD_MID_ID_COL)
+    population = MiDDataEnhancer(stats_tracker=stats_tracker, logger=logger, helpers=h, output_folder=output_folder)
+    hh_folder = config.get("enhanced_mid.input.mid_hh_folder")
+    population.load_df_from_csv(h.get_files(hh_folder), test_col=s.HOUSEHOLD_MID_ID_COL)
 
     logger.info(f"Population df after adding HH attributes: \n{population.df.head()}")
     population.check_for_merge_suffixes()
@@ -39,14 +35,15 @@ def enhance_travel_survey(input_hh_folder, input_persons_folder, input_trips_fol
     population.df = h.generate_unique_household_id(population.df)
 
     # Add persons to households (increases the number of rows)
-    population.add_csv_data_on_id(h.get_files(input_persons_folder), [s.PERSON_ID_COL],
+    persons_folder = config.get("enhanced_mid.input.mid_persons_folder")
+    population.add_csv_data_on_id(h.get_files(persons_folder), [s.PERSON_ID_COL],
                                   id_column=s.HOUSEHOLD_MID_ID_COL,
                                   drop_duplicates_from_source=False)
     logger.info(f"Population df after adding persons: \n{population.df.head()}")
     population.check_for_merge_suffixes()
 
     # Add person attributes from MiD
-    population.add_csv_data_on_id(h.get_files(input_persons_folder), id_column=s.PERSON_ID_COL,
+    population.add_csv_data_on_id(h.get_files(persons_folder), id_column=s.PERSON_ID_COL,
                                   drop_duplicates_from_source=True, delete_later=True)
     logger.info(f"Population df after adding P attributes: \n{population.df.head()}")
     population.check_for_merge_suffixes()
@@ -55,13 +52,14 @@ def enhance_travel_survey(input_hh_folder, input_persons_folder, input_trips_fol
     population.impute_license_status()
 
     # Add MiD-trips to people (increases the number of rows)
-    population.add_csv_data_on_id(h.get_files(input_trips_folder), [s.LEG_ID_COL], id_column=s.PERSON_ID_COL,
+    trips_folder = config.get("enhanced_mid.input.mid_trips_folder")
+    population.add_csv_data_on_id(h.get_files(trips_folder), [s.LEG_ID_COL], id_column=s.PERSON_ID_COL,
                                   drop_duplicates_from_source=False)
     logger.info(f"Population df after adding trips: \n{population.df.head()}")
     population.check_for_merge_suffixes()
 
     # Add trip attributes from MiD
-    population.add_csv_data_on_id(h.get_files(input_trips_folder), id_column=s.LEG_ID_COL,
+    population.add_csv_data_on_id(h.get_files(trips_folder), id_column=s.LEG_ID_COL,
                                   drop_duplicates_from_source=True)
     logger.info(f"Population df after adding L attributes: \n{population.df.head()}")
     population.check_for_merge_suffixes()
@@ -132,26 +130,44 @@ def enhance_travel_survey(input_hh_folder, input_persons_folder, input_trips_fol
     logger.info(f"Final population df: \n{population.df.head()}")
 
     # population.write_overview()
-    population.df.to_csv(os.path.join(output_dir, s.ENHANCED_MID_FILE), index=False)
-    logger.info(f"Wrote population output file.")
-
-    stats_tracker.write_stats_to_file(os.path.join(output_dir, s.STATS_FILE))
-
-    logger.info(f"Finished enhance_travel_survey pipeline")
+    output_file = config.get("enhanced_mid.output.enhanced_mid_file")
+    population.df.to_csv(output_file, index=False)
+    logger.info(f"Wrote population output file: {output_file}")
     return
 
+if __name__ == "__main__":
+    if len(sys.argv) < 4:
+        print("Usage: run.py <output_folder> <project_root> <config_yaml>")
+        print("Absolute paths, folders must exist.")
+        sys.exit(1)
 
-if __name__ == '__main__':
-    try:
-        os.chdir(pipeline_setup.PROJECT_ROOT)
-        enhance_travel_survey(s.MiD_HH_FOLDER, s.MiD_PERSONS_FOLDER, s.MiD_TRIPS_FOLDER, pipeline_setup.OUTPUT_DIR)
-    except Exception as e:
-        if s.PLAY_FAILURE_ALERT:
-            pass
-            # winsound.Beep(600, 500)
-            # time.sleep(0.1)
-            # winsound.Beep(500, 500)
-            # time.sleep(0.2)
-            # winsound.Beep(400, 1500)
+    output_folder = sys.argv[1]  # Absolute path
+    project_root = sys.argv[2]
+    config_yaml = sys.argv[3]  # Just the filename
+    step_name = "enhanced_mid"
 
-        raise
+    # Each step sets up its own logging, Config object, StatsTracker and Helpers
+    config = Config(output_folder, project_root, config_yaml)
+    config.resolve_paths()
+
+    setup_logging(output_folder, console_level=config.get("settings.logging.console_level"),
+                  file_level=config.get("settings.logging.file_level"))
+    logger = logging.getLogger(step_name)
+
+    stats_tracker = StatsTracker(output_folder)
+
+    h = Helpers(project_root, output_folder, config, stats_tracker, logger)
+
+    logger.info(f"Starting step {step_name}")
+    time_start = time.time()
+
+    # Run the MiD data enhancer
+    enhance_travel_survey(config)
+
+    time_end = time.time()
+    time_step = time_end - time_start
+    stats_tracker.log("runtimes.enhanced_mid_time", time_step)
+    stats_tracker.write_stats()
+    config.write_used_config()
+
+    logger.info(f"Step {step_name} finished in {time_step:.2f} seconds.")

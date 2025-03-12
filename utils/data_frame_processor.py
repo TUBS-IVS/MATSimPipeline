@@ -1,48 +1,61 @@
 from typing import Literal
-
 import pandas as pd
-
-from utils import settings as s, helpers as h
-from utils.logger import logging
-
-logger = logging.getLogger(__name__)
-
+import logging
+import gzip
 
 class DataFrameProcessor:
     """
     Base class for processing a Pandas DataFrame.
-    @Author: Felix Petre
     """
 
-    def __init__(self, df: pd.DataFrame = None, id_column: str = None):
+    def __init__(self, df: pd.DataFrame = None, stats_tracker=None, logger=None):
+        """
+        Parameters should be set as many functions require them, but for some quick scripting they can be omitted.
+        """
+        self.stats_tracker = stats_tracker
+        self.logger = logger if logger is not None else logging.getLogger("data_frame_processor")
         self.df = df
-        self.id_column = id_column
         self.columns_to_delete = set()
 
-    @property
-    def df(self) -> pd.DataFrame:
-        if self._df is None:
-            logger.warning("DataFrame is not yet initialized.")
-        return self._df
+    def read_csv(self, csv_path: str, test_col=None, use_cols=None) -> pd.DataFrame:
+        """
+        Read a csv file with unknown separator and return a dataframe.
+        Also works for gzipped files.
 
-    @df.setter
-    def df(self, value: pd.DataFrame):
-        if not isinstance(value, pd.DataFrame) and value is not None:
-            raise ValueError("The df attribute must be a Pandas DataFrame or None.")
-        self._df = value
+        :param csv_path: Path to the CSV file.
+        :param test_col: Column name that should be present in the file for validation.
+        :param use_cols: List of columns to use from the file. Defaults to all columns.
+        :return: DataFrame with the contents of the CSV file.
+        :raises: KeyError, ValueError if `test_col` is not found after attempting to read the file.
+        """
+        try:
+            if csv_path.endswith('.gz'):
+                with gzip.open(csv_path, 'rt') as f:
+                    df = pd.read_csv(f, sep=',', usecols=use_cols)
+            else:
+                df = pd.read_csv(csv_path, sep=',', usecols=use_cols)
+            if test_col is not None:
+                test = df[test_col]
+        except (KeyError,
+                ValueError):  # Sometimes also throws without test_col, when the file is not comma-separated. This is good.
+            self.logger.info(f"ID column '{test_col}' not found in {csv_path}, trying to read as ';' separated file...")
+            if csv_path.endswith('.gz'):
+                with gzip.open(csv_path, 'rt') as f:
+                    df = pd.read_csv(f, sep=';', usecols=use_cols)
+            else:
+                df = pd.read_csv(csv_path, sep=';', usecols=use_cols)
+            try:
+                if test_col is not None:
+                    test = df[test_col]
+            except (KeyError, ValueError):
+                self.logger.error(
+                    f"ID column '{test_col}' still not found in {csv_path}, verify column name and try again.")
+                raise
+            self.logger.info("Success.")
+        return df
 
-    @property
-    def id_column(self) -> str:
-        return self._id_column
-
-    @id_column.setter
-    def id_column(self, value: str) -> None:
-        if self._df is not None and value is not None and value not in self._df.columns:
-            logger.info(f"ID column '{value}' not found in DataFrame, setting anyway.")
-
-        self._id_column = value
-
-    def load_df_from_csv(self, csv_path, if_df_exists: Literal['replace', 'concat'] = 'concat', use_cols=None, test_col=None) -> None:
+    def load_df_from_csv(self, csv_path, if_df_exists: Literal['replace', 'concat'] = 'concat', use_cols=None,
+                         test_col=None) -> None:
         """
         Initializes the DataFrame from a CSV file.
 
@@ -51,19 +64,19 @@ class DataFrameProcessor:
         - if_df_exists: str, whether to replace the existing DataFrame or concatenate to it.
         """
         try:
-            new_df = h.read_csv(csv_path, test_col=test_col, use_cols=use_cols)
+            new_df = self.read_csv(csv_path, test_col=test_col, use_cols=use_cols)
 
             if if_df_exists == 'replace':
                 if self.df:
-                    logger.info("DataFrame loaded and replaced successfully from CSV.")
+                    self.logger.info("DataFrame loaded and replaced successfully from CSV.")
                 else:
-                    logger.info("DataFrame loaded successfully from CSV.")
+                    self.logger.info("DataFrame loaded successfully from CSV.")
                 self.df = new_df
             elif if_df_exists == 'concat':
                 self.df = pd.concat([self.df, new_df], ignore_index=True) if self.df is not None else new_df
-                logger.info("DataFrame loaded and concatenated successfully from CSV.")
+                self.logger.info("DataFrame loaded and concatenated successfully from CSV.")
         except Exception as e:
-            logger.error(f"Failed to load DataFrame from {csv_path}: {e}")
+            self.logger.error(f"Failed to load DataFrame from {csv_path}: {e}")
             raise
 
     def add_df_on_id(self, source_df, columns_to_add=None, overwrite_existing=False, id_column=None,
@@ -92,7 +105,7 @@ class DataFrameProcessor:
                 raise ValueError("id_column is None. Please specify an ID column to use.")
             else:
                 id_column = self.id_column
-                logger.info(f"No id_column provided, using id_column from DataFrame: {id_column}")
+                self.logger.info(f"No id_column provided, using id_column from DataFrame: {id_column}")
 
         # Validation for ID columns in both dataframes
         if id_column not in self.df.columns or id_column not in source_df.columns:
@@ -103,7 +116,7 @@ class DataFrameProcessor:
             duplicate_mask = source_df.duplicated(subset=id_column, keep='first')
             if duplicate_mask.any():
                 duplicate_ids = source_df.loc[duplicate_mask, id_column].tolist()
-                logger.info(f"Duplicate {id_column} values found and dropped in source_df: {duplicate_ids}")
+                self.logger.info(f"Duplicate {id_column} values found and dropped in source_df: {duplicate_ids}")
                 source_df = source_df.drop_duplicates(subset=id_column, keep='first')
 
         # Handle columns
@@ -111,10 +124,10 @@ class DataFrameProcessor:
         for col in columns_to_iterate:
             if col in self.df.columns:
                 if overwrite_existing:
-                    logger.info(f"Column {col} already exists in the DataFrame. Overwriting.")
+                    self.logger.info(f"Column {col} already exists in the DataFrame. Overwriting.")
                     self.df.drop(columns=[col], inplace=True)
                 else:
-                    logger.info(f"Column {col} already exists in the DataFrame. Skipping.")
+                    self.logger.info(f"Column {col} already exists in the DataFrame. Skipping.")
                     columns_to_add.remove(col)
 
         # Ensure id_column is in columns_to_add for merging
@@ -153,7 +166,7 @@ class DataFrameProcessor:
             if id_column not in columns_to_add:
                 columns_to_add.append(id_column)
         try:
-            source_df = h.read_csv(csv_path, id_column, use_cols=columns_to_add)
+            source_df = self.read_csv(csv_path, id_column, use_cols=columns_to_add)
 
             if delete_later:
                 if columns_to_add is None:
@@ -162,7 +175,7 @@ class DataFrameProcessor:
 
             self.add_df_on_id(source_df, columns_to_add, overwrite_existing, id_column, drop_duplicates_from_source)
         except Exception as e:
-            logger.error(f"Failed to load and add CSV data from {csv_path}: {e}")
+            self.logger.error(f"Failed to load and add CSV data from {csv_path}: {e}")
             raise
 
     def remove_columns_startswith(self, startswith) -> None:
@@ -176,9 +189,9 @@ class DataFrameProcessor:
         self.df.drop(cols_to_remove, axis=1, inplace=True)
 
         if cols_to_remove:
-            logger.info(f"Removed columns: {cols_to_remove}")
+            self.logger.info(f"Removed columns: {cols_to_remove}")
         else:
-            logger.info("No columns were removed.")
+            self.logger.info("No columns were removed.")
 
     def remove_columns_marked_for_later_deletion(self) -> None:
         """
@@ -188,16 +201,16 @@ class DataFrameProcessor:
 
         cols_not_found = set(self.columns_to_delete) - set(cols_to_remove)
         if cols_not_found:
-            logger.warning(f"Columns marked for deletion were not found: {cols_not_found}")
+            self.logger.warning(f"Columns marked for deletion were not found: {cols_not_found}")
 
         self.df.drop(cols_to_remove, axis=1, inplace=True)
 
         self.columns_to_delete.clear()
 
         if cols_to_remove:
-            logger.info(f"Removed columns: {cols_to_remove}")
+            self.logger.info(f"Removed columns: {cols_to_remove}")
         else:
-            logger.info("No columns were removed.")
+            self.logger.info("No columns were removed.")
 
     def convert_time_to_datetime(self, column_names: list) -> None:
         """
@@ -207,17 +220,18 @@ class DataFrameProcessor:
         :param column_names: The names of the columns to convert.
         :return: The DataFrame with the specified columns converted to datetime.
         """
-        default_date = s.BASE_DATE
+        default_date = "1970-01-01"
 
         for column_name in column_names:
-            logger.info(f"Converting column '{column_name}' with {len(self.df)} total rows to datetime.")
+            self.logger.info(f"Converting column '{column_name}' with {len(self.df)} total rows to datetime.")
 
             # Convert to datetime with a fixed date
-            self.df[column_name] = pd.to_datetime(self.df[column_name].astype(str).apply(lambda x: f"{default_date} {x}"),
-                                                  errors='coerce')
+            self.df[column_name] = pd.to_datetime(
+                self.df[column_name].astype(str).apply(lambda x: f"{default_date} {x}"),
+                errors='coerce')
 
             null_count = self.df[column_name].isnull().sum()  # Count NaT values, which are considered null
-            logger.info(f"Number of failed conversions (NaT): {null_count}")
+            self.logger.info(f"Number of failed conversions (NaT): {null_count}")
 
     def convert_datetime_to_seconds(self, column_names: list) -> None:
         """
@@ -229,10 +243,11 @@ class DataFrameProcessor:
         default_date = '2020-01-01'
         for column_name in column_names:
             if pd.api.types.is_datetime64_any_dtype(self.df[column_name]):
-                logger.info(f"Converting column '{column_name}' with {len(self.df)} total rows to seconds.")
-                self.df[f"{column_name}_seconds"] = (self.df[column_name] - pd.Timestamp(default_date)).dt.total_seconds()
+                self.logger.info(f"Converting column '{column_name}' with {len(self.df)} total rows to seconds.")
+                self.df[f"{column_name}_seconds"] = (
+                            self.df[column_name] - pd.Timestamp(default_date)).dt.total_seconds()
             else:
-                logger.warning(f"Column '{column_name}' is not a datetime column.")
+                self.logger.warning(f"Column '{column_name}' is not a datetime column.")
 
     def filter_out_rows(self, column_name, values_to_filter: list):
         """
@@ -240,10 +255,10 @@ class DataFrameProcessor:
         """
         if column_name not in self.df.columns:
             raise ValueError(f"Column '{column_name}' not found in DataFrame.")
-        logger.info(f"Filtering out rows where column '{column_name}' has values: {values_to_filter}")
-        logger.info(f"Number of rows before filtering: {len(self.df)}")
+        self.logger.info(f"Filtering out rows where column '{column_name}' has values: {values_to_filter}")
+        self.logger.info(f"Number of rows before filtering: {len(self.df)}")
         self.df = self.df[~self.df[column_name].isin(values_to_filter)]
-        logger.info(f"Number of rows after filtering: {len(self.df)}")
+        self.logger.info(f"Number of rows after filtering: {len(self.df)}")
 
     def check_for_merge_suffixes(self, suffixes=('_x', '_y'), throw_error=True):
         """
@@ -260,7 +275,7 @@ class DataFrameProcessor:
                     columns_with_suffixes[suffix].append(col)
         if throw_error and any(columns_with_suffixes.values()):
             raise ValueError(f"Columns with merge suffixes found: {columns_with_suffixes}")
-        logger.info(f"Columns with merge suffixes: {columns_with_suffixes}")
+        self.logger.info(f"Columns with merge suffixes: {columns_with_suffixes}")
         return columns_with_suffixes
 
     def set_column_type(self, columns, dtype):
@@ -287,4 +302,3 @@ class DataFrameProcessor:
         Transpose the DataFrame.
         """
         self.df = self.df.T
-

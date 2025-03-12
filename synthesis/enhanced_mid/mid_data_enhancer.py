@@ -3,24 +3,32 @@ from collections import deque
 import numpy as np
 import pandas as pd
 from os import path
-import ivs_helpers as ivs
 from tqdm import tqdm
 
-from utils import settings as s, pipeline_setup, helpers as h
+from utils import column_names as s, helpers as h
 from utils.data_frame_processor import DataFrameProcessor
-from utils.stats_tracker import stats_tracker
 from utils.logger import logging
 
 logger = logging.getLogger(__name__)
+
 
 class MiDDataEnhancer(DataFrameProcessor):
     """
     Collects all methods that are applied only, directly, to the unexpanded, raw MiD data.
     """
 
-    def __init__(self, df: pd.DataFrame = None, id_column: str = None):
-        super().__init__(df, id_column)
-        # self.sf = h.SlackFactors(s.SLACK_FACTORS_FILE)
+    def __init__(self, df: pd.DataFrame = None, stats_tracker=None, logger=None, helpers=None, output_folder=None):
+        """
+        Initializes MiDDataEnhancer.
+
+        :param df: Optional Pandas DataFrame to process.
+        :param stats_tracker: Instance of StatsTracker for tracking statistics.
+        :param logger: Logger instance for logging messages.
+        :param helpers: Helpers instance for additional utility functions.
+        """
+        super().__init__(df, stats_tracker, logger)  # Properly initialize parent class
+        self.h = helpers
+        self.output_folder = output_folder
 
     def filter_home_to_home_legs(self):  # TODO: remove?
         """
@@ -141,7 +149,6 @@ class MiDDataEnhancer(DataFrameProcessor):
         # Set the activity time of the last leg to None
         is_last_leg = self.df["unique_person_id"] != self.df["unique_person_id"].shift(-1)
         self.df.loc[is_last_leg, s.ACT_DUR_SECONDS_COL] = None
-        logger.info(f"Calculated activity duration in secs.")
 
     def write_short_overview(self):
         """
@@ -160,10 +167,10 @@ class MiDDataEnhancer(DataFrameProcessor):
         logger.info(f"Number of legs: {num_legs}")
         logger.info(f"Number of persons with one leg: {num_persons_one_leg}")
         logger.info(f"Number of persons with no leg: {num_persons_no_leg}")
-        stats_tracker.log("num_persons", num_persons)
-        stats_tracker.log("num_legs", num_legs)
-        stats_tracker.log("num_persons_one_leg", num_persons_one_leg)
-        stats_tracker.log("num_persons_no_leg", num_persons_no_leg)
+        self.stats_tracker.log("num_persons", num_persons)
+        self.stats_tracker.log("num_legs", num_legs)
+        self.stats_tracker.log("num_persons_one_leg", num_persons_one_leg)
+        self.stats_tracker.log("num_persons_no_leg", num_persons_no_leg)
 
     def write_overview(self):
         logger.info(f"Exporting stats...")
@@ -179,7 +186,7 @@ class MiDDataEnhancer(DataFrameProcessor):
             # Flattening MultiIndex columns
             stats_df.columns = ['_'.join(col).strip() for col in stats_df.columns]
 
-            file_path = f"{pipeline_setup.OUTPUT_DIR}/{col}_stats.csv"
+            file_path = f"{self.output_folder}/{col}_stats.csv"
             stats_df.to_csv(file_path)
             logger.info(f"Exported stats to {file_path}.")
 
@@ -451,7 +458,7 @@ class MiDDataEnhancer(DataFrameProcessor):
                     self.df.loc[current_leg_index, s.LEG_END_TIME_COL] = self.df.loc[
                                                                              current_leg_index, s.LEG_START_TIME_COL] + pd.Timedelta(
                         seconds=current_leg[s.LEG_DURATION_SECONDS_COL])
-                stats_tracker.increment("legs_with_corrected_times")
+                self.stats_tracker.increment("legs_with_corrected_times")
 
             new_times = self.df[self.df[s.UNIQUE_P_ID_COL] == person][[
                 s.LEG_START_TIME_COL, s.LEG_END_TIME_COL, s.ACT_DUR_SECONDS_COL, s.ACT_TO_INTERNAL_COL
@@ -459,7 +466,7 @@ class MiDDataEnhancer(DataFrameProcessor):
 
             logger.debug(f"New times: "
                          f"\n {new_times}")
-            stats_tracker.increment("persons_with_corrected_times")
+            self.stats_tracker.increment("persons_with_corrected_times")
 
     def find_similar_persons_with_activities(self, person, activity_types: list, attributes: list = None,
                                              cols_to_check_nan: list = None):
@@ -549,7 +556,7 @@ class MiDDataEnhancer(DataFrameProcessor):
         # Calculate license likelihoods (valid entries are mostly based on adults in MiD, which is good, because we
         # assign non-adults no license; this means unknowns are mostly adults)
         valid_entries = self.df[self.df[s.HAS_LICENSE_COL].isin([s.LICENSE_YES, s.LICENSE_NO])]
-        likelihoods = h.calculate_value_frequencies_df(valid_entries, s.H_CAR_IN_HH_COL, s.HAS_LICENSE_COL)
+        likelihoods = self.h.calculate_value_frequencies_df(valid_entries, s.H_CAR_IN_HH_COL, s.HAS_LICENSE_COL)
         licence_likelihood_with_car = likelihoods.at[s.CAR_IN_HH_YES, s.LICENSE_YES]
         logger.debug(f"Likelihood of having a license with a car: {licence_likelihood_with_car}")
         licence_likelihood_without_car = likelihoods.at[s.CAR_IN_HH_NO, s.LICENSE_YES]
@@ -952,11 +959,11 @@ class MiDDataEnhancer(DataFrameProcessor):
                     legs = person.loc[main_activity_row + 1:closest_home_row]
 
                 distances = legs[s.LEG_DISTANCE_METERS_COL].tolist()
-                dist_estimation_tree = h.build_estimation_tree(distances)
+                dist_estimation_tree = self.h.build_estimation_tree(distances)
                 home_to_main_distance = dist_estimation_tree[-1][0][2]  # highest lvl, leg 0, estimated value
 
                 times = legs[s.LEG_DURATION_SECONDS_COL].tolist()
-                time_estimation_tree = h.build_estimation_tree(times)
+                time_estimation_tree = self.h.build_estimation_tree(times)
                 home_to_main_time = time_estimation_tree[-1][0][2]  # highest lvl, leg 0, estimated value
 
                 time_is_estimated = 1
@@ -1059,15 +1066,11 @@ class MiDDataEnhancer(DataFrameProcessor):
 
         # Group by household
         households = self.df.groupby(s.UNIQUE_HH_ID_COL)
-        num_households = len(households)
 
         # Initialize connections series and checks_df
         connections = pd.Series(index=self.df.index, dtype='object')
         checks_data = []
-        for household_id, household_group in households:
-            num_households -= 1
-            if num_households % 1000 == 0:
-                logger.info(f"------ {num_households} households remaining. ------")
+        for household_id, household_group in tqdm(households, desc="Processing Households", unit="hh"):
             if household_group[s.PERSON_ID_COL].nunique() == 1:
                 logger.debug(f"Household {household_id} has only one person. No connections.")
                 continue
@@ -1077,10 +1080,10 @@ class MiDDataEnhancer(DataFrameProcessor):
                     if person_a_leg[s.PERSON_ID_COL] == person_b_leg[s.PERSON_ID_COL] or idx_b <= idx_a:
                         continue  # So we don't compare a leg to itself or to a leg it's already been compared to
 
-                    dist_match = h.check_distance(person_a_leg, person_b_leg)
-                    time_match = h.check_time(person_a_leg, person_b_leg)
-                    mode_match = h.check_mode(person_a_leg, person_b_leg)
-                    activity_match = h.check_activity(person_a_leg, person_b_leg)
+                    dist_match = self.h.check_distance(person_a_leg, person_b_leg)
+                    time_match = self.h.check_time(person_a_leg, person_b_leg)
+                    mode_match = self.h.check_mode(person_a_leg, person_b_leg)
+                    activity_match = self.h.check_activity(person_a_leg, person_b_leg)
                     logger.debug(f"Legs {person_a_leg[s.UNIQUE_LEG_ID_COL]} and {person_b_leg[s.UNIQUE_LEG_ID_COL]}: "
                                  f"distance {dist_match}, time {time_match}, mode {mode_match}, activity {activity_match}")
                     checks_data.append({  # List of dics
@@ -1102,7 +1105,7 @@ class MiDDataEnhancer(DataFrameProcessor):
 
         # Save checks_df to a CSV file
         checks_df = pd.DataFrame(checks_data)
-        file_loc = path.join(pipeline_setup.OUTPUT_DIR, 'leg_connections_logs.csv')
+        file_loc = path.join(self.output_folder, 'leg_connections_logs.csv')
         checks_df.to_csv(file_loc, index=False)
 
         # Add connections as a new column to self.df

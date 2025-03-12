@@ -2,7 +2,7 @@
 import pandas as pd
 
 from utils import helpers as h, settings as s
-from synthesis.data_prep.mid_data_enhancer import MiDDataEnhancer
+from synthesis.enhanced_mid.mid_data_enhancer import MiDDataEnhancer
 from utils.logger import logging
 from utils.stats_tracker import stats_tracker
 import os

@@ -6,15 +6,18 @@ from typing import Literal
 
 from utils import settings as s
 from utils import helpers as h
-from utils.logger import logging
+import logging
+from utils.logger import setup_logging
 from synthesis.location_assignment import activity_locator_distance_based as al
 from synthesis.location_assignment import myhoerl
-from utils.stats_tracker import stats_tracker
+from utils.stats_tracker import StatsTracker
 
+output_folder = sys.argv[1] # Absolute path to the output folder
+project_root = sys.argv[2] # Absolute path to the project root
+
+setup_logging(output_folder)
 logger = logging.getLogger(__name__)
-
-output_folder = sys.argv[1]
-project_root = sys.argv[2]
+stats_tracker = StatsTracker(output_folder)
 
 def run_location_assignment(configs):
     logger.info("Starting location assignment.")
@@ -28,9 +31,21 @@ def run_location_assignment(configs):
     assert_no_missing_locations = configs["general"]["assert_no_missing_locations"]
     filter_max_distance = configs["general"]["filter_max_distance"]
     filter_number_of_persons = configs["general"]["filter_number_of_persons"]
-    filter_by_person = configs["general"]["filter_by_person"]
     skip_loading_full_population = configs["general"]["skip_loading_full_population"]
     write_to_csv = configs["general"]["write_to_csv"]
+
+    # New Stlye
+    # locations_json_folder = config.get("general.locations_json_folder")
+    # algorithms_to_run = config.get("general.algorithms_to_run")
+    #
+    # save_intermediate_results = config.get("general.save_intermediate_results")
+    # assert_no_missing_locations = config.get("general.assert_no_missing_locations")
+    # filter_max_distance = config.get("general.filter_max_distance")
+    # filter_number_of_persons = config.get("general.filter_number_of_persons")
+    # filter_by_person = config.get("general.filter_by_person")
+    # skip_loading_full_population = config.get("general.skip_loading_full_population")
+    # write_to_csv = config.get("general.write_to_csv")
+
     algo_time = 0
 
     # Early check if all algorithms are valid
@@ -61,7 +76,7 @@ def run_location_assignment(configs):
         elif algorithm == 'nothing':
             logger.info("Doing nothing.")
         elif algorithm == 'filter':
-            mobile_population_df = mobile_population_df[mobile_population_df[s.UNIQUE_P_ID_COL] == filter_by_person]
+            mobile_population_df = mobile_population_df[mobile_population_df[s.UNIQUE_P_ID_COL] == configs["general"]["filter_by_person"]]
         elif algorithm == 'remove_unfeasible':
             mobile_population_df = remove_unfeasible_persons(mobile_population_df)
         elif algorithm == 'hoerl':
@@ -224,7 +239,7 @@ def run_advanced_petre(population_df, target_locations, config):
     segmented_dict = al.new_segment_plans(legs_dict)
     logger.info("Dict segmented.")
     time_start = time.time()
-    advance_petre_algorithm = al.AdvancedPetreAlgorithm(target_locations, segmented_dict, config)
+    advance_petre_algorithm = al.CARLA(target_locations, segmented_dict, config)
     result_dict = advance_petre_algorithm.run()
     algo_time = time.time() - time_start
     logger.info(f"CARLA done in {algo_time} seconds.")

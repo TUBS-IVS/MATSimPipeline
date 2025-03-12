@@ -8,73 +8,26 @@ import time
 import json
 
 from build.lib.ivs_helpers import stats_tracker
-from openpyxl.pivot.fields import Boolean
 from tqdm import tqdm
 from collections import defaultdict
 from typing import List, Dict, Any, Tuple, Literal
-from dataclasses import dataclass, field
+from utils.types import Segment, SegmentedPlan, SegmentedPlans, DetailedSegment, DetailedSegmentedPlan, \
+    DetailedSegmentedPlans, Leg, DetailedLeg
 
 import numpy as np
 import pandas as pd
 # from sklearn.neighbors import KDTree
 from scipy.spatial import cKDTree
 
-from utils import settings as s, helpers as h, pipeline_setup
-# from utils.types import PlanLeg, PlanSegment, SegmentedPlan, SegmentedPlans, UnSegmentedPlan, UnSegmentedPlans
+from utils import column_names as s
+from utils.helpers import Helpers
+
+h = Helpers()
 from utils.logger import logging
 
-from typing import NamedTuple, Tuple
 from frozendict import frozendict
 
 logger = logging.getLogger(__name__)
-
-
-# @dataclass
-# class Leg:
-#     __slots__ = (
-#         'leg_id', 'to_act_type', 'distance', 'from_location',
-#         'to_location', 'mode', 'is_main_activity', 'home_to_main_distance'
-#     )
-#     leg_id: str
-#     to_act_type: str
-#     distance: float
-#     from_location: np.ndarray
-#     to_location: np.ndarray
-#     mode: str
-#     is_main_activity: int
-#     home_to_main_distance: float
-
-class Leg(NamedTuple):
-    unique_leg_id: str
-    from_location: np.ndarray
-    to_location: np.ndarray
-    distance: float
-    to_act_type: str
-    to_act_identifier: str
-
-
-# Details are later also available in the unified df. This is just for algos that need it.
-class DetailedLeg(NamedTuple):
-    unique_leg_id: str
-    from_location: np.ndarray
-    to_location: np.ndarray
-    distance: float
-    to_act_type: str
-    to_act_identifier: str
-    mode: str
-    is_main_activity: bool
-    mirrors_main_activity: bool
-    home_to_main_distance: float
-
-
-Segment = Tuple[Leg, ...]  # A segment of a plan (immutable tuple of legs)
-SegmentedPlan = Tuple[Segment, ...]  # A full plan split into segments
-SegmentedPlans = frozendict[str, SegmentedPlan]  # All agents' plans (person_id -> SegmentedPlan)
-
-DetailedSegment = Tuple[DetailedLeg, ...]  # A segment of a plan (immutable tuple of legs)
-DetailedSegmentedPlan = Tuple[DetailedSegment, ...]  # A full plan split into segments
-DetailedSegmentedPlans = frozendict[str, DetailedSegmentedPlan]  # All agents' plans (person_id -> SegmentedPlan)
-
 
 
 class GermanPopulationDensity:
@@ -379,7 +332,8 @@ class TargetLocations:
         return identifier, coordinates
 
     def find_ring_candidates(self, act_type: str, center: np.ndarray, radius1: float, radius2: float, max_iterations=20,
-                             min_candidates=10, restrict_angle=False, direction_point=None, angle_range=math.pi / 1.5) -> \
+                             min_candidates=10, restrict_angle=False, direction_point=None,
+                             angle_range=math.pi / 1.5) -> \
             Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Find candidates within a ring around a center point.
         Iteratively increase the radii until a sufficient number of candidates is found."""
@@ -497,7 +451,7 @@ class TargetLocations:
                 raise RuntimeError(f"Not enough candidates found after {max_iterations} iterations.")
 
 
-class AdvancedPetreAlgorithm:
+class CARLA:
     """
     """
 
@@ -506,16 +460,16 @@ class AdvancedPetreAlgorithm:
         self.segmented_plans = segmented_plans
         self.c_i = CircleIntersection(target_locations)
 
-        self.number_of_branches = config['number_of_branches']
-        self.min_candidates_complex_case = config['min_candidates_complex_case']
-        self.candidates_two_leg_case = config['candidates_two_leg_case']
-        self.max_candidates = config['max_candidates']
-        self.anchor_strategy = config['anchor_strategy']
-        self.selection_strategy_complex_case = config['selection_strategy_complex_case']
-        self.selection_strategy_two_leg_case = config['selection_strategy_two_leg_case']
-        self.max_radius_reduction_factor = config['max_radius_reduction_factor']
-        self.max_iterations_complex_case = config['max_iterations_complex_case']
-        self.only_return_valid_persons = config['only_return_valid_persons']
+        self.number_of_branches = config.get("location_assignment.CARLA.number_of_branches")
+        self.min_candidates_complex_case = config.get("location_assignment.CARLA.min_candidates_complex_case")
+        self.candidates_two_leg_case = config.get("location_assignment.CARLA.candidates_two_leg_case")
+        self.max_candidates = config.get("location_assignment.CARLA.max_candidates")
+        self.anchor_strategy = config.get("location_assignment.CARLA.anchor_strategy")
+        self.selection_strategy_complex_case = config.get("location_assignment.CARLA.selection_strategy_complex_case")
+        self.selection_strategy_two_leg_case = config.get("location_assignment.CARLA.selection_strategy_two_leg_case")
+        self.max_radius_reduction_factor = config.get("location_assignment.CARLA.max_radius_reduction_factor")
+        self.max_iterations_complex_case = config.get("location_assignment.CARLA.max_iterations_complex_case")
+        self.only_return_valid_persons = config.get("location_assignment.CARLA.only_return_valid_persons")
 
     def run(self):
         placed_dict = {}
@@ -652,166 +606,6 @@ class AdvancedPetreAlgorithm:
         # Return the best solution
         best_idx = np.argmax(branch_scores)
         return full_segs[best_idx], branch_scores[best_idx]
-
-    def solve_segment_old(self, in_segment):
-        """At each level, find the best n locations, solve subproblems, and choose the best solution.
-        -Solve the highest current level with n candidates
-        -Place their locations and resegment (split) the segment
-        -Feed the new segments back into the solver"""
-        segment = copy.deepcopy(in_segment)
-        stats_tracker.increment("AdvancedPetreAlgorithm: Segments processed")
-
-        if len(segment) == 0:
-            raise ValueError("No legs in segment.")
-        elif len(segment) == 1:
-            stats_tracker.increment("AdvancedPetreAlgorithm: 1-leg segments")
-            assert segment[0]['from_location'].size > 0 and segment[0][
-                'to_location'].size > 0, "Both start and end locations must be known for a single leg."
-            return segment, 0
-        # if there are only two legs, we can find the loc immediately
-        elif len(segment) == 2:
-            stats_tracker.increment(f"AdvancedPetreAlgorithm: 2-leg segments")
-            if logger.isEnabledFor(logging.DEBUG): logger.debug(
-                f"Advanced locating. Segment has 2 legs. leg ID:{segment[0]['unique_leg_id']}")
-            act = self.c_i.get_best_circle_intersection_location(segment[0]['from_location'], segment[1]['to_location'],
-                                                                 segment[0]['to_act_type'], segment[0]['distance'],
-                                                                 segment[1]['distance'])
-            act_identifier, act_name, act_coord, act_cap, act_dist, act_score = act
-            segment[0]['to_location'] = act_coord
-            segment[1]['from_location'] = act_coord
-            segment[0]['to_act_identifier'] = act_identifier
-            # segment[0]['to_act_name'] = act_name
-            # segment[0]['to_act_cap'] = act_cap
-            # segment[0]['to_act_score'] = act_score
-            return segment, act_score
-
-        else:
-            if logger.isEnabledFor(logging.DEBUG): logger.debug(
-                f"Advanced locating. Segment has {len(segment)} legs. leg ID:{segment[0]['unique_leg_id']}")
-            stats_tracker.increment(f"AdvancedPetreAlgorithm: {len(segment)}-leg segments")
-            if self.anchor_strategy == "lower_middle":
-                anchor_idx = len(segment) // 2 - 1
-            elif self.anchor_strategy == "upper_middle":
-                anchor_idx = len(segment) // 2
-            elif self.anchor_strategy == "start":
-                anchor_idx = 0
-            elif self.anchor_strategy == "end":
-                anchor_idx = len(segment) - 1
-            else:
-                raise ValueError("Invalid anchor strategy.")
-
-            distances = np.array([leg['distance'] for leg in segment])
-
-            distances_start_to_act = distances[:anchor_idx + 1]  # Up to and including anchor
-            distances_act_to_end = distances[anchor_idx + 1:]  # From anchor + 1 to end
-
-            # Radii describing the search area (two overlapping donuts)
-            min_possible_distance1, max_possible_distance1 = h.get_min_max_distance(distances_start_to_act)
-            min_possible_distance2, max_possible_distance2 = h.get_min_max_distance(distances_act_to_end)
-
-            # Get candidates for the highest level
-            act_type = segment[anchor_idx]['to_act_type']
-            location1 = segment[0]['from_location']  # From
-            location2 = segment[-1]['to_location']  # To
-
-            candidates, iterations = self.target_locations.find_overlapping_rings_candidates(act_type,
-                                                                                             location1, location2,
-                                                                                             min_possible_distance1,
-                                                                                             max_possible_distance1,
-                                                                                             min_possible_distance2,
-                                                                                             max_possible_distance2,
-                                                                                             self.min_candidates_complex_case,
-                                                                                             self.max_candidates,
-                                                                                             self.max_iterations_complex_case)
-
-            candidate_identifiers, candidate_coordinates, candidate_potentials = candidates
-
-            if iterations > 0:  # We need to find distance deviations of each candidate to score them
-
-                candidate_deviations = np.zeros(len(candidate_identifiers))
-                # We only count deviations of lowest-level legs to avoid double counting
-                if len(distances_start_to_act) == 1:
-                    candidate_deviations += h.get_abs_distance_deviations(candidate_coordinates, location1,
-                                                                          distances_start_to_act)
-                elif len(distances_act_to_end) == 1:
-                    candidate_deviations += h.get_abs_distance_deviations(candidate_coordinates, location2,
-                                                                          distances_act_to_end)
-                local_scores = EvaluationFunction.evaluate_candidates(candidate_potentials, candidate_deviations)
-
-            else:  # No distance deviations expected, just score by potentials
-
-                # # 'DEBUG'
-                candidate_deviations = np.zeros(len(candidate_identifiers))
-                if len(distances_start_to_act) == 1:
-                    candidate_deviations += h.get_abs_distance_deviations(candidate_coordinates, location1,
-                                                                          distances_start_to_act)
-                if len(distances_act_to_end) == 1:
-                    candidate_deviations += h.get_abs_distance_deviations(candidate_coordinates, location2,
-                                                                          distances_act_to_end)
-
-                if np.any(candidate_deviations != 0):
-                    raise ValueError("Total deviations should be zero.")
-                # # /'DEBUG'
-
-                local_scores = EvaluationFunction.evaluate_candidates(candidate_potentials, None,
-                                                                      len(candidate_identifiers))
-
-            stats_tracker.log(f"AdvancedPetreAlgorithm: Number of candidates at segment length {len(segment)}:",
-                              len(local_scores))
-            if logger.isEnabledFor(logging.DEBUG): logger.debug(
-                f"Advanced locating. Found {len(local_scores)} candidates at segment length {len(segment)}.")
-
-            # # >Randomly< sample down to number_of_branches if there are too many candidates with the same score
-            # # This creates a roughly equal spacial distribution of candidates
-            # if len(local_scores) > number_of_branches:
-            #     stats_tracker.increment(f"AdvancedPetreAlgorithm: More candidates than branches:")
-            #
-            #     highest_value = np.max(local_scores)
-            #     highest_indices = np.where(local_scores == highest_value)[0]
-            #
-            #     if len(highest_indices) > number_of_branches:
-            #         stats_tracker.increment(f"AdvancedPetreAlgorithm: More candidates with equal scores than branches:")
-            #
-            #         selected_indices = np.random.choice(highest_indices, number_of_branches, replace=False)
-            #         candidates = (candidate_identifiers[selected_indices],
-            #                       candidate_coordinates[selected_indices],
-            #                       candidate_potentials[selected_indices])
-            #         local_scores = local_scores[selected_indices]
-
-            # Select the best-ish candidates
-            selected_candidates, scores = EvaluationFunction.select_candidates(candidates, local_scores,
-                                                                               self.number_of_branches, 'mixed')
-            selected_identifiers, selected_coords, selected_potentials = selected_candidates
-
-            # Split the segment at the anchor point
-            subsegment1 = segment[:anchor_idx + 1]  # Up to and including anchor
-            subsegment2 = segment[anchor_idx + 1:]  # From anchor + 1 to end
-
-            full_segs = []
-            branch_scores = []
-            for i in range(len(selected_identifiers)):
-                if len(selected_identifiers) == 1:
-                    subsegment1[-1]['to_location'] = selected_coords
-                    subsegment1[-1]['to_act_identifier'] = np.array(selected_identifiers[i])
-                    subsegment2[0]['from_location'] = selected_coords
-                else:
-                    subsegment1[-1]['to_location'] = selected_coords[i]
-                    subsegment1[-1]['to_act_identifier'] = np.array(selected_identifiers[i])
-                    subsegment2[0]['from_location'] = selected_coords[i]
-
-                located_seg1, score1 = self.solve_segment(subsegment1)
-                located_seg2, score2 = self.solve_segment(subsegment2)
-
-                total_branch_score = score1 + score2 + scores[i]
-                branch_scores.append(total_branch_score)
-
-                full_seg = located_seg1 + located_seg2  # List concatenation
-                full_segs.append(full_seg)
-
-            max_score = max(branch_scores)
-            best_seg = full_segs[branch_scores.index(max_score)]
-
-            return best_seg, max_score
 
 
 class WeirdPetreAlgorithm:
@@ -1162,7 +956,7 @@ class SimpleLelkeAlgorithm:
                                                                                 person_legs[i]['from_location'],
                                                                                 radius1, radius2, restrict_angle=True,
                                                                                 direction_point=person_legs[-1][
-                                                                                    'to_location'], max_iterations= 50)
+                                                                                    'to_location'], max_iterations=50)
 
                         act_identifier, act_coord, act_cap, act_score = (
                             EvaluationFunction.monte_carlo_select_candidate(candidates))
@@ -2000,8 +1794,6 @@ def convert_to_detailed_segmented_plans(df: pd.DataFrame) -> DetailedSegmentedPl
     return detailed_segmented_plans
 
 
-
-
 def prepare_population_df_for_location_assignment(df, filter_max_distance=None, number_of_persons=None) -> (
         pd.DataFrame, pd.DataFrame):
     """Temporarily prepare the MiD DataFrame for the leg dictionary function."""
@@ -2355,7 +2147,8 @@ def write_hoerl_df_to_big_df(hoerl_df, big_df):  # TODO: write main stuff (somew
     return merged_df
 
 
-def write_placement_results_dict_to_population_df(placement_results_dict, population_df, merge_how = 'left') -> pd.DataFrame:
+def write_placement_results_dict_to_population_df(placement_results_dict, population_df,
+                                                  merge_how='left') -> pd.DataFrame:
     """Writes the placement results from the dictionary to the big DataFrame."""
     records = []
     for person_id, segments in placement_results_dict.items():

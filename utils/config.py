@@ -1,9 +1,9 @@
 import os
 import yaml
-from utils.helpers import nest_dict
+
 
 class Config:
-    def __init__(self, output_folder, project_root, config_file = "config.yaml"):
+    def __init__(self, output_folder, project_root, config_file="config.yaml"):
         self.output_folder = output_folder
 
         # Load the config file
@@ -13,11 +13,11 @@ class Config:
                 raise ValueError("Invalid YAML format: Expected a dictionary at the top level.")
 
         # Load the used configuration (for documentation), which will be updated as the pipeline runs.
-        used_config_path = os.path.join(output_folder, "used_config.yaml")
+        used_config_path = os.path.join(self.output_folder, "used_config.yaml")
         if not os.path.exists(used_config_path):
             with open(used_config_path, "w") as f:
                 yaml.safe_dump({}, f)  # Writes an empty dictionary to the file
-        with open(os.path.join(output_folder, "used_config.yaml"), "r") as f:
+        with open(os.path.join(self.output_folder, "used_config.yaml"), "r") as f:
             self.used_config = yaml.safe_load(f) or {}
             if not isinstance(self.used_config, dict):
                 raise ValueError("Invalid YAML format: Expected a dictionary at the top level.")
@@ -45,43 +45,68 @@ class Config:
         Retrieve a configuration value using a dot-separated key.
         - If `use_used` is True, return the value from `used_config`.
         - Otherwise, traverse `full_config`, record the accessed value, and return it.
-        - If `default` is not specified, the method raises an error if the key is missing.
+        - If the key is missing entirely, return `default` (or raise KeyError if `default` is "Stop_when_missing").
         """
 
         def traverse(config, key_path):
+            """Traverses a nested dictionary using dot-separated keys."""
             keys = key_path.split('.')
             value = config
             for k in keys:
-                if isinstance(value, dict):
-                    if k in value:
-                        value = value[k]
-                    else:
-                        raise KeyError(f"Key '{key}' not found in {'used_config' if use_used else 'full_config'}.")
+                if isinstance(value, dict) and k in value:
+                    value = value[k]
                 else:
-                    raise KeyError(f"Key '{key}' not found in {'used_config' if use_used else 'full_config'}.")
-            return value
+                    if default == "Stop_when_missing":
+                        raise KeyError(f"Key '{key}' not found in {'used_config' if use_used else 'full_config'}.")
+                    return default  # Only use default if the key is fully missing
+            return value  # Return the actual value, even if None
 
-        if use_used:
-            return traverse(self.used_config, key)
-        value = traverse(self.full_config, key)
+        # Get value from used_config if specified, otherwise from full_config
+        value = traverse(self.used_config if use_used else self.full_config, key)
 
-        if value is None:
-            if default == "Stop_when_missing":
-                raise KeyError(f"Key '{key}' is required but not found in full_config.")
-            else:
-                value = default
-
-        # Store the accessed value in used_config
-        if key not in self.used_config:
+        # Store the accessed value in used_config only if it wasn't fetched from there
+        if not use_used and key not in self.used_config:
             self.used_config[key] = value
 
         return value
 
-    def write_used_config(self, used_config_file):
+    def nest_dict(self, flat_dict):
+        """
+        Convert a flat dictionary with dot-separated keys into a nested dictionary.
+
+        Example:
+          {
+              "settings.num_cores": 8,
+              "settings.log_level": "INFO",
+              "steps.Population.script": "steps/population/run.py"
+          }
+        becomes:
+          {
+              "settings": {
+                  "num_cores": 8,
+                  "log_level": "INFO"
+              },
+              "steps": {
+                  "Population": {
+                      "script": "steps/population/run.py"
+                  }
+              }
+          }
+        """
+        nested = {}
+        for composite_key, value in flat_dict.items():
+            keys = composite_key.split('.')
+            d = nested
+            for key in keys[:-1]:
+                d = d.setdefault(key, {})
+            d[keys[-1]] = value
+        return nested
+
+    def write_used_config(self):
         """
         Convert the flat used_config into a nested dictionary (via nest_dict)
         and write it to the provided used_config_file.
         """
-        nested_config = nest_dict(self.used_config)
-        with open(used_config_file, "w") as f:
+        nested_config = self.nest_dict(self.used_config)
+        with open(os.path.join(self.output_folder, "used_config.yaml"), "w") as f:
             yaml.safe_dump(nested_config, f, sort_keys=False)

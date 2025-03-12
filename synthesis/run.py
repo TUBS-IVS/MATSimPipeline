@@ -1,25 +1,30 @@
 #!/usr/bin/env python
 
+"""
+Entry point for running the pipeline.
+No changes are needed here. Use the config.yaml!
+"""
+
 import os
 import logging
 import subprocess
 from datetime import datetime
-from utils.config import Config  # Expects: Config(output_folder, project_root)
-from utils.logger import setup_logging  # Expects: setup_logging(output_folder, console_level, file_level)
-from utils import settings as s
+from utils.config import Config
+from utils.logger import setup_logging
 
 class PipelineRunner:
-    def __init__(self, project_root=None):
+    def __init__(self, config_yaml="config.yaml", project_root=None):
         """
         Initializes the pipeline, sets up logging, and prepares configuration files.
         """
+        self.config_yaml = config_yaml
         if project_root is None:
             project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.project_root = project_root
 
         self.output_folder = self.create_output_folder()
 
-        self.config_obj = Config(self.output_folder, self.project_root, s.CONFIG_YAML_TO_USE)
+        self.config_obj = Config(self.output_folder, self.project_root, self.config_yaml)
 
         console_level = self.config_obj.get("settings.logging.console_level")
         file_level = self.config_obj.get("settings.logging.file_level")
@@ -39,11 +44,11 @@ class PipelineRunner:
         """
         logging.info(f"Running step: {step_name}...")
 
-        step_script = self.config_obj.get(f"steps.{step_name}.script")
+        step_script = self.config_obj.get(f"{step_name}.script")
 
-        command = [os.sys.executable, step_script, self.output_folder, self.project_root]
+        command = [os.sys.executable, step_script, self.output_folder, self.project_root, self.config_yaml]
 
-        result = subprocess.run(command, capture_output=True, text=True)
+        result = subprocess.run(command, text=True)
         if result.returncode == 0:
             logging.info(f"{step_name} completed successfully.")
             return True
@@ -62,7 +67,7 @@ class PipelineRunner:
                 logging.error(f"Step {step_name} failed. Stopping pipeline.")
                 return
         logging.info("Pipeline completed successfully.")
-
+        return self.output_folder
 
 if __name__ == "__main__":
     runner = PipelineRunner()

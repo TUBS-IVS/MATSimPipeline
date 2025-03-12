@@ -2,88 +2,210 @@
 # Global pipeline settings
 settings:
   logging:
-    console_level: "DEBUG"
+    console_level: "INFO"
     file_level: "INFO"
+  play_error_sound: false
 
-# Define execution order (steps & parallel runs)
+# Define execution order
 execution:
-  - LocationChoice
+  - enhanced_mid
 
 # Steps Configuration
-steps:
-  Population:
-    script: steps/population/run.py
-    input_files: # Use ${CURRENT_OUTPUT} to refer to the current output folder (to get outputs from previous steps)
-      expanded_households_files:
-        - "data/synthetic_households_city.csv"
-        - "data/synthetic_households_region.csv"
-      enhanced_mid_folder: "data/mid/enhanced"
-      mid_hh_folder: "data/mid/households"
-      mid_persons_folder: "data/mid/persons"
-      mid_trips_folder: "${CURRENT_OUTPUT}/mid/trips"
-    settings:
-      sample_size: 0.25
-      n_closest_cells: 10
-      default_slack_factor: 1.5
-      sigmoid_beta: -0.15
-      sigmoid_delta_t: 1200
+Population:
+  script: population\run.py
+  input: # Use ${CURRENT_OUTPUT} to refer to the current output folder (to get outputs from previous steps)
+    expanded_households_files:
+      - "data/synthetic_households_city.csv"
+      - "data/synthetic_households_region.csv"
+    enhanced_mid_folder: "data/mid/enhanced"
+  output:
+    buildings_in_lowest_geography_with_weights_file: "data/houses_with_weights.csv"
+    capa_cells_csv_path: "data/region_hanover_potentials.csv"
+    capa_cells_shp_path: "data/shapes/RH_useful__zone.SHP"
+    region_without_city_gpkg_file: "data/shapes/RegionOhneStadtGitter100m.gpkg"
+    shape_boundary_file: "data/shapes/region_hanover.shp"
+    slack_factors_file: "data/Slack_Factors.csv"
+    mid_hh_folder: "data/mid/households"
+    mid_persons_folder: "data/mid/persons"
+    mid_trips_folder: "data/mid/trips"
+    enhanced_mid_file: "enhanced_mid.csv"
+  geography_columns:
+    - WELT
+    - STAAT
+    - STADTTLNR
+    - BAUBLOCKNR
+  lowest_level_geography: "BAUBLOCKNR"
 
-  MID_Enhancement:
-    script: steps/mid_enhancement/run.py
-    input_files:
-      buildings_in_lowest_geography_with_weights_file: "data/houses_with_weights.csv"
-      capa_cells_csv_path: "data/region_hanover_potentials.csv"
-      capa_cells_shp_path: "data/shapes/RH_useful__zone.SHP"
-      region_without_city_gpkg_file: "data/shapes/RegionOhneStadtGitter100m.gpkg"
-      shape_boundary_file: "data/shapes/region_hanover.shp"
-      slack_factors_file: "data/Slack_Factors.csv"
-    settings:
-      id_columns:
-        household_mid_id_column: "H_ID"
-        household_popsim_id_column: "household_id"
-        person_id_column: "HP_ID"
-        leg_non_unique_id_column: "W_ID"
-        leg_id_column: "HPW_ID"
-        tt_matrix_cell_id_column: "cell_id"
-      geography_columns:
-        - WELT
-        - STAAT
-        - STADTTLNR
-        - BAUBLOCKNR
-      lowest_level_geography: "BAUBLOCKNR"
+enhanced_mid:
+  script: enhanced_mid\run.py
+  input:
+    mid_hh_folder: "data/mid/households"
+    mid_persons_folder: "data/mid/persons"
+    mid_trips_folder: "data/mid/trips"
+  output:
+    enhanced_mid_file: "enhanced_mid.csv"
 
-  LocationChoice:
-    script: location_assignment\run_location_assignment.py
-    input_files:
-      population_df_folder: "data/mid/enhanced"
-      locations_json_folder: "data/locations"
-    algorithm_settings:
-      algorithms_to_run:
-        - "load_intermediate"
-        - "CARLA"
-      save_intermediate_results: true
-      assert_no_missing_locations: true
-      filter_by_person: "10474610_12005_10474614"
-      filter_number_of_persons: 1000
-      filter_max_distance: 30000
-      detour_factor: 1.4
-      skip_loading_full_population: true
-      write_to_csv: true
-      CARLA:
-        number_of_branches: 70
-        min_candidates_complex_case: 20
-        candidates_two_leg_case: 30
-        max_candidates: null
-        anchor_strategy: "lower_middle"
-        selection_strategy_complex_case: "top_n_spatial_downsample"
-        selection_strategy_two_leg_case: "top_n"
-        max_radius_reduction_factor: null
-        max_iterations_complex_case: 15
-        only_return_valid_persons: false
-      main:
-        skip_already_located: true
-      open_ended:
-        skip_already_located: false
-      hoerl:
-        max_iterations: 1000
+location_assignment:
+  script: location_assignment\run.py
+  input:
+    population_df_folder: "data/mid/enhanced"
+    locations_json_folder: "data/locations"
+  output:
+    population: "population.csv"
+  # General settings
+  algorithms_to_run:
+    - "load_intermediate"
+    - "CARLA"
+  save_intermediate_results: true
+  assert_no_missing_locations: true
+  filter_number_of_persons: 1000
+  filter_max_distance: 30000
+  detour_factor: 1.4
+  skip_loading_full_population: true
+  write_to_csv: true
+  # Algorithm specific settings
+  filter:
+    filter_by_person: "10474610_12005_10474614"
+  CARLA:
+    number_of_branches: 70
+    min_candidates_complex_case: 20
+    candidates_two_leg_case: 30
+    max_candidates: null
+    anchor_strategy: "lower_middle"
+    selection_strategy_complex_case: "top_n_spatial_downsample"
+    selection_strategy_two_leg_case: "top_n"
+    max_radius_reduction_factor: null
+    max_iterations_complex_case: 15
+    only_return_valid_persons: false
+  main:
+    skip_already_located: true
+  open_ended:
+    skip_already_located: false
+  hoerl:
+    max_iterations: 1000
 
+matsim_writer:
+  script: matsim_writer\run.py
+  input:
+    population_df: "${CURRENT_OUTPUT}/population.csv"
+  output:
+    plans: "population.xml"
+    households: "households.xml"
+    facilities: "facilities.xml"
+    vehicles: "vehicles.xml"
+  write_post_processed_population: true
+  write_xmls: true
+
+# Define the mapping of values from the input data to internal values
+value_maps:
+  activities:
+    work:
+      mid: 1
+      alkis_location_types:
+      internal: work
+      MATSim: work
+    business:
+      mid: 2
+      alkis_location_types:
+      internal: business
+      MATSim: work
+    education:
+      mid: 3
+      alkis_location_types:
+      internal: education
+      MATSim: education
+    shopping:
+      mid: 4
+      alkis_location_types:
+      internal: shopping
+      MATSim: shopping
+    errands:
+      mid: 5
+      alkis_location_types:
+      internal: errands
+      MATSim: leisure
+    pick_up_drop_off:
+      mid: 6
+      alkis_location_types:
+      internal: pick_up_drop_off
+      MATSim: other
+    leisure:
+      mid: 7
+      alkis_location_types:
+      internal: leisure
+      MATSim: leisure
+    home:
+      mid: 8
+      alkis_location_types:
+      internal: home
+      MATSim: home
+    return_journey:
+      mid: 9
+      alkis_location_types:
+      internal: return_journey
+      MATSim: other
+    other:
+      mid: 10
+      alkis_location_types:
+      internal: other
+      MATSim: other
+    early_education:
+      mid: 11
+      alkis_location_types:
+      internal: early_education
+      MATSim: education
+    daycare:
+      mid: 12
+      alkis_location_types:
+      internal: daycare
+      MATSim: education
+    accompany_adult:
+      mid: 13
+      alkis_location_types:
+      internal: accompany_adult
+      MATSim: other
+    sports:
+      mid: 14
+      alkis_location_types:
+      internal: sports
+      MATSim: leisure
+    meetup:
+      mid: 15
+      alkis_location_types:
+      internal: meetup
+      MATSim: leisure
+    lessons:
+      mid: 16
+      alkis_location_types:
+      internal: lessons
+      MATSim: leisure
+    unspecified:
+      mid: 99
+      alkis_location_types:
+      internal: unspecified
+      MATSim: other
+  modes:
+    car:
+      mid: 4
+      internal: car
+      MATSim: car
+    bike:
+      mid: 2
+      internal: bike
+      MATSim: bike
+    walk:
+      mid: 1
+      internal: walk
+      MATSim: walk
+    pt:
+      mid: 5
+      internal: pt
+      MATSim: pt
+    ride:
+      mid: 3
+      internal: ride
+      MATSim: ride
+    undefined:
+      mid: undefined
+      internal: undefined
+      MATSim: undefined

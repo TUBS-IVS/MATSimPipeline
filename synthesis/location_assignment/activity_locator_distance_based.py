@@ -99,79 +99,36 @@ class CommuterPlacer:
         # Remove the rest
         # Do more precise check.
 
-    # def locate_commuter(self, person_legs: UnSegmentedPlan) -> UnSegmentedPlan:
-    #     """Gets a person's main activity and locates it.
-    #     Currently just uses the Euclidean distance and potentials.
-    #     Planned to also use O-D matrices.
-    #     :return: Updated list of legs with located main activities.
-    #     """
-    #     main_activity_index, main_activity_leg = h.get_main_activity_leg(person_legs)
-    #     if main_activity_leg is None:
-    #         return person_legs
-    #
-    #     # Skip if main already located
-    #     to_location = main_activity_leg.get('to_location')
-    #     assert isinstance(to_location, np.ndarray), "Bad location format."
-    #     if to_location.size != 0:
-    #         return person_legs
-    #
-    #     # TODO go from here
-    #     target_activity = main_activity_leg['to_act_type']
-    #     home_location = person_legs[0]['from_location']
-    #     estimated_distance_home_to_main = person_legs[0]['home_to_main_distance']
-    #
-    #     # Radii are iteratively spread by find_ring_candidates until a candidate is found
-    #     radius1, radius2 = h.spread_distances(estimated_distance_home_to_main,
-    #                                           estimated_distance_home_to_main)  # Initial
-    #     candidates = self.target_locations.find_ring_candidates(target_activity, home_location, radius1=radius1,
-    #                                                             radius2=radius2)
-    #     scores = EvaluationFunction.evaluate_candidates(candidates[-2], None, len(candidates[-2]))
-    #     chosen_candidate, score = (
-    #         EvaluationFunction.select_candidates(candidates, scores, 1, 'monte_carlo'))
-    #
-    #     act_identifier, act_name, act_coord, act_pot, act_dist = chosen_candidate
-    #
-    #     # Update the main activity leg and the subsequent leg
-    #     person_legs[main_activity_index]['to_location'] = act_coord
-    #     person_legs[main_activity_index]['to_act_identifier'] = act_identifier
-    #     person_legs[main_activity_index]['to_act_name'] = act_name
-    #     person_legs[main_activity_index]['to_act_cap'] = act_pot
-    #     person_legs[main_activity_index]['to_act_score'] = score
-    #
-    #     if main_activity_index + 1 < len(person_legs):  # Set from location if there is a subsequent leg
-    #         person_legs[main_activity_index + 1]['from_location'] = act_coord
-    #
-    #     return person_legs
 
 
-def reformat_locations(locations_data: Dict[str, Dict[str, Dict[str, Any]]]) -> Dict[str, Dict[str, np.ndarray]]:
-    """Reformat locations data from a nested dictionary to a dictionary of numpy arrays."""
-    reformatted_data = {}
-
-    for type, locations in locations_data.items():
-        identifiers = []
-        names = []
-        coordinates = []
-        potentials = []
-
-        for location_id, location_details in locations.items():
-            identifiers.append(location_id)
-            names.append(location_details['name'])
-            coordinates.append(location_details['coordinates'])
-            try:
-                potentials.append(location_details['potential'])
-            except KeyError:
-                logger.warning("Using old capacity name instead of potential name")
-                potentials.append(location_details['capacity'])  # Old name
-
-        reformatted_data[type] = {
-            'identifiers': np.array(identifiers, dtype=object),
-            'names': np.array(names, dtype=str),
-            'coordinates': np.array(coordinates, dtype=float),
-            'potentials': np.array(potentials, dtype=float)
-        }
-
-    return reformatted_data
+# def reformat_locations(locations_data: Dict[str, Dict[str, Dict[str, Any]]]) -> Dict[str, Dict[str, np.ndarray]]:
+#     """Reformat locations data from a nested dictionary to a dictionary of numpy arrays."""
+#     reformatted_data = {}
+#
+#     for type, locations in locations_data.items():
+#         identifiers = []
+#         names = []
+#         coordinates = []
+#         potentials = []
+#
+#         for location_id, location_details in locations.items():
+#             identifiers.append(location_id)
+#             names.append(location_details['name'])
+#             coordinates.append(location_details['coordinates'])
+#             try:
+#                 potentials.append(location_details['potential'])
+#             except KeyError:
+#                 logger.warning("Using old capacity name instead of potential name")
+#                 potentials.append(location_details['capacity'])  # Old name
+#
+#         reformatted_data[type] = {
+#             'identifiers': np.array(identifiers, dtype=object),
+#             'names': np.array(names, dtype=str),
+#             'coordinates': np.array(coordinates, dtype=float),
+#             'potentials': np.array(potentials, dtype=float)
+#         }
+#
+#     return reformatted_data
 
 
 class Potentials:

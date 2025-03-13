@@ -8,13 +8,16 @@ from utils.stats_tracker import StatsTracker
 
 import pandas as pd
 import os
-from typing import Literal
 
 from utils import column_names as s
 from utils.helpers import Helpers
 from synthesis.location_assignment import activity_locator_distance_based as al
 from synthesis.location_assignment import myhoerl
 
+# From the minimal united locations datafile (which contains centre points, polygons, MiD hh ids, ALKIS oi, and allowed activities)
+# get buildings/locations where households exist
+# associate any needed data with the households from enhanced mid, including trip info
+# get all buildings with just their centre point and the allowed activities
 
 def run_location_assignment(config):
 
@@ -41,7 +44,7 @@ def run_location_assignment(config):
 
     if not skip_loading_full_population:
         # Load the population dataframe
-        population_df = h.read_csv(h.get_files(config.get("location_assignment.population_df_folder")))
+        population_df = pd.read_csv(h.get_files(config.get("location_assignment.population_df_folder")))
 
         # Prepare the population dataframe, split off non-mobile persons
         mobile_population_df, non_mobile_population_df = (al.prepare_population_df_for_location_assignment
@@ -125,7 +128,7 @@ def run_location_assignment(config):
 
 
 def load_intermediate():
-    mobile_population_df = h.read_csv(h.get_files(r"data/intermediates"))
+    mobile_population_df = pd.read_csv(h.get_files(r"data/intermediates"))
     if "to_location" in mobile_population_df.columns:
         mobile_population_df["to_location"] = mobile_population_df["to_location"].apply(
             lambda x: h.convert_to_point(x, target='array'))

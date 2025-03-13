@@ -8,10 +8,10 @@ settings:
 
 # Define execution order
 execution:
-  - enhanced_mid
+  - location_assignment
 
 # Steps Configuration
-Population:
+population:
   script: population\run.py
   input: # Use ${CURRENT_OUTPUT} to refer to the current output folder (to get outputs from previous steps)
     expanded_households_files:
@@ -35,6 +35,30 @@ Population:
     - STADTTLNR
     - BAUBLOCKNR
   lowest_level_geography: "BAUBLOCKNR"
+
+digital_twin_maker: # Integrates population and more data to buildings
+    script: digital_twin_maker\run.py
+    input:
+        buildings_in_lowest_geography_with_weights_file: "${CURRENT_OUTPUT}/houses_with_weights.csv"
+        capa_cells_csv_path: "${CURRENT_OUTPUT}/region_hanover_potentials.csv"
+        capa_cells_shp_path: "${CURRENT_OUTPUT}/shapes/RH_useful__zone.SHP"
+        region_without_city_gpkg_file: "${CURRENT_OUTPUT}/shapes/RegionOhneStadtGitter100m.gpkg"
+        shape_boundary_file: "${CURRENT_OUTPUT}/shapes/region_hanover.shp"
+        slack_factors_file: "${CURRENT_OUTPUT}/Slack_Factors.csv"
+    output:
+        locations_pkl: "locations.pkl"
+        locations_csv: "locations.csv"
+        locations_shp: "locations.shp"
+        capa_cells_shp_path: "shapes/RH_useful__zone.SHP"
+        region_without_city_gpkg_file: "shapes/RegionOhneStadtGitter100m.gpkg"
+        shape_boundary_file: "shapes/region_hanover.shp"
+        slack_factors_file: "Slack_Factors.csv"
+    # General settings
+    assign_random_households: true
+    assign_random_activities: true
+    save_pkl: true # Translate and pickle locations for faster processing in the next step
+    save_csv: true
+    save_shp: true
 
 enhanced_mid:
   script: enhanced_mid\run.py

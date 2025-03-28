@@ -1,7 +1,7 @@
 # TODO: This isn't used right now. Either upgrade or remove.
 
 import argparse
-from synthesis import popsim_to_matsim_plans_main
+from playground import popsim_to_matsim_plans_main
 from utils import matsim_pipeline_setup
 #from transaction_pipeline import transaction_main
 from utils.logger import logging

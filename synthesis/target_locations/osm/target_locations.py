@@ -126,7 +126,7 @@ class TargetLocations:
 import os
 import time
 
-os.chdir(r"C:\Users\petre\Documents\GitHub\MATSimPipeline")
+os.chdir(r"/")
 # Example usage
 start_time = time.time()
 geopackage_path = r"C:\Users\petre\Documents\GitHub\osmox\LOWER_SAXONY\niedersachsen_epsg_25832.gpkg"
@@ -144,7 +144,7 @@ save_time = time.time()
 print(f"Time taken to save reformatted data: {save_time - edit_end_time:.2f} seconds")
 
 # Load reformatted data
-loaded_target_locations = TargetLocations.load_reformatted_data(r"C:\Users\petre\Documents\GitHub\MATSimPipeline\playground\reformatted_data2.json")
+loaded_target_locations = TargetLocations.load_reformatted_data(r"/playground/reformatted_data2.json")
 print(loaded_target_locations.data)
 print(loaded_target_locations.indices)
 end_time = time.time()

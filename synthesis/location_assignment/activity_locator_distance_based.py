@@ -304,7 +304,7 @@ class TargetLocations:
                 if restrict_angle:
                     angle_candidates = []
                     for j, candidate_location in enumerate(candidates[1]):
-                        if is_within_angle(candidate_location, center, direction_point, angle_range):
+                        if h.is_within_angle(candidate_location, center, direction_point, angle_range):
                             angle_candidates.append(j)
                     candidates = tuple(
                         [arr[angle] if arr is not None else None for angle in angle_candidates]
@@ -896,7 +896,7 @@ class SimpleLelkeAlgorithm:
                         if logger.isEnabledFor(logging.DEBUG): logger.debug(
                             "Selecting location using simple two-leg method.")
                         assert person_legs[-1] == person_legs[
-                            i + 1], "Last leg must be the last leg."  # TODO: Remove this line in production
+                            i + 1], "Last leg must be the last leg."  # TODO: Remove this line in prod. This had a reason I don't remember lol
                         act_identifier, act_coord, act_cap, act_score = \
                             self.c_i.get_best_circle_intersection_location(person_legs[i]['from_location'],
                                                                            person_legs[-1]['to_location'],
@@ -1974,45 +1974,45 @@ def new_segment_plans(plans: SegmentedPlans) -> SegmentedPlans:
 
 
 # TODO: medium term remove
-def insert_placed_distances(segment):
-    """Inserts info on the actual distances between placed activities for a fully located segment.
-    Optional; for debugging and evaluation."""
-    for leg in segment:
-        leg['placed_distance'] = h.euclidean_distance(leg['from_location'], leg['to_location'])
-        leg['placed_distance_absolute_diff'] = abs(leg['distance'] - leg['placed_distance'])
-        leg['placed_distance_relative_diff'] = leg['placed_distance_absolute_diff'] / leg['distance']
-    return segment
-
-
-def summarize_placement_results(flattened_segmented_dict):
-    """Summarizes the placement results of a fully located segment.
-    Optional; for debugging and evaluation."""
-    discretization_errors = []
-    relative_errors = []
-    total_number_of_legs = sum([len(segment) for segment in flattened_segmented_dict.values()])
-    for person_id, segment in flattened_segmented_dict.items():
-        for leg in segment:
-            discretization_errors.append(leg['placed_distance_absolute_diff'])
-            relative_errors.append(leg['placed_distance_relative_diff'])
-    mean_discretization_error = sum(discretization_errors) / total_number_of_legs
-    mean_relative_error = sum(relative_errors) / total_number_of_legs
-    median_discretization_error = np.median(discretization_errors)
-    median_relative_error = np.median(relative_errors)
-
-    logger.info(f"Total number of legs: {total_number_of_legs}")
-    logger.info(f"Average discretization error: {mean_discretization_error}")
-    logger.info(f"Average relative error: {mean_relative_error}")
-    logger.info(f"Median discretization error: {median_discretization_error}")
-    logger.info(f"Median relative error: {median_relative_error}")
-
-    return total_number_of_legs, mean_discretization_error, mean_relative_error, median_discretization_error, median_relative_error
-
-
-def flatten_segmented_dict(segmented_dict: Dict[str, List[List[Dict[str, Any]]]]) -> Dict[str, List[Dict[str, Any]]]:
-    """Recombine the segments of each person into a single list of legs."""
-    for person_id, segments in segmented_dict.items():
-        segmented_dict[person_id] = [leg for segment in segments for leg in segment]
-    return segmented_dict
+# def insert_placed_distances(segment):
+#     """Inserts info on the actual distances between placed activities for a fully located segment.
+#     Optional; for debugging and evaluation."""
+#     for leg in segment:
+#         leg['placed_distance'] = h.euclidean_distance(leg['from_location'], leg['to_location'])
+#         leg['placed_distance_absolute_diff'] = abs(leg['distance'] - leg['placed_distance'])
+#         leg['placed_distance_relative_diff'] = leg['placed_distance_absolute_diff'] / leg['distance']
+#     return segment
+#
+#
+# def summarize_placement_results(flattened_segmented_dict):
+#     """Summarizes the placement results of a fully located segment.
+#     Optional; for debugging and evaluation."""
+#     discretization_errors = []
+#     relative_errors = []
+#     total_number_of_legs = sum([len(segment) for segment in flattened_segmented_dict.values()])
+#     for person_id, segment in flattened_segmented_dict.items():
+#         for leg in segment:
+#             discretization_errors.append(leg['placed_distance_absolute_diff'])
+#             relative_errors.append(leg['placed_distance_relative_diff'])
+#     mean_discretization_error = sum(discretization_errors) / total_number_of_legs
+#     mean_relative_error = sum(relative_errors) / total_number_of_legs
+#     median_discretization_error = np.median(discretization_errors)
+#     median_relative_error = np.median(relative_errors)
+#
+#     logger.info(f"Total number of legs: {total_number_of_legs}")
+#     logger.info(f"Average discretization error: {mean_discretization_error}")
+#     logger.info(f"Average relative error: {mean_relative_error}")
+#     logger.info(f"Median discretization error: {median_discretization_error}")
+#     logger.info(f"Median relative error: {median_relative_error}")
+#
+#     return total_number_of_legs, mean_discretization_error, mean_relative_error, median_discretization_error, median_relative_error
+#
+#
+# def flatten_segmented_dict(segmented_dict: Dict[str, List[List[Dict[str, Any]]]]) -> Dict[str, List[Dict[str, Any]]]:
+#     """Recombine the segments of each person into a single list of legs."""
+#     for person_id, segments in segmented_dict.items():
+#         segmented_dict[person_id] = [leg for segment in segments for leg in segment]
+#     return segmented_dict
 
 
 # def build_candidate_tree(segment, tree):
@@ -2029,53 +2029,32 @@ def flatten_segmented_dict(segmented_dict: Dict[str, List[List[Dict[str, Any]]]]
 #             if logger.isEnabledFor(logging.DEBUG): logger.debug(candidates)
 
 
-def angle_between(p1, p2):
-    delta_y = p2[1] - p1[1]
-    delta_x = p2[0] - p1[0]
-    angle = math.atan2(delta_y, delta_x)
-    return angle
 
 
-def is_within_angle(point, center, direction_point, angle_range):
-    angle_to_point = angle_between(center, point)
-    angle_to_direction = angle_between(center, direction_point)
-    lower_bound = angle_to_direction - angle_range / 2
-    upper_bound = angle_to_direction + angle_range / 2
-
-    # Normalize angles between -pi and pi
-    angle_to_point = (angle_to_point + 2 * math.pi) % (2 * math.pi)
-    lower_bound = (lower_bound + 2 * math.pi) % (2 * math.pi)
-    upper_bound = (upper_bound + 2 * math.pi) % (2 * math.pi)
-
-    if lower_bound < upper_bound:
-        return lower_bound <= angle_to_point <= upper_bound
-    else:  # Covers the case where the angle range crosses the -pi/pi boundary
-        return angle_to_point >= lower_bound or angle_to_point <= upper_bound
-
-
-def update_dataframe(df: pd.DataFrame, placed_dict: Dict[str, Any]) -> pd.DataFrame:
-    # Initialize new columns with NaN values
-    df['from_location'] = np.nan
-    df['to_location'] = np.nan
-    df['placed_distance'] = np.nan
-    df['placed_distance_absolute_diff'] = np.nan
-    df['placed_distance_relative_diff'] = np.nan
-
-    # Flatten the dictionary and create a DataFrame
-    records = []
-    for key, value in placed_dict.items():
-        for entry in value:
-            records.extend(entry)  # works here because the entries are lists
-
-    data_df = pd.DataFrame(records)
-
-    # Merge the DataFrame on leg_id
-    df = df.merge(data_df[[s.UNIQUE_LEG_ID_COL, 'from_location', 'to_location', 'placed_distance',
-                           'placed_distance_absolute_diff',
-                           'placed_distance_relative_diff']],
-                  on=s.UNIQUE_LEG_ID_COL, how='left')
-
-    return df
+#
+# def update_dataframe(df: pd.DataFrame, placed_dict: Dict[str, Any]) -> pd.DataFrame:
+#     # Initialize new columns with NaN values
+#     df['from_location'] = np.nan
+#     df['to_location'] = np.nan
+#     df['placed_distance'] = np.nan
+#     df['placed_distance_absolute_diff'] = np.nan
+#     df['placed_distance_relative_diff'] = np.nan
+#
+#     # Flatten the dictionary and create a DataFrame
+#     records = []
+#     for key, value in placed_dict.items():
+#         for entry in value:
+#             records.extend(entry)  # works here because the entries are lists
+#
+#     data_df = pd.DataFrame(records)
+#
+#     # Merge the DataFrame on leg_id
+#     df = df.merge(data_df[[s.UNIQUE_LEG_ID_COL, 'from_location', 'to_location', 'placed_distance',
+#                            'placed_distance_absolute_diff',
+#                            'placed_distance_relative_diff']],
+#                   on=s.UNIQUE_LEG_ID_COL, how='left')
+#
+#     return df
 
 
 def write_hoerl_df_to_big_df(hoerl_df, big_df):  # TODO: write main stuff (somewhere else) to big df

@@ -12,7 +12,7 @@ import os
 from utils import column_names as s
 from utils.helpers import Helpers
 from synthesis.location_assignment import activity_locator_distance_based as al
-from synthesis.location_assignment import myhoerl
+from synthesis.location_assignment import hoerl
 
 # From the minimal united locations datafile (which contains centre points, polygons, MiD hh ids, ALKIS oi, and allowed activities)
 # get buildings/locations where households exist
@@ -34,7 +34,7 @@ def run_location_assignment(config):
 
     # Early check if all algorithms are valid
     valid_algorithms = ['load_intermediate', 'filter', 'remove_unfeasible', 'hoerl', 'simple_lelke', 'greedy_petre',
-                        'main', 'CARLA', 'open_ended', 'nothing']
+                        'simple_main', 'CARLA', 'open_ended', 'nothing']
 
     if not all(algorithm in valid_algorithms for algorithm in algorithms_to_run):
         raise ValueError(f"Invalid algorithm. Valid algorithms are: {valid_algorithms}")
@@ -75,7 +75,7 @@ def run_location_assignment(config):
             mobile_population_df = run_greedy_petre(
                 mobile_population_df, target_locations)
         elif algorithm == 'main':
-            mobile_population_df = run_main(
+            mobile_population_df = run_simple_main(
                 mobile_population_df, target_locations,
                 config)  # TODO: config object will not work -> adjust inner code
         elif algorithm == 'open_ended':
@@ -157,7 +157,7 @@ def run_hoerl(population_df, target_locations, config):
     segmented_dict = al.segment_plans(legs_dict)
     logger.info("Dict segmented, starting hoerl")
     time_start = time.time()
-    df_location, df_convergence = myhoerl.process(target_locations, segmented_dict, config)
+    df_location, df_convergence = hoerl.process(target_locations, segmented_dict, config)
     algo_time = time.time() - time_start
     logger.info(f"Hoerl done in {algo_time} seconds.")
     stats_tracker.log("runtimes.hoerl_time", algo_time)
@@ -196,7 +196,7 @@ def run_simple_lelke(population_df, target_locations):
     return h.add_from_location(population_df, 'to_location', 'from_location')
 
 
-def run_main(population_df, target_locations, config):
+def run_simple_main(population_df, target_locations, config):
     """Runs the Main algorithm on the given population and locations CSV files."""
     logger.info("Starting Main algorithm.")
     legs_dict = al.populate_legs_dict_from_df(population_df)

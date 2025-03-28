@@ -3,6 +3,7 @@ import gzip
 import json
 import os
 import random
+import math
 import re
 import shutil
 import glob
@@ -928,6 +929,29 @@ class Helpers:
         self.stats_tracker.log("downsampled_population", sample_percentage)
         self.logger.info(f"Downsampled population to {sample_percentage * 100}% of the original population.")
         return df
+
+    @staticmethod
+    def angle_between(p1, p2):
+        delta_y = p2[1] - p1[1]
+        delta_x = p2[0] - p1[0]
+        angle = math.atan2(delta_y, delta_x)
+        return angle
+
+    def is_within_angle(self, point, center, direction_point, angle_range):
+        angle_to_point = self.angle_between(center, point)
+        angle_to_direction = self.angle_between(center, direction_point)
+        lower_bound = angle_to_direction - angle_range / 2
+        upper_bound = angle_to_direction + angle_range / 2
+
+        # Normalize angles between -pi and pi
+        angle_to_point = (angle_to_point + 2 * math.pi) % (2 * math.pi)
+        lower_bound = (lower_bound + 2 * math.pi) % (2 * math.pi)
+        upper_bound = (upper_bound + 2 * math.pi) % (2 * math.pi)
+
+        if lower_bound < upper_bound:
+            return lower_bound <= angle_to_point <= upper_bound
+        else:  # Covers the case where the angle range crosses the -pi/pi boundary
+            return angle_to_point >= lower_bound or angle_to_point <= upper_bound
 
 
 class SlackFactors:

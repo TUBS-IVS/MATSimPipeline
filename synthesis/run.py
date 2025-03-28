@@ -5,6 +5,9 @@ Entry point for running the pipeline.
 No changes are needed here. Use the config.yaml!
 """
 
+import cProfile
+import pstats
+import io
 import os
 import logging
 import subprocess
@@ -58,14 +61,42 @@ class PipelineRunner:
 
     def run(self):
         """
-        Runs each pipeline step sequentially as specified in execution_order.
+        Runs each pipeline step sequentially as specified in execution_order, with optional profiling.
         After all steps complete, the used_config.yaml file will reflect settings used by all steps.
         """
+        profile_enabled = self.config_obj.get("settings.profiling.enabled", default=False)
+        save_txt = self.config_obj.get("settings.profiling.save_txt", default=True)
+        save_raw = self.config_obj.get("settings.profiling.save_raw", default=False)
+
+        profiler = None
+        if profile_enabled:
+            logging.info("Profiling enabled — running with cProfile.")
+            profiler = cProfile.Profile()
+            profiler.enable()
+
         execution_order = self.config_obj.get("execution")
         for step_name in execution_order:
             if not self.run_step(step_name):
                 logging.error(f"Step {step_name} failed. Stopping pipeline.")
                 return
+
+        if profile_enabled and profiler:
+            profiler.disable()
+
+            if save_txt:
+                stats_path = os.path.join(self.output_folder, "profile_stats.txt")
+                s = io.StringIO()
+                ps = pstats.Stats(profiler, stream=s).sort_stats(pstats.SortKey.CUMULATIVE)
+                ps.print_stats()
+                with open(stats_path, "w") as f:
+                    f.write(s.getvalue())
+                logging.info(f"Profiling summary saved to {stats_path}")
+
+            if save_raw:
+                raw_path = os.path.join(self.output_folder, "profile_stats.prof")
+                profiler.dump_stats(raw_path)
+                logging.info(f"Raw profiler data saved to {raw_path}")
+
         logging.info("Pipeline completed successfully.")
         return self.output_folder
 

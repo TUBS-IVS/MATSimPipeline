@@ -1,23 +1,27 @@
 # Unified configuration file for the entire pipeline (under construction)
 # Global pipeline settings
 settings:
+  profiling:
+    enabled: true
+    save_txt: true        # Save readable profile_stats.txt
+    save_raw: true        # Save raw profile_stats.prof for tools like snakeviz
   logging:
     console_level: "INFO"
     file_level: "INFO"
-  play_error_sound: false
 
 # Define execution order
 execution:
   - location_assignment
 
 # Steps Configuration
-population:
-  script: population\run.py
+synthetic_population:
+  script: synthetic_population\run.py
   input: # Use ${CURRENT_OUTPUT} to refer to the current output folder (to get outputs from previous steps)
     expanded_households_files:
       - "data/synthetic_households_city.csv"
       - "data/synthetic_households_region.csv"
     enhanced_mid_folder: "data/mid/enhanced"
+    area_border_file: "data/shapes/region_hanover.shp"
   output:
     buildings_in_lowest_geography_with_weights_file: "data/houses_with_weights.csv"
     capa_cells_csv_path: "data/region_hanover_potentials.csv"
@@ -29,12 +33,17 @@ population:
     mid_persons_folder: "data/mid/persons"
     mid_trips_folder: "data/mid/trips"
     enhanced_mid_file: "enhanced_mid.csv"
-  geography_columns:
-    - WELT
-    - STAAT
-    - STADTTLNR
-    - BAUBLOCKNR
-  lowest_level_geography: "BAUBLOCKNR"
+  # Assign random location within a given geography (no buildings needed)
+  assign_random_locations: true
+  # Given buildings and any MiD hh sample, assign a random (but viable) building to the hh
+  assign_random_buildings: false
+
+#  geography_columns:
+#    - WELT
+#    - STAAT
+#    - STADTTLNR
+#    - BAUBLOCKNR
+#  lowest_level_geography: "BAUBLOCKNR"
 
 digital_twin_maker: # Integrates population and more data to buildings
     script: digital_twin_maker\run.py
@@ -101,7 +110,7 @@ location_assignment:
     max_radius_reduction_factor: null
     max_iterations_complex_case: 15
     only_return_valid_persons: false
-  main:
+  simple_main:
     skip_already_located: true
   open_ended:
     skip_already_located: false

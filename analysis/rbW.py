@@ -23,14 +23,14 @@ population.check_for_merge_suffixes()
 population.df = h.generate_unique_household_id(population.df)
 
 # Add persons to households (increases the number of rows)
-population.add_csv_data_on_id(h.get_files(s.MiD_PERSONS_FOLDER), [s.PERSON_ID_COL],
+population.add_csv_data_on_id(h.get_files(s.MiD_PERSONS_FOLDER), [s.PERSON_MID_ID_COL],
                               id_column=s.HOUSEHOLD_MID_ID_COL,
                               drop_duplicates_from_source=False)
 logger.info(f"Population df after adding persons: \n{population.df.head()}")
 population.check_for_merge_suffixes()
 
 # Add person attributes from MiD
-population.add_csv_data_on_id(h.get_files(s.MiD_PERSONS_FOLDER), id_column=s.PERSON_ID_COL,
+population.add_csv_data_on_id(h.get_files(s.MiD_PERSONS_FOLDER), id_column=s.PERSON_MID_ID_COL,
                               drop_duplicates_from_source=True, delete_later=True)
 logger.info(f"Population df after adding P attributes: \n{population.df.head()}")
 population.check_for_merge_suffixes()
@@ -38,7 +38,7 @@ population.check_for_merge_suffixes()
 population.df = h.generate_unique_person_id(population.df)
 
 # Add MiD-trips to people (increases the number of rows)
-population.add_csv_data_on_id(h.get_files(s.MiD_TRIPS_FOLDER), [s.LEG_ID_COL], id_column=s.PERSON_ID_COL,
+population.add_csv_data_on_id(h.get_files(s.MiD_TRIPS_FOLDER), [s.LEG_ID_COL], id_column=s.PERSON_MID_ID_COL,
                               drop_duplicates_from_source=False)
 logger.info(f"Population df after adding trips: \n{population.df.head()}")
 population.check_for_merge_suffixes()
@@ -58,7 +58,7 @@ hhs_with_rbw = population.df[rbw_filter][s.HOUSEHOLD_MID_ID_COL].unique()
 logger.info(f"Number of households with rbW: {len(hhs_with_rbw)}")
 
 filtered_df = population.df[population.df[s.HOUSEHOLD_MID_ID_COL].isin(hhs_with_rbw)]
-filtered_df = filtered_df[[s.HOUSEHOLD_MID_ID_COL, s.PERSON_ID_COL, s.LEG_NON_UNIQUE_ID_COL, s.LEG_IS_RBW_COL,
+filtered_df = filtered_df[[s.HOUSEHOLD_MID_ID_COL, s.PERSON_MID_ID_COL, s.LEG_NON_UNIQUE_ID_COL, s.LEG_IS_RBW_COL,
                            s.LEG_START_TIME_COL, s.LEG_END_TIME_COL, s.LEG_DURATION_MINUTES_COL, s.LEG_DISTANCE_KM_COL,
                            s.ACT_MID_COL, s.MODE_MID_COL]]
 # Print the filtered DataFrame

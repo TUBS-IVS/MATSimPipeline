@@ -36,14 +36,14 @@ def enhance_travel_survey(config: Config):
 
     # Add persons to households (increases the number of rows)
     persons_folder = config.get("enhanced_mid.input.mid_persons_folder")
-    population.add_csv_data_on_id(h.get_files(persons_folder), [s.PERSON_ID_COL],
+    population.add_csv_data_on_id(h.get_files(persons_folder), [s.PERSON_MID_ID_COL],
                                   id_column=s.HOUSEHOLD_MID_ID_COL,
                                   drop_duplicates_from_source=False)
     logger.info(f"Population df after adding persons: \n{population.df.head()}")
     population.check_for_merge_suffixes()
 
     # Add person attributes from MiD
-    population.add_csv_data_on_id(h.get_files(persons_folder), id_column=s.PERSON_ID_COL,
+    population.add_csv_data_on_id(h.get_files(persons_folder), id_column=s.PERSON_MID_ID_COL,
                                   drop_duplicates_from_source=True, delete_later=True)
     logger.info(f"Population df after adding P attributes: \n{population.df.head()}")
     population.check_for_merge_suffixes()
@@ -53,7 +53,7 @@ def enhance_travel_survey(config: Config):
 
     # Add MiD-trips to people (increases the number of rows)
     trips_folder = config.get("enhanced_mid.input.mid_trips_folder")
-    population.add_csv_data_on_id(h.get_files(trips_folder), [s.LEG_ID_COL], id_column=s.PERSON_ID_COL,
+    population.add_csv_data_on_id(h.get_files(trips_folder), [s.LEG_ID_COL], id_column=s.PERSON_MID_ID_COL,
                                   drop_duplicates_from_source=False)
     logger.info(f"Population df after adding trips: \n{population.df.head()}")
     population.check_for_merge_suffixes()

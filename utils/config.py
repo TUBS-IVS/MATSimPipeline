@@ -58,13 +58,12 @@ class Config:
                 else:
                     if default == "Stop_when_missing":
                         raise KeyError(f"Key '{key}' not found in {'used_config' if use_used else 'full_config'}.")
-                    return default  # Only use default if the key is fully missing
+                    return default
             return value  # Return the actual value, even if None
 
-        # Get value from used_config if specified, otherwise from full_config
         value = traverse(self.used_config if use_used else self.full_config, key)
 
-        # Store the accessed value in used_config only if it wasn't fetched from there
+        # Store the accessed value in used_config (only if it wasn't fetched from there)
         if not use_used and key not in self.used_config:
             self.used_config[key] = value
 

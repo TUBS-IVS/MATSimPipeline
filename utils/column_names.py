@@ -34,7 +34,7 @@ ENHANCED_MID_FILE = "enhanced_mid.csv"
 # ID Columns
 HOUSEHOLD_MID_ID_COL = "H_ID"
 HOUSEHOLD_POPSIM_ID_COL = "household_id"
-PERSON_ID_COL = "HP_ID"
+PERSON_MID_ID_COL = "HP_ID"
 LEG_NON_UNIQUE_ID_COL = "W_ID"
 LEG_ID_COL = "HPW_ID"
 TT_MATRIX_CELL_ID_COL = "cell_id"
@@ -84,9 +84,13 @@ UNIQUE_HH_ID_COL = "unique_household_id"
 UNIQUE_P_ID_COL = "unique_person_id"
 
 FACILITY_ID_COL = "facility_id"
+FACILITY_CENTROID_COL = "facility_centroid"
 FACILITY_X_COL = "facility_x"
 FACILITY_Y_COL = "facility_y"
 FACILITY_ACTIVITIES_COL = "facility_activities"
+FACILITY_NAME_COL = "facility_name"
+FACILITY_POTENTIAL_COL = "facility_potential"
+
 IS_MAIN_ACTIVITY_COL = "is_main_activity"
 MIRRORS_MAIN_ACTIVITY_COL = "mirrors_main_activity"
 

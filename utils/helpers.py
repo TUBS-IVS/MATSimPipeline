@@ -72,7 +72,7 @@ class Helpers:
             return
 
         # Create unique leg ids
-        legs_file[s.LEG_ID_COL] = legs_file[s.PERSON_ID_COL].astype(str) + "_" + legs_file[
+        legs_file[s.LEG_ID_COL] = legs_file[s.PERSON_MID_ID_COL].astype(str) + "_" + legs_file[
             s.LEG_NON_UNIQUE_ID_COL].astype(
             str)
         self.logger.info(f"Created unique leg ids.")
@@ -481,7 +481,7 @@ class Helpers:
         df.sort_values(by=[s.UNIQUE_P_ID_COL, s.LEG_NON_UNIQUE_ID_COL], inplace=True)
 
         # Shift the 'to_activity' down to create 'from_activity' for each group
-        df[s.COORD_FROM_COL] = df.groupby(s.PERSON_ID_COL)[s.COORD_TO_COL].shift(1)
+        df[s.COORD_FROM_COL] = df.groupby(s.PERSON_MID_ID_COL)[s.COORD_TO_COL].shift(1)
 
         # For the first leg of each person, set 'from_coord' to home coord
         df.loc[(df[s.LEG_NON_UNIQUE_ID_COL] == 1), s.COORD_FROM_COL] = df.loc[
@@ -506,7 +506,7 @@ class Helpers:
         df.sort_values(by=[s.UNIQUE_P_ID_COL, s.LEG_NON_UNIQUE_ID_COL], inplace=True)
 
         # Shift the 'to_activity' down to create 'from_activity' for each group
-        df[col_from] = df.groupby(s.PERSON_ID_COL)[col_to].shift(1)
+        df[col_from] = df.groupby(s.PERSON_MID_ID_COL)[col_to].shift(1)
 
         # For the first leg of each person, set 'from_coord' to home coord
         df.loc[(df[s.LEG_NON_UNIQUE_ID_COL] == 1), col_from] = df.loc[
@@ -525,7 +525,7 @@ class Helpers:
         # Sort the DataFrame by person ID and leg number (the df should usually already be sorted this way)
         df.sort_values(by=[s.UNIQUE_P_ID_COL, s.LEG_NON_UNIQUE_ID_COL], inplace=True)
 
-        df[s.CELL_FROM_COL] = df.groupby(s.PERSON_ID_COL)[s.CELL_TO_COL].shift(1)
+        df[s.CELL_FROM_COL] = df.groupby(s.PERSON_MID_ID_COL)[s.CELL_TO_COL].shift(1)
 
         # For the first leg of each person, set 'from_cell' to home cell
         df.loc[(df[s.LEG_NON_UNIQUE_ID_COL] == 1), s.CELL_FROM_COL] = df.loc[
@@ -684,10 +684,10 @@ class Helpers:
         col_name = s.UNIQUE_P_ID_COL
         self.logger.info(f"Generating unique person IDs...")
         if col_name not in df.columns:
-            df[col_name] = df[s.UNIQUE_HH_ID_COL] + "_" + df[s.PERSON_ID_COL].astype(str)
+            df[col_name] = df[s.UNIQUE_HH_ID_COL] + "_" + df[s.PERSON_MID_ID_COL].astype(str)
             self.logger.info(f"Created new column {col_name}.")
         else:
-            df[col_name] = df[s.UNIQUE_HH_ID_COL] + "_" + df[s.PERSON_ID_COL].astype(str)
+            df[col_name] = df[s.UNIQUE_HH_ID_COL] + "_" + df[s.PERSON_MID_ID_COL].astype(str)
             self.logger.info(f"Overwrote existing column {col_name}.")
         return df
 

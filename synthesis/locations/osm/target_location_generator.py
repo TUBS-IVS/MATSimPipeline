@@ -1,4 +1,3 @@
-"""Produces target locations with potentials from pretty much any source."""
 
 from utils.logger import logging
 from pyproj import Transformer

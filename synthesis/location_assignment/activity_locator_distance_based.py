@@ -154,7 +154,7 @@ class TargetLocations:
     """
 
     def __init__(self, json_folder_path: str):
-        self.data: Dict[str, Dict[str, np.ndarray]] = self.load_reformatted_osmox_data(h.get_files(json_folder_path))
+        self.data: Dict[str, Dict[str, np.ndarray]] = self.load_locations_dict(h.get_files(json_folder_path))
         self.indices: Dict[str, cKDTree] = {}
 
         for type, pdata in self.data.items():
@@ -162,7 +162,7 @@ class TargetLocations:
             self.indices[type] = cKDTree(pdata["coordinates"])
 
     @staticmethod
-    def load_reformatted_osmox_data(file_path: str):
+    def load_locations_dict(file_path: str):
         with open(file_path, 'r') as f:
             data = json.load(f)
         # Convert lists back to numpy arrays
@@ -1755,8 +1755,8 @@ def prepare_population_df_for_location_assignment(df, filter_max_distance=None, 
         pd.DataFrame, pd.DataFrame):
     """Temporarily prepare the MiD DataFrame for the leg dictionary function."""
 
-    df["from_location"] = None
-    df["to_location"] = None
+    # df["from_location"] = None
+    # df["to_location"] = None
 
     # Split persons with no leg ID into a separate DataFrame
     no_leg_df = df[df[s.LEG_ID_COL].isna()].copy()
@@ -1776,9 +1776,9 @@ def prepare_population_df_for_location_assignment(df, filter_max_distance=None, 
 
     # Identify and remove records of persons with any trip exceeding the max distance if filter_max_distance is specified
     if filter_max_distance is not None:
-        person_ids_to_exclude = df[df[s.LEG_DISTANCE_METERS_COL] > filter_max_distance][s.PERSON_ID_COL].unique()
+        person_ids_to_exclude = df[df[s.LEG_DISTANCE_METERS_COL] > filter_max_distance][s.PERSON_MID_ID_COL].unique()
         row_count_before = df.shape[0]
-        df = df[~df[s.PERSON_ID_COL].isin(person_ids_to_exclude)]
+        df = df[~df[s.PERSON_MID_ID_COL].isin(person_ids_to_exclude)]
         if logger.isEnabledFor(logging.DEBUG): logger.debug(
             f"Dropped {row_count_before - df.shape[0]} rows from persons with trips exceeding the max distance of {filter_max_distance} km.")
 
@@ -1788,35 +1788,35 @@ def prepare_population_df_for_location_assignment(df, filter_max_distance=None, 
 
     # Limit to the specified number of persons and keep all rows for these persons
     if number_of_persons is not None:
-        person_ids = df[s.PERSON_ID_COL].unique()[:number_of_persons]
-        df = df[df[s.PERSON_ID_COL].isin(person_ids)]
+        person_ids = df[s.PERSON_MID_ID_COL].unique()[:number_of_persons]
+        df = df[df[s.PERSON_MID_ID_COL].isin(person_ids)]
 
-    # Add random home locations for each person for testing
-    def generate_random_location_within_hanover():
-        """Generate a random coordinate within Hanover, Germany, in EPSG:25832."""
-        xmin, xmax = 546000, 556000
-        ymin, ymax = 5800000, 5810000
-        x = random.uniform(xmin, xmax)
-        y = random.uniform(ymin, ymax)
-        return np.array([x, y])
-
-    df[s.HOME_LOC_COL] = None
-    for person_id, group in df.groupby(s.UNIQUE_P_ID_COL):
-        home_location = generate_random_location_within_hanover()
-        for i in group.index:
-            df.at[i, s.HOME_LOC_COL] = home_location
-        df.at[group.index[0], "from_location"] = home_location
-        df.at[group.index[-1], "to_location"] = home_location
-
-        home_rows_to = group[group[s.ACT_TO_INTERNAL_COL] == s.ACT_HOME].index
-        if not home_rows_to.empty:
-            for idx in home_rows_to:
-                df.at[idx, "to_location"] = home_location
-
-        home_rows_from = group[group[s.ACT_FROM_INTERNAL_COL] == s.ACT_HOME].index
-        if not home_rows_from.empty:
-            for idx in home_rows_from:
-                df.at[idx, "from_location"] = home_location
+    # # Add random home locations for each person for testing
+    # def generate_random_location_within_hanover():
+    #     """Generate a random coordinate within Hanover, Germany, in EPSG:25832."""
+    #     xmin, xmax = 546000, 556000
+    #     ymin, ymax = 5800000, 5810000
+    #     x = random.uniform(xmin, xmax)
+    #     y = random.uniform(ymin, ymax)
+    #     return np.array([x, y])
+    #
+    # df[s.HOME_LOC_COL] = None
+    # for person_id, group in df.groupby(s.UNIQUE_P_ID_COL):
+    #     home_location = generate_random_location_within_hanover()
+    #     for i in group.index:
+    #         df.at[i, s.HOME_LOC_COL] = home_location
+    #     df.at[group.index[0], "from_location"] = home_location
+    #     df.at[group.index[-1], "to_location"] = home_location
+    #
+    #     home_rows_to = group[group[s.ACT_TO_INTERNAL_COL] == s.ACT_HOME].index
+    #     if not home_rows_to.empty:
+    #         for idx in home_rows_to:
+    #             df.at[idx, "to_location"] = home_location
+    #
+    #     home_rows_from = group[group[s.ACT_FROM_INTERNAL_COL] == s.ACT_HOME].index
+    #     if not home_rows_from.empty:
+    #         for idx in home_rows_from:
+    #             df.at[idx, "from_location"] = home_location
 
     logger.info("Prepared population dataframe for location assignment.")
     if logger.isEnabledFor(logging.DEBUG): logger.debug(df.head())
@@ -2059,13 +2059,13 @@ def new_segment_plans(plans: SegmentedPlans) -> SegmentedPlans:
 
 def write_hoerl_df_to_big_df(hoerl_df, big_df):  # TODO: write main stuff (somewhere else) to big df
     """Unites the Hoerl DataFrame with the big DataFrame."""
-    hoerl_df = hoerl_df.rename(columns={'person_id': s.PERSON_ID_COL,
+    hoerl_df = hoerl_df.rename(columns={'person_id': s.PERSON_MID_ID_COL,
                                         'location_id': 'location_id_hoerl',
                                         'geometry': 'to_location_hoerl'})
 
     # Recreate the unique leg id column
     hoerl_df[s.LEG_NON_UNIQUE_ID_COL] = hoerl_df['activity_index'] - 1  # Starting index
-    hoerl_df[s.UNIQUE_LEG_ID_COL] = (hoerl_df[s.PERSON_ID_COL] + "_" + hoerl_df[s.LEG_NON_UNIQUE_ID_COL].astype(str) +
+    hoerl_df[s.UNIQUE_LEG_ID_COL] = (hoerl_df[s.PERSON_MID_ID_COL] + "_" + hoerl_df[s.LEG_NON_UNIQUE_ID_COL].astype(str) +
                                      ".0")  # .0 is added to match the format of the big DataFrame :(
 
     hoerl_df = hoerl_df[[s.UNIQUE_LEG_ID_COL, 'location_id_hoerl', 'to_location_hoerl']]

@@ -32,9 +32,9 @@ def create_test_data(root, test_data_dir, hh_dir, person_dir, leg_dir):
         s.HOUSEHOLD_MID_ID_COL].unique()
 
     # 3. Households with persons having only one leg
-    legs_per_person = leg_df.groupby(s.PERSON_ID_COL).size()
+    legs_per_person = leg_df.groupby(s.PERSON_MID_ID_COL).size()
     persons_with_one_leg = legs_per_person[legs_per_person == 1].index
-    difficult_hhs_one_leg_person = person_df[person_df[s.PERSON_ID_COL].isin(persons_with_one_leg)][
+    difficult_hhs_one_leg_person = person_df[person_df[s.PERSON_MID_ID_COL].isin(persons_with_one_leg)][
         s.HOUSEHOLD_MID_ID_COL].unique()
 
     # 4. More to be added here

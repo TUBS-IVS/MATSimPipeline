@@ -6,14 +6,12 @@ Writes the population, households, vehicles and facilities data to MATSim XML fo
 import sys
 import logging
 import time
-import os
-import matsim.writers
-import pandas as pd
-
-from utils import helpers as h, column_names as s
+from synthesis.matsim_writer.matsim_writer import MATSimWriter
+from synthesis.matsim_writer.population_post_processor import PopulationPostProcessor
 from utils.config import Config
 from utils.logger import setup_logging
 from utils.stats_tracker import StatsTracker
+from utils.helpers import Helpers
 
 if __name__ == "__main__":
     if len(sys.argv) < 4:
@@ -36,11 +34,17 @@ if __name__ == "__main__":
 
     stats_tracker = StatsTracker(output_folder)
 
+    h = Helpers(project_root, output_folder, config, stats_tracker, logger)
+
     logger.info(f"Starting step {step_name}")
     time_start = time.time()
 
-    # Run the MATSim writer
-    matsim_writer = MATSimWriter(config, output_folder)
+    population_post_processor = PopulationPostProcessor(population, config, logger, h)
+    population_post_processor.load_df_from_csv()
+    # population_post_processor.change_last_leg_activity_to_home()
+    population_post_processor.vary_times_by_household()
+
+    matsim_writer = MATSimWriter(population, config, logger, h)
     matsim_writer.write_plans_to_matsim_xml()
     matsim_writer.write_households_to_matsim_xml()
     matsim_writer.write_vehicles_to_matsim_xml()

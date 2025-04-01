@@ -1,24 +1,31 @@
-class MATSimWriter:
-    def __init__(self, config: Config):
-        self.config = config
-        self.df = self.load_population_data()
+import matsim
+from utils import column_names as s
 
-    def load_population_data(self):
-        """
-        Load population data (expects it in the output folder).
-        """
-        population_file = self.config.get("matsim_writer.input.population_df")
-        if not os.path.exists(population_file):
-            logger.error(f"Expected population data file not found: {population_file}")
-            sys.exit(1)
-        return pd.read_csv(population_file)
+class MATSimWriter:
+    def __init__(self, population, config, logger, helpers, locations = None):
+        self.df = population
+        self.config = config
+        self.logger = logger
+        self.h = helpers
+
+    #     self.df = self.load_population_data()
+    #
+    # def load_population_data(self):
+    #     """
+    #     Load population data (expects it in the output folder).
+    #     """
+    #     population_file = self.config.get("matsim_writer.input.population_df")
+    #     if not os.path.exists(population_file):
+    #         self.logger.error(f"Expected population data file not found: {population_file}")
+    #         sys.exit(1)
+    #     return pd.read_csv(population_file)
 
     def write_plans_to_matsim_xml(self):
         """
         Writes plans to MATSim XML format.
         """
-        logger.info("Writing plans to MATSim xml...")
-        output_file = config.get("matsim_writer.output.plans")
+        self.logger.info("Writing plans to MATSim xml...")
+        output_file = self.config.get("matsim_writer.output.plans")
 
         with open(output_file, 'wb+') as f_write:
             writer = matsim.writers.PopulationWriter(f_write)
@@ -32,7 +39,7 @@ class MATSimWriter:
                     type="home",
                     x=group[s.HOME_LOC_COL].iloc[0].x,
                     y=group[s.HOME_LOC_COL].iloc[0].y,
-                    end_time=abs(h.seconds_from_datetime(group[s.LEG_START_TIME_COL].iloc[0]))
+                    end_time=abs(self.h.seconds_from_datetime(group[s.LEG_START_TIME_COL].iloc[0]))
                 )
 
                 for idx, row in group.iterrows():
@@ -48,36 +55,36 @@ class MATSimWriter:
                 writer.end_person()
             writer.end_population()
 
-        logger.info(f"Wrote plans to MATSim xml: {output_file}")
+        self.logger.info(f"Wrote plans to MATSim xml: {output_file}")
         return output_file
 
     def write_households_to_matsim_xml(self):
         """
         Writes households to MATSim XML format.
         """
-        logger.info("Writing households to MATSim xml...")
-        output_file = config.get("matsim_writer.output.households")
+        self.logger.info("Writing self.households to MATSim xml...")
+        output_file = self.config.get("matsim_writer.output.households")
 
         with open(output_file, 'wb+') as f_write:
-            households_writer = matsim.writers.HouseholdsWriter(f_write)
-            households_writer.start_households()
+            self.households_writer = matsim.writers.HouseholdsWriter(f_write)
+            self.households_writer.start_households()
 
-            for _, hh in self.df.groupby([s.UNIQUE_HH_ID_COL]):
-                household_id = hh[s.UNIQUE_HH_ID_COL].iloc[0]
-                person_ids = hh[s.UNIQUE_P_ID_COL].unique().tolist()
-                households_writer.start_household(household_id)
-                households_writer.add_members(person_ids)
-                households_writer.end_household()
+            for _, self.hh in self.df.groupby([s.UNIQUE_HH_ID_COL]):
+                self.household_id = self.hh[s.UNIQUE_HH_ID_COL].iloc[0]
+                person_ids = self.hh[s.UNIQUE_P_ID_COL].unique().tolist()
+                self.households_writer.start_household(household_id)
+                self.households_writer.add_members(person_ids)
+                self.households_writer.end_household()
 
-            households_writer.end_households()
-        logger.info(f"Wrote households to MATSim xml: {output_file}")
+            self.households_writer.end_households()
+        self.logger.info(f"Wrote self.households to MATSim xml: {output_file}")
 
     def write_facilities_to_matsim_xml(self):
         """
         Writes facilities data to MATSim XML format.
         """
-        logger.info("Writing facilities to MATSim xml...")
-        output_file = config.get("matsim_writer.output.facilities")
+        self.logger.info("Writing facilities to MATSim xml...")
+        output_file = self.config.get("matsim_writer.output.facilities")
 
         with open(output_file, 'wb+') as f_write:
             facilities_writer = matsim.writers.FacilitiesWriter(f_write)
@@ -95,14 +102,14 @@ class MATSimWriter:
                 facilities_writer.end_facility()
 
             facilities_writer.end_facilities()
-        logger.info(f"Wrote facilities to MATSim xml: {output_file}")
+        self.logger.info(f"Wrote facilities to MATSim xml: {output_file}")
 
     def write_vehicles_to_matsim_xml(self):
         """
         Writes vehicles data to MATSim XML format.
         """
-        logger.info("Writing vehicles to MATSim xml...")
-        output_file = config.get("matsim_writer.output.vehicles")
+        self.logger.info("Writing vehicles to MATSim xml...")
+        output_file = self.config.get("matsim_writer.output.vehicles")
 
         with open(output_file, 'wb+') as f_write:
             vehicle_writer = matsim.writers.VehiclesWriter(f_write)
@@ -114,11 +121,11 @@ class MATSimWriter:
                 network_mode="car"
             )
 
-            for _, hh in self.df.groupby([s.UNIQUE_HH_ID_COL]):
-                vehicle_ids = hh.get(s.LIST_OF_CARS_COL, []).iloc[0]
+            for _, self.hh in self.df.groupby([s.UNIQUE_HH_ID_COL]):
+                vehicle_ids = self.h.get(s.LIST_OF_CARS_COL, []).iloc[0]
                 if vehicle_ids:
                     for vehicle_id in vehicle_ids:
                         vehicle_writer.add_vehicle(vehicle_id=vehicle_id, vehicle_type="car")
 
             vehicle_writer.end_vehicle_definitions()
-        logger.info(f"Wrote vehicles to MATSim xml: {output_file}")
+        self.logger.info(f"Wrote vehicles to MATSim xml: {output_file}")

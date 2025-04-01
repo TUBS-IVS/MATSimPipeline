@@ -8,35 +8,44 @@ settings:
   logging:
     console_level: "INFO"
     file_level: "INFO"
+  common_crs: "EPSG:25832"
 
 # Define execution order
 execution:
-  - location_assignment
+#  - enhanced_mid
+#  - locations_alkis
+#  - synthetic_population
+#  - location_assignment
+- location_assignment_prep
+
 
 # Steps Configuration
 synthetic_population:
   script: synthetic_population\run.py
   input: # Use ${CURRENT_OUTPUT} to refer to the current output folder (to get outputs from previous steps)
-    expanded_households_files:
-      - "data/synthetic_households_city.csv"
-      - "data/synthetic_households_region.csv"
-    enhanced_mid_folder: "data/mid/enhanced"
-    area_border_file: "data/shapes/region_hanover.shp"
+#    expanded_households_files:
+#      - "data/synthetic_households_city.csv"
+#      - "data/synthetic_households_region.csv"
+#    enhanced_mid_folder: "data/mid/enhanced"
+    region_border_shp: "data/shapes/region_hanover.shp"
+    sample_population_csv: "data/mid/enhanced/enhanced_mid.csv" # Sample population for testing
+    buildings_gpkg: "output/20250401_104704/locations.gpkg" #"${CURRENT_OUTPUT}/locations.gpkg"
+    buildings_pkl: "data/shapes/locations.pkl" #"${CURRENT_OUTPUT}/locations.pkl"
   output:
-    buildings_in_lowest_geography_with_weights_file: "data/houses_with_weights.csv"
-    capa_cells_csv_path: "data/region_hanover_potentials.csv"
-    capa_cells_shp_path: "data/shapes/RH_useful__zone.SHP"
-    region_without_city_gpkg_file: "data/shapes/RegionOhneStadtGitter100m.gpkg"
-    shape_boundary_file: "data/shapes/region_hanover.shp"
-    slack_factors_file: "data/Slack_Factors.csv"
-    mid_hh_folder: "data/mid/households"
-    mid_persons_folder: "data/mid/persons"
-    mid_trips_folder: "data/mid/trips"
-    enhanced_mid_file: "enhanced_mid.csv"
+    population_with_locations_csv: "population_with_locations.csv"
+    population_with_locations_pkl: "population_with_locations.pkl"
+    building_assignment_gpkg: "building_assignments.gpkg"
+    building_assignment_pkl: "building_assignments.pkl"
+
   # Assign random location within a given geography (no buildings needed)
   assign_random_locations: true
   # Given buildings and any MiD hh sample, assign a random (but viable) building to the hh
   assign_random_buildings: false
+  limit_buildings_to_region: true
+  save_population_with_locations_csv: true
+  save_population_with_locations_pkl: true
+  save_building_assignments_gpkg: true
+  save_building_assignments_pkl: true
 
 #  geography_columns:
 #    - WELT
@@ -45,29 +54,42 @@ synthetic_population:
 #    - BAUBLOCKNR
 #  lowest_level_geography: "BAUBLOCKNR"
 
-digital_twin_maker: # Integrates population and more data to buildings
-    script: digital_twin_maker\run.py
-    input:
-        buildings_in_lowest_geography_with_weights_file: "${CURRENT_OUTPUT}/houses_with_weights.csv"
-        capa_cells_csv_path: "${CURRENT_OUTPUT}/region_hanover_potentials.csv"
-        capa_cells_shp_path: "${CURRENT_OUTPUT}/shapes/RH_useful__zone.SHP"
-        region_without_city_gpkg_file: "${CURRENT_OUTPUT}/shapes/RegionOhneStadtGitter100m.gpkg"
-        shape_boundary_file: "${CURRENT_OUTPUT}/shapes/region_hanover.shp"
-        slack_factors_file: "${CURRENT_OUTPUT}/Slack_Factors.csv"
-    output:
-        locations_pkl: "locations.pkl"
-        locations_csv: "locations.csv"
-        locations_shp: "locations.shp"
-        capa_cells_shp_path: "shapes/RH_useful__zone.SHP"
-        region_without_city_gpkg_file: "shapes/RegionOhneStadtGitter100m.gpkg"
-        shape_boundary_file: "shapes/region_hanover.shp"
-        slack_factors_file: "Slack_Factors.csv"
-    # General settings
-    assign_random_households: true
-    assign_random_activities: true
-    save_pkl: true # Translate and pickle locations for faster processing in the next step
-    save_csv: true
-    save_shp: true
+#digital_twin_maker: # Integrates population and more data to buildings
+#    script: digital_twin_maker\run.py
+#    input:
+#        buildings_in_lowest_geography_with_weights_file: "${CURRENT_OUTPUT}/houses_with_weights.csv"
+#        capa_cells_csv_path: "${CURRENT_OUTPUT}/region_hanover_potentials.csv"
+#        capa_cells_shp_path: "${CURRENT_OUTPUT}/shapes/RH_useful__zone.SHP"
+#        region_without_city_gpkg_file: "${CURRENT_OUTPUT}/shapes/RegionOhneStadtGitter100m.gpkg"
+#        shape_boundary_file: "${CURRENT_OUTPUT}/shapes/region_hanover.shp"
+#        slack_factors_file: "${CURRENT_OUTPUT}/Slack_Factors.csv"
+#    output:
+#        locations_pkl: "locations.pkl"
+#        locations_csv: "locations.csv"
+#        locations_shp: "locations.shp"
+#        capa_cells_shp_path: "shapes/RH_useful__zone.SHP"
+#        region_without_city_gpkg_file: "shapes/RegionOhneStadtGitter100m.gpkg"
+#        shape_boundary_file: "shapes/region_hanover.shp"
+#        slack_factors_file: "Slack_Factors.csv"
+#    # General settings
+#    assign_random_households: true
+#    assign_random_activities: true
+#    save_pkl: true # Translate and pickle locations for faster processing in the next step
+#    save_csv: true
+#    save_shp: true
+
+locations_alkis:
+  script: locations\alkis\run.py
+  input:
+    hausumringe_shp: "data/shapes/ALKIS/gebaeude-ni.shp"
+    gfk_mapping_csv: "data/locations/alkis_building_activity_map.csv"
+  output:
+      locations_gpkg: "locations.gpkg"
+      locations_pkl: "locations.pkl"
+  save_gpkg: false
+  save_pkl: true # Pickle for faster saving and faster processing in the next step
+
+locations_osm:
 
 enhanced_mid:
   script: enhanced_mid\run.py
@@ -78,17 +100,28 @@ enhanced_mid:
   output:
     enhanced_mid_file: "enhanced_mid.csv"
 
+location_assignment_prep:
+  script: location_assignment_prep\run.py
+  input:
+      locations_gpkg: "locations.gpkg"
+      locations_pkl: "output/20250401_104704/locations.pkl"
+  output:
+      location_pkl: "prepared_dictionary_locations.pkl"
+      location_json: "prepared_dictionary_locations.json"
+  save_json: false # May take ages
+  save_pkl: true
+
 location_assignment:
   script: location_assignment\run.py
   input:
     population_df_folder: "data/mid/enhanced"
-    locations_json_folder: "data/locations"
+    locations_json_folder: "data/prepared_locations"
   output:
     population: "population.csv"
   # General settings
   algorithms_to_run:
     - "load_intermediate"
-    - "CARLA"
+    - "hoerl"
   save_intermediate_results: true
   assert_no_missing_locations: true
   filter_number_of_persons: 1000
@@ -134,87 +167,70 @@ value_maps:
   activities:
     work:
       mid: 1
-      alkis_location_types:
       internal: work
       MATSim: work
     business:
       mid: 2
-      alkis_location_types:
       internal: business
       MATSim: work
     education:
       mid: 3
-      alkis_location_types:
       internal: education
       MATSim: education
     shopping:
       mid: 4
-      alkis_location_types:
       internal: shopping
       MATSim: shopping
     errands:
       mid: 5
-      alkis_location_types:
       internal: errands
       MATSim: leisure
     pick_up_drop_off:
       mid: 6
-      alkis_location_types:
       internal: pick_up_drop_off
       MATSim: other
     leisure:
       mid: 7
-      alkis_location_types:
       internal: leisure
       MATSim: leisure
     home:
       mid: 8
-      alkis_location_types:
       internal: home
       MATSim: home
     return_journey:
       mid: 9
-      alkis_location_types:
       internal: return_journey
       MATSim: other
     other:
       mid: 10
-      alkis_location_types:
       internal: other
       MATSim: other
     early_education:
       mid: 11
-      alkis_location_types:
       internal: early_education
       MATSim: education
     daycare:
       mid: 12
-      alkis_location_types:
       internal: daycare
       MATSim: education
     accompany_adult:
       mid: 13
-      alkis_location_types:
       internal: accompany_adult
       MATSim: other
     sports:
       mid: 14
-      alkis_location_types:
       internal: sports
       MATSim: leisure
     meetup:
       mid: 15
-      alkis_location_types:
       internal: meetup
       MATSim: leisure
     lessons:
       mid: 16
-      alkis_location_types:
       internal: lessons
       MATSim: leisure
     unspecified:
       mid: 99
-      alkis_location_types:
       internal: unspecified
       MATSim: other
   modes:

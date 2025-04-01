@@ -46,8 +46,8 @@ class MiDDataEnhancer(DataFrameProcessor):
         """
         logger.info("Resetting leg ids...")
         # Sort by person id and leg id
-        self.df.sort_values(by=[s.PERSON_ID_COL, s.LEG_NON_UNIQUE_ID_COL], inplace=True, ignore_index=True)
-        self.df[s.LEG_NON_UNIQUE_ID_COL] = self.df.groupby(s.PERSON_ID_COL).cumcount() + 1
+        self.df.sort_values(by=[s.PERSON_MID_ID_COL, s.LEG_NON_UNIQUE_ID_COL], inplace=True, ignore_index=True)
+        self.df[s.LEG_NON_UNIQUE_ID_COL] = self.df.groupby(s.PERSON_MID_ID_COL).cumcount() + 1
         logger.info("Reset leg ids.")
 
     def convert_minutes_to_seconds(self, minute_col, seconds_col):
@@ -133,11 +133,11 @@ class MiDDataEnhancer(DataFrameProcessor):
         :return:
         """
         logger.info("Calculating activity duration...")
-        self.df.sort_values(by=['unique_household_id', s.PERSON_ID_COL, s.LEG_NON_UNIQUE_ID_COL], inplace=True,
+        self.df.sort_values(by=['unique_household_id', s.PERSON_MID_ID_COL, s.LEG_NON_UNIQUE_ID_COL], inplace=True,
                             ignore_index=True)
 
         # Group by person and calculate the time difference within each group
-        self.df[s.ACT_DUR_SECONDS_COL] = self.df.groupby(s.PERSON_ID_COL)[s.LEG_START_TIME_COL].shift(-1) - \
+        self.df[s.ACT_DUR_SECONDS_COL] = self.df.groupby(s.PERSON_MID_ID_COL)[s.LEG_START_TIME_COL].shift(-1) - \
                                          self.df[
                                              s.LEG_END_TIME_COL]
 
@@ -541,7 +541,7 @@ class MiDDataEnhancer(DataFrameProcessor):
                     # Drop the person itself from the similar persons
                     return similar_persons
 
-        logger.debug(f"Found no similar persons for {person[s.PERSON_ID_COL]}.")
+        logger.debug(f"Found no similar persons for {person[s.PERSON_MID_ID_COL]}.")
         return pd.DataFrame()  # Return an empty DataFrame if no similar persons found
 
     def impute_license_status(self):
@@ -699,10 +699,10 @@ class MiDDataEnhancer(DataFrameProcessor):
         """
         logger.info("Adding from_activity column...")
         # Sort the DataFrame by person ID and leg number (the df should usually already be sorted this way)
-        self.df.sort_values(by=[s.PERSON_ID_COL, s.LEG_NON_UNIQUE_ID_COL], inplace=True)
+        self.df.sort_values(by=[s.PERSON_MID_ID_COL, s.LEG_NON_UNIQUE_ID_COL], inplace=True)
 
         # Shift the 'to_activity' down to create 'from_activity' for each group
-        self.df[s.ACT_FROM_INTERNAL_COL] = self.df.groupby(s.PERSON_ID_COL)[s.ACT_TO_INTERNAL_COL].shift(1)
+        self.df[s.ACT_FROM_INTERNAL_COL] = self.df.groupby(s.PERSON_MID_ID_COL)[s.ACT_TO_INTERNAL_COL].shift(1)
 
         # For the first leg of each person, set 'from_activity' based on 'starts_at_home'
         self.df.loc[(self.df[s.LEG_NON_UNIQUE_ID_COL] == 1) & (
@@ -722,7 +722,7 @@ class MiDDataEnhancer(DataFrameProcessor):
 
         df = self.df[self.df[s.LEG_DISTANCE_KM_COL] < 500]
 
-        for person_id, person_trips in df.groupby(s.PERSON_ID_COL):
+        for person_id, person_trips in df.groupby(s.PERSON_MID_ID_COL):
             logger.debug(f"Searching sf at person {person_id}...")
             # Sort by ordered_id to ensure sequence
             person_trips = person_trips.sort_values(by=s.LEG_NON_UNIQUE_ID_COL)
@@ -736,7 +736,7 @@ class MiDDataEnhancer(DataFrameProcessor):
                 if first_leg[s.ACT_TO_INTERNAL_COL] == second_leg[s.ACT_FROM_INTERNAL_COL]:
 
                     direct_trip = self.df[
-                        (self.df[s.PERSON_ID_COL] == person_id) &
+                        (self.df[s.PERSON_MID_ID_COL] == person_id) &
                         # Exclude the two legs we're checking
                         (self.df[s.LEG_NON_UNIQUE_ID_COL] != first_leg[s.LEG_NON_UNIQUE_ID_COL]) &
                         (self.df[s.LEG_NON_UNIQUE_ID_COL] != second_leg[s.LEG_NON_UNIQUE_ID_COL]) &
@@ -763,7 +763,7 @@ class MiDDataEnhancer(DataFrameProcessor):
                                               slack_factor))
                         logger.debug(f"Found a slack factor of {slack_factor} for person {person_id} ")
 
-        return pd.DataFrame(slack_factors, columns=[s.PERSON_ID_COL,
+        return pd.DataFrame(slack_factors, columns=[s.PERSON_MID_ID_COL,
                                                     s.H_REGION_TYPE_COL,
                                                     s.PERSON_AGE_COL,
                                                     'start_activity',
@@ -1071,13 +1071,13 @@ class MiDDataEnhancer(DataFrameProcessor):
         connections = pd.Series(index=self.df.index, dtype='object')
         checks_data = []
         for household_id, household_group in tqdm(households, desc="Processing Households", unit="hh"):
-            if household_group[s.PERSON_ID_COL].nunique() == 1:
+            if household_group[s.PERSON_MID_ID_COL].nunique() == 1:
                 logger.debug(f"Household {household_id} has only one person. No connections.")
                 continue
 
             for idx_a, person_a_leg in household_group.iterrows():
                 for idx_b, person_b_leg in household_group.iterrows():
-                    if person_a_leg[s.PERSON_ID_COL] == person_b_leg[s.PERSON_ID_COL] or idx_b <= idx_a:
+                    if person_a_leg[s.PERSON_MID_ID_COL] == person_b_leg[s.PERSON_MID_ID_COL] or idx_b <= idx_a:
                         continue  # So we don't compare a leg to itself or to a leg it's already been compared to
 
                     dist_match = self.h.check_distance(person_a_leg, person_b_leg)
@@ -1116,10 +1116,10 @@ class MiDDataEnhancer(DataFrameProcessor):
         self.df[s.HH_HAS_CONNECTIONS_COL] = 0
         self.df[s.P_HAS_CONNECTIONS_COL] = 0
 
-        for person_id in self.df[s.PERSON_ID_COL].unique():
-            if any(self.df[self.df[s.PERSON_ID_COL] == person_id][s.CONNECTED_LEGS_COL].apply(
+        for person_id in self.df[s.PERSON_MID_ID_COL].unique():
+            if any(self.df[self.df[s.PERSON_MID_ID_COL] == person_id][s.CONNECTED_LEGS_COL].apply(
                     lambda x: isinstance(x, list))):
-                self.df.loc[self.df[s.PERSON_ID_COL] == person_id, s.P_HAS_CONNECTIONS_COL] = 1
+                self.df.loc[self.df[s.PERSON_MID_ID_COL] == person_id, s.P_HAS_CONNECTIONS_COL] = 1
                 logger.debug(f"Person {person_id} has connections.")
 
         for hh_id in self.df[s.UNIQUE_HH_ID_COL].unique():
@@ -1132,11 +1132,11 @@ class MiDDataEnhancer(DataFrameProcessor):
         logger.info("Counting connected legs per person...")
         self.df[s.NUM_CONNECTED_LEGS_COL] = 0
 
-        for person_id in self.df[s.PERSON_ID_COL].unique():
-            person_rows = self.df[self.df[s.PERSON_ID_COL] == person_id]
+        for person_id in self.df[s.PERSON_MID_ID_COL].unique():
+            person_rows = self.df[self.df[s.PERSON_MID_ID_COL] == person_id]
             num_connections = person_rows[s.CONNECTED_LEGS_COL].apply(
                 lambda x: len(x) if isinstance(x, list) else 0).sum()
-            self.df.loc[self.df[s.PERSON_ID_COL] == person_id, s.NUM_CONNECTED_LEGS_COL] = num_connections
+            self.df.loc[self.df[s.PERSON_MID_ID_COL] == person_id, s.NUM_CONNECTED_LEGS_COL] = num_connections
             logger.debug(f"Person {person_id} has {num_connections} connected legs.")
 
     def mark_main_activity(self):

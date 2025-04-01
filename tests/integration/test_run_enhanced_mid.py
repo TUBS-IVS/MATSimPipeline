@@ -88,7 +88,7 @@ def test_enhance_travel_survey(setup_test_environment):
         )
 
     # Verify NON_UNIQUE_LEG_ID and other conditions for each person
-    grouped = output_df.groupby(s.PERSON_ID_COL)
+    grouped = output_df.groupby(s.PERSON_MID_ID_COL)
 
     for person_id, group in grouped:
         # Non-mobile person

@@ -19,9 +19,9 @@ from synthesis.location_assignment import hoerl
 # associate any needed data with the households from enhanced mid, including trip info
 # get all buildings with just their centre point and the allowed activities
 
-def run_location_assignment(config):
+def run_location_assignment():
 
-    locations_json_folder = config.get("location_assignment.input.locations_json_folder")
+    locations_json_folder = config.get("location_assignment.input.locations_json")
     algorithms_to_run = config.get("location_assignment.algorithms_to_run")
 
     save_intermediate_results = config.get("location_assignment.save_intermediate_results")
@@ -67,7 +67,7 @@ def run_location_assignment(config):
         elif algorithm == 'hoerl':
             mobile_population_df = run_hoerl(
                 mobile_population_df, target_locations,
-                config)  # TODO: config object will not work -> adjust inner code
+                config)
         elif algorithm == 'simple_lelke':
             mobile_population_df = run_simple_lelke(
                 mobile_population_df, target_locations)
@@ -110,9 +110,9 @@ def run_location_assignment(config):
     if write_to_csv:
         algos_string = "_".join(algorithms_to_run)
         if "CARLA" in algorithms_to_run:
-            num_branches_string = f"_{config.get("location_assignment.CARLA.number_of_branches")}-branches"
-            min_candidates_complex_string = f"_{config.get("location_assignment.CARLA.min_candidates_complex_case")}-min-cand-complex"
-            candidates_two_leg_string = f"_{config.get("location_assignment.CARLA.candidates_two_leg_case")}-cand-two-leg"
+            num_branches_string = f"_{config.get('location_assignment.CARLA.number_of_branches')}-branches"
+            min_candidates_complex_string = f"_{config.get('location_assignment.CARLA.min_candidates_complex_case')}-min-cand-complex"
+            candidates_two_leg_string = f"_{config.get('location_assignment.CARLA.candidates_two_leg_case')}-cand-two-leg"
         else:
             num_branches_string = ""
             candidates_two_leg_string = ""
@@ -262,7 +262,7 @@ if __name__ == "__main__":
 
     logger.info(f"Starting step {step_name}")
     time_start = time.time()
-    run_location_assignment(config)
+    run_location_assignment()
     time_end = time.time()
     time_step = time_end - time_start
     stats_tracker.log("runtimes.location_assignment_time", time_step)

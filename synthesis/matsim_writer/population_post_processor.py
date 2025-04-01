@@ -19,7 +19,7 @@ class PopulationPostProcessor(DataFrameProcessor):
         self.logger.info("Changing last leg activity to home...")
         self.df = self.df.sort_values(by=[s.UNIQUE_LEG_ID_COL])
 
-        is_last_leg = self.df[s.PERSON_ID_COL].ne(self.df[s.PERSON_ID_COL].shift(-1))
+        is_last_leg = self.df[s.PERSON_MID_ID_COL].ne(self.df[s.PERSON_MID_ID_COL].shift(-1))
 
         number_of_rows_to_change = len(self.df[is_last_leg & (self.df[s.ACT_TO_INTERNAL_COL] != s.ACT_HOME)])
 

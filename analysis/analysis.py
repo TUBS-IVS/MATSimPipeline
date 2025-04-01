@@ -10,9 +10,9 @@ import os
 import folium
 
 
-from utils import pipeline_setup
+# from utils import pipeline_setup
 from utils import data_frame_processor as dfp
-from utils import settings as s
+from utils import column_names as s
 from utils.logger import logging
 
 logger = logging.getLogger(__name__)
@@ -184,9 +184,9 @@ class DataframeAnalysis(dfp.DataFrameProcessor):
 
         # Save the plot if a save path is provided
         if save_name:
-            save_name = os.path.join(pipeline_setup.OUTPUT_DIR, save_name)
-            plt.savefig(save_name, bbox_inches='tight')
-
+            # save_name = os.path.join(pipeline_setup.OUTPUT_DIR, save_name)
+            # plt.savefig(save_name, bbox_inches='tight')
+            pass
         else:
             plt.show()
 
@@ -274,14 +274,6 @@ class DataframeAnalysis(dfp.DataFrameProcessor):
 
         # Calculate the discretization error
         self.df['discretization_error'] = np.abs(self.df[s.LEG_DISTANCE_METERS_COL] - self.df['placed_distance'])
-
-    def find_interesting_trips(self, n: int):  # TODO: Implement
-        """Selects a few interesting agent trips for debugging and evaluation."""
-        interesting_trips = []
-        for person_id, segment in flattened_segmented_dict.items():
-            if len(segment) > 2:
-                interesting_trips.append(segment)
-        return interesting_trips
 
 
 def analyze_influence_on_slack(df):

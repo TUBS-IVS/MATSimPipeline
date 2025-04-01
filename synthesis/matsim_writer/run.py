@@ -39,6 +39,7 @@ if __name__ == "__main__":
     logger.info(f"Starting step {step_name}")
     time_start = time.time()
 
+    #TODO: Adjust
     population_post_processor = PopulationPostProcessor(population, config, logger, h)
     population_post_processor.load_df_from_csv()
     # population_post_processor.change_last_leg_activity_to_home()

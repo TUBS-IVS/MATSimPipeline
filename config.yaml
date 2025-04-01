@@ -15,8 +15,8 @@ execution:
 #  - enhanced_mid
 #  - locations_alkis
 #  - synthetic_population
-#  - location_assignment
-- location_assignment_prep
+  - location_assignment
+#  - location_assignment_prep
 
 
 # Steps Configuration
@@ -114,14 +114,16 @@ location_assignment_prep:
 location_assignment:
   script: location_assignment\run.py
   input:
-    population_df_folder: "data/mid/enhanced"
-    locations_json_folder: "data/prepared_locations"
+    population_csv: "output/20250401_133235/population_with_locations.csv"
+    population_pkl: ""
+    locations_json: "output/20250401_135025/prepared_dictionary_locations.json"
+    locations_pkl: "output/20250401_135025/prepared_dictionary_locations.pkl"
   output:
     population: "population.csv"
   # General settings
   algorithms_to_run:
     - "load_intermediate"
-    - "hoerl"
+    - "CARLA"
   save_intermediate_results: true
   assert_no_missing_locations: true
   filter_number_of_persons: 1000

@@ -21,7 +21,8 @@ from synthesis.location_assignment import hoerl
 
 def run_location_assignment():
 
-    locations_json_folder = config.get("location_assignment.input.locations_json")
+    locations_json_path = os.path.join(project_root, config.get("location_assignment.input.locations_json"))
+    locations_pkl_path = os.path.join(project_root, config.get("location_assignment.input.locations_pkl"))
     algorithms_to_run = config.get("location_assignment.algorithms_to_run")
 
     save_intermediate_results = config.get("location_assignment.save_intermediate_results")
@@ -40,11 +41,11 @@ def run_location_assignment():
         raise ValueError(f"Invalid algorithm. Valid algorithms are: {valid_algorithms}")
 
     # Build the common KDTree for the locations
-    target_locations = al.TargetLocations(h.get_files(locations_json_folder))
+    target_locations = al.TargetLocations(locations_json_path, locations_pkl_path)
 
     if not skip_loading_full_population:
         # Load the population dataframe
-        population_df = pd.read_csv(h.get_files(config.get("location_assignment.population_df_folder")))
+        population_df = pd.read_csv(config.get("location_assignment.population_csv"))
 
         # Prepare the population dataframe, split off non-mobile persons
         mobile_population_df, non_mobile_population_df = (al.prepare_population_df_for_location_assignment

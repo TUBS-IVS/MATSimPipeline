@@ -153,8 +153,8 @@ class TargetLocations:
     This class is used to quickly find the nearest activity locations for a given location.
     """
 
-    def __init__(self, json_folder_path: str):
-        self.data: Dict[str, Dict[str, np.ndarray]] = self.load_locations_dict(h.get_files(json_folder_path))
+    def __init__(self, locations_json_path: str, locations_pkl_path:str):
+        self.data: Dict[str, Dict[str, np.ndarray]] = self.load_locations_dict(locations_json_path, locations_pkl_path)
         self.indices: Dict[str, cKDTree] = {}
 
         for type, pdata in self.data.items():
@@ -162,14 +162,20 @@ class TargetLocations:
             self.indices[type] = cKDTree(pdata["coordinates"])
 
     @staticmethod
-    def load_locations_dict(file_path: str):
-        with open(file_path, 'r') as f:
-            data = json.load(f)
-        # Convert lists back to numpy arrays
-        for purpose in data:
-            for key in data[purpose]:
-                data[purpose][key] = np.array(data[purpose][key])
-        return data
+    def load_locations_dict(locations_json_path, locations_pkl_path):
+        try:
+            logger.info("Loading locations from pickle file.")
+            with open(locations_pkl_path, 'rb') as f:
+                data = pickle.load(f)
+            return data
+        except FileNotFoundError:
+            logger.info("Pickle file not found. Falling back to JSON.")
+            with open(locations_json_path, 'r') as f:
+                data = json.load(f)
+            for purpose in data:
+                for key in data[purpose]:
+                    data[purpose][key] = np.array(data[purpose][key])
+            return data
 
     def hoerl_query(self, purpose, location):
         _, index = self.indices[purpose].query(location.reshape(1, -1))
@@ -1762,11 +1768,10 @@ def prepare_population_df_for_location_assignment(df, filter_max_distance=None, 
     no_leg_df = df[df[s.LEG_ID_COL].isna()].copy()
     df = df.dropna(subset=[s.LEG_ID_COL])
     # TEMP: Remove persons that have no leg 1 (it may have been removed by enhancer)
-    # TODO: Remove lines below again
     mobile_persons_with_leg_1 = df[df[s.UNIQUE_LEG_ID_COL].str.contains("_1.0")][s.UNIQUE_P_ID_COL].unique()
     df = df[df[s.UNIQUE_P_ID_COL].isin(mobile_persons_with_leg_1)]
 
-    if logger.isEnabledFor(logging.DEBUG): logger.debug(f"People with no legs: {no_leg_df.shape[0]}")
+    if logger.isEnabledFor(logging.INFO): logger.info(f"People with no legs: {no_leg_df.shape[0]}")
 
     # Throw out rows with missing values in the distance column
     row_count_before = df.shape[0]

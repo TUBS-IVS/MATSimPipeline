@@ -8,13 +8,17 @@ class DataFrameProcessor:
     Base class for processing a Pandas DataFrame.
     """
 
-    def __init__(self, df: pd.DataFrame = None, stats_tracker=None, logger=None):
+    def __init__(self, df: pd.DataFrame = None, config=None, stats_tracker=None, logger=None, helpers=None,
+                 output_folder=None):
         """
         Parameters should be set as many functions require them, but for some quick scripting they can be omitted.
         """
+        self.df = df
+        self.config = config
         self.stats_tracker = stats_tracker
         self.logger = logger if logger is not None else logging.getLogger("data_frame_processor")
-        self.df = df
+        self.h = helpers
+        self.output_folder = output_folder
         self.columns_to_delete = set()
 
     def read_csv(self, csv_path: str, test_col=None, use_cols=None) -> pd.DataFrame:
@@ -240,7 +244,7 @@ class DataFrameProcessor:
         :param column_names: The names of the columns to convert.
         :return: The DataFrame with new columns containing the seconds from midnight.
         """
-        default_date = '2020-01-01'
+        default_date = "1970-01-01"
         for column_name in column_names:
             if pd.api.types.is_datetime64_any_dtype(self.df[column_name]):
                 self.logger.info(f"Converting column '{column_name}' with {len(self.df)} total rows to seconds.")

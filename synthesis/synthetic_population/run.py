@@ -74,20 +74,30 @@ def assign_random_locations(df, polygon):
     for person_id, group in df.groupby(s.UNIQUE_P_ID_COL):
         home_location = h.random_point_in_polygon(polygon)
         for i in group.index:
-            df.at[i, s.HOME_LOC_COL] = home_location
+            # df.at[i, s.HOME_LOC_COL] = home_location
+            df.at[i, s.HOME_X_COL] = home_location.x
+            df.at[i, s.HOME_Y_COL] = home_location.y
 
-        df.at[group.index[0], "from_location"] = home_location
-        df.at[group.index[-1], "to_location"] = home_location
+        # df.at[group.index[0], "from_location"] = home_location
+        # df.at[group.index[-1], "to_location"] = home_location
+        df.at[group.index[0], s.FROM_X_COL] = home_location.x
+        df.at[group.index[0], s.FROM_Y_COL] = home_location.y
+        df.at[group.index[-1], s.TO_X_COL] = home_location.x
+        df.at[group.index[-1], s.TO_Y_COL] = home_location.y
 
         home_rows_to = group[group[s.ACT_TO_INTERNAL_COL] == s.ACT_HOME].index
         if not home_rows_to.empty:
             for idx in home_rows_to:
-                df.at[idx, "to_location"] = home_location
+                # df.at[idx, "to_location"] = home_location
+                df.at[idx, s.TO_X_COL] = home_location.x
+                df.at[idx, s.TO_Y_COL] = home_location.y
 
         home_rows_from = group[group[s.ACT_FROM_INTERNAL_COL] == s.ACT_HOME].index
         if not home_rows_from.empty:
             for idx in home_rows_from:
-                df.at[idx, "from_location"] = home_location
+                # df.at[idx, "from_location"] = home_location
+                df.at[idx, s.FROM_X_COL] = home_location.x
+                df.at[idx, s.FROM_Y_COL] = home_location.y
     return df
 
 def population_sim():

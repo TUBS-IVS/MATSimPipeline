@@ -27,7 +27,8 @@ class DetailedLeg(NamedTuple):
 
 Segment = Tuple[Leg, ...]  # A segment of a plan (immutable tuple of legs)
 SegmentedPlan = Tuple[Segment, ...]  # A full plan split into segments
-SegmentedPlans = frozendict[str, SegmentedPlan]  # All agents' plans (person_id -> SegmentedPlan)
+SegmentedPlans = frozendict[str, SegmentedPlan]  # Many agents' plans (person_id -> SegmentedPlan)
+Households = frozendict[str, SegmentedPlans]
 
 DetailedSegment = Tuple[DetailedLeg, ...]  # A segment of a plan (immutable tuple of legs)
 DetailedSegmentedPlan = Tuple[DetailedSegment, ...]  # A full plan split into segments

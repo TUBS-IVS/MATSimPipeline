@@ -8,18 +8,6 @@ class MATSimWriter:
         self.logger = logger
         self.h = helpers
 
-    #     self.df = self.load_population_data()
-    #
-    # def load_population_data(self):
-    #     """
-    #     Load population data (expects it in the output folder).
-    #     """
-    #     population_file = self.config.get("matsim_writer.input.population_df")
-    #     if not os.path.exists(population_file):
-    #         self.logger.error(f"Expected population data file not found: {population_file}")
-    #         sys.exit(1)
-    #     return pd.read_csv(population_file)
-
     def write_plans_to_matsim_xml(self):
         """
         Writes plans to MATSim XML format.

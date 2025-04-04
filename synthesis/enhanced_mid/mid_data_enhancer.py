@@ -17,18 +17,10 @@ class MiDDataEnhancer(DataFrameProcessor):
     Collects all methods that are applied only, directly, to the unexpanded, raw MiD data.
     """
 
-    def __init__(self, df: pd.DataFrame = None, stats_tracker=None, logger=None, helpers=None, output_folder=None):
-        """
-        Initializes MiDDataEnhancer.
-
-        :param df: Optional Pandas DataFrame to process.
-        :param stats_tracker: Instance of StatsTracker for tracking statistics.
-        :param logger: Logger instance for logging messages.
-        :param helpers: Helpers instance for additional utility functions.
-        """
-        super().__init__(df, stats_tracker, logger)  # Properly initialize parent class
-        self.h = helpers
-        self.output_folder = output_folder
+    def __init__(self, df: pd.DataFrame = None, config=None, stats_tracker=None, logger=None, helpers=None,
+                 output_folder=None):
+        super().__init__(df = df, config=config, stats_tracker=stats_tracker, logger=logger, helpers=helpers,
+                         output_folder=output_folder)
 
     def filter_home_to_home_legs(self):  # TODO: remove?
         """
@@ -40,14 +32,76 @@ class MiDDataEnhancer(DataFrameProcessor):
         self.df = self.df[~home_to_home_condition].reset_index(drop=True)
         logger.info(f"Filtered out 'home to home' legs. {len(self.df)} rows remaining.")
 
+    def expand_home_to_home_legs(self):
+        """
+        Expands legs that start and end at home ("home to home") by splitting them into two:
+        home → unspecified → home, approximating e.g. a walk or bike ride.
+        """
+        logger.info(f"Expanding 'home to home' legs in DataFrame of {len(self.df)} rows...")
+
+        home_to_home_condition = (
+                (self.df[s.ACT_FROM_INTERNAL_COL] == s.ACT_HOME) &
+                (self.df[s.ACT_TO_INTERNAL_COL] == s.ACT_HOME)
+        )
+        home_to_home_legs = self.df[home_to_home_condition].copy()
+
+        if home_to_home_legs.empty:
+            logger.info("No 'home to home' legs found. Skipping.")
+            return
+
+        detour_factor = self.config.get("enhanced_mid.detour_factor")
+        new_legs = []
+
+        for _, leg in home_to_home_legs.iterrows():
+            # Compute corrected straight-line distance
+            corrected_distance = leg[s.LEG_DISTANCE_METERS_COL] / (2 * detour_factor)
+            corrected_duration_s = leg[s.LEG_DURATION_SECONDS_COL] / 2
+            corrected_duration_min = corrected_duration_s / 60
+
+            # First leg: home → unspecified
+            leg1 = leg.copy()
+            leg1[s.ACT_TO_INTERNAL_COL] = s.ACT_UNSPECIFIED
+            leg1[s.LEG_DISTANCE_METERS_COL] = corrected_distance
+            leg1[s.LEG_DURATION_SECONDS_COL] = corrected_duration_s
+            leg1[s.LEG_DURATION_MINUTES_COL] = corrected_duration_min
+            # Adjust end time (in datetime)
+            middle_time = leg1[s.LEG_START_TIME_COL] + pd.Timedelta(seconds=corrected_duration_s)
+
+            # Allow for 1-second rounding tolerance
+            expected_end_time = middle_time + pd.Timedelta(seconds=corrected_duration_s)
+            actual_end_time = leg[s.LEG_END_TIME_COL]
+            time_diff = abs((actual_end_time - expected_end_time).total_seconds())
+            assert time_diff < 1, f"End time mismatch: expected {expected_end_time}, got {actual_end_time}"
+
+            leg1[s.LEG_END_TIME_COL] = middle_time
+
+            # Second leg: unspecified → home
+            leg2 = leg.copy()
+            leg2[s.ACT_FROM_INTERNAL_COL] = s.ACT_UNSPECIFIED
+            leg2[s.LEG_DISTANCE_METERS_COL] = corrected_distance
+            leg2[s.LEG_DURATION_SECONDS_COL] = corrected_duration_s
+            leg2[s.LEG_DURATION_MINUTES_COL] = corrected_duration_min
+            # Adjust start time (in datetime)
+            leg2[s.LEG_START_TIME_COL] = middle_time
+
+            new_legs.append(leg1)
+            new_legs.append(leg2)
+
+        # Remove original home-home legs and add new ones
+        self.df = self.df[~home_to_home_condition].copy()
+        new_df = pd.DataFrame(new_legs)
+        self.df = pd.concat([self.df, new_df], ignore_index=True)
+
+        logger.info(f"Expanded {len(home_to_home_legs)} 'home → home' legs into {len(new_df)} new rows.")
+
     def reset_leg_ids(self):
         """
         Resets the leg ids to start from 1 for each person.
         """
         logger.info("Resetting leg ids...")
         # Sort by person id and leg id
-        self.df.sort_values(by=[s.PERSON_MID_ID_COL, s.LEG_NON_UNIQUE_ID_COL], inplace=True, ignore_index=True)
-        self.df[s.LEG_NON_UNIQUE_ID_COL] = self.df.groupby(s.PERSON_MID_ID_COL).cumcount() + 1
+        self.df.sort_values(by=[s.PERSON_MID_ID_COL, s.LEG_NUMBER_COL], inplace=True, ignore_index=True)
+        self.df[s.LEG_NUMBER_COL] = self.df.groupby(s.PERSON_MID_ID_COL).cumcount() + 1
         logger.info("Reset leg ids.")
 
     def convert_minutes_to_seconds(self, minute_col, seconds_col):
@@ -128,12 +182,12 @@ class MiDDataEnhancer(DataFrameProcessor):
 
     def calculate_activity_duration(self):
         """
-        Calculate the time between the end of one leg and the start of the next leg seconds.
+        Calculate the time between the end of one leg and the start of the next leg in seconds.
         Writes to a separate column different to the given MiD duration.
         :return:
         """
         logger.info("Calculating activity duration...")
-        self.df.sort_values(by=['unique_household_id', s.PERSON_MID_ID_COL, s.LEG_NON_UNIQUE_ID_COL], inplace=True,
+        self.df.sort_values(by=['unique_household_id', s.PERSON_MID_ID_COL, s.LEG_NUMBER_COL], inplace=True,
                             ignore_index=True)
 
         # Group by person and calculate the time difference within each group
@@ -158,10 +212,10 @@ class MiDDataEnhancer(DataFrameProcessor):
         persons = self.df.groupby("unique_person_id")
 
         num_persons = len(persons)
-        num_legs = self.df[s.LEG_NON_UNIQUE_ID_COL].notna().sum()
+        num_legs = self.df[s.LEG_NUMBER_COL].notna().sum()
         num_persons_one_leg = sum(
-            len(person) == 1 and pd.notna(person[s.LEG_NON_UNIQUE_ID_COL]).any() for _, person in persons)
-        num_persons_no_leg = sum(pd.isna(person[s.LEG_NON_UNIQUE_ID_COL]).all() for _, person in persons)
+            len(person) == 1 and pd.notna(person[s.LEG_NUMBER_COL]).any() for _, person in persons)
+        num_persons_no_leg = sum(pd.isna(person[s.LEG_NUMBER_COL]).all() for _, person in persons)
 
         logger.info(f"Number of persons: {num_persons}")
         logger.info(f"Number of legs: {num_legs}")
@@ -217,7 +271,7 @@ class MiDDataEnhancer(DataFrameProcessor):
         Returns a pd DataFrame with the average start time and standard deviation for each activity type.
         """
         # Only look at the first leg of each person
-        first_legs = self.df[self.df[s.LEG_NON_UNIQUE_ID_COL] == 1]
+        first_legs = self.df[self.df[s.LEG_NUMBER_COL] == 1]
 
         # Convert datetime to numeric (timestamp) for calculation
         first_legs['timestamp'] = first_legs['leg_start_time'].view(np.int64)
@@ -242,7 +296,7 @@ class MiDDataEnhancer(DataFrameProcessor):
         new_rows = []
 
         for person_id, group in self.df.groupby(s.UNIQUE_P_ID_COL):
-            if pd.isna(group.at[group.index[0], s.LEG_NON_UNIQUE_ID_COL]):
+            if pd.isna(group.at[group.index[0], s.LEG_NUMBER_COL]):
                 logger.debug(f"Person {person_id} has no legs. Skipping...")
                 continue
             if group[s.ACT_TO_INTERNAL_COL].iloc[-1] == s.ACT_HOME:
@@ -277,7 +331,7 @@ class MiDDataEnhancer(DataFrameProcessor):
 
             # Create home_leg with the calculated duration
             home_leg = last_leg.copy()
-            home_leg[s.LEG_NON_UNIQUE_ID_COL] = last_leg[s.LEG_NON_UNIQUE_ID_COL] + 1
+            home_leg[s.LEG_NUMBER_COL] = last_leg[s.LEG_NUMBER_COL] + 1
             home_leg[s.UNIQUE_LEG_ID_COL] = f"{home_leg['unique_person_id']}_{home_leg[s.LEG_ID_COL]}"
             home_leg[s.LEG_START_TIME_COL] = last_leg[s.LEG_END_TIME_COL] + pd.Timedelta(seconds=activity_time)
             home_leg[s.LEG_END_TIME_COL] = home_leg[s.LEG_START_TIME_COL] + pd.Timedelta(minutes=home_leg_duration)
@@ -345,7 +399,7 @@ class MiDDataEnhancer(DataFrameProcessor):
             person_legs = self.df[self.df[s.UNIQUE_P_ID_COL] == person]
 
             # Skip person with no mobility
-            if pd.isna(person_legs.at[person_legs.index[0], s.LEG_NON_UNIQUE_ID_COL]):
+            if pd.isna(person_legs.at[person_legs.index[0], s.LEG_NUMBER_COL]):
                 if len(person_legs) == 1:
                     continue
                 else:
@@ -699,21 +753,21 @@ class MiDDataEnhancer(DataFrameProcessor):
         """
         logger.info("Adding from_activity column...")
         # Sort the DataFrame by person ID and leg number (the df should usually already be sorted this way)
-        self.df.sort_values(by=[s.PERSON_MID_ID_COL, s.LEG_NON_UNIQUE_ID_COL], inplace=True)
+        self.df.sort_values(by=[s.PERSON_MID_ID_COL, s.LEG_NUMBER_COL], inplace=True)
 
         # Shift the 'to_activity' down to create 'from_activity' for each group
         self.df[s.ACT_FROM_INTERNAL_COL] = self.df.groupby(s.PERSON_MID_ID_COL)[s.ACT_TO_INTERNAL_COL].shift(1)
 
         # For the first leg of each person, set 'from_activity' based on 'starts_at_home'
-        self.df.loc[(self.df[s.LEG_NON_UNIQUE_ID_COL] == 1) & (
+        self.df.loc[(self.df[s.LEG_NUMBER_COL] == 1) & (
                 self.df[
                     s.FIRST_LEG_STARTS_AT_HOME_COL] == s.FIRST_LEG_STARTS_AT_HOME), s.ACT_FROM_INTERNAL_COL] = s.ACT_HOME
-        self.df.loc[(self.df[s.LEG_NON_UNIQUE_ID_COL] == 1) & (
+        self.df.loc[(self.df[s.LEG_NUMBER_COL] == 1) & (
                 self.df[
                     s.FIRST_LEG_STARTS_AT_HOME_COL] != s.FIRST_LEG_STARTS_AT_HOME), s.ACT_FROM_INTERNAL_COL] = s.ACT_UNSPECIFIED
 
         # Handle cases with no legs (NA in leg_id)
-        self.df.loc[self.df[s.LEG_NON_UNIQUE_ID_COL].isna(), s.ACT_FROM_INTERNAL_COL] = None
+        self.df.loc[self.df[s.LEG_NUMBER_COL].isna(), s.ACT_FROM_INTERNAL_COL] = None
 
         logger.info("Added from_activity column.")
 
@@ -725,7 +779,7 @@ class MiDDataEnhancer(DataFrameProcessor):
         for person_id, person_trips in df.groupby(s.PERSON_MID_ID_COL):
             logger.debug(f"Searching sf at person {person_id}...")
             # Sort by ordered_id to ensure sequence
-            person_trips = person_trips.sort_values(by=s.LEG_NON_UNIQUE_ID_COL)
+            person_trips = person_trips.sort_values(by=s.LEG_NUMBER_COL)
 
             # Find indirect routes by checking consecutive legs
             for i in range(len(person_trips) - 1):
@@ -738,8 +792,8 @@ class MiDDataEnhancer(DataFrameProcessor):
                     direct_trip = self.df[
                         (self.df[s.PERSON_MID_ID_COL] == person_id) &
                         # Exclude the two legs we're checking
-                        (self.df[s.LEG_NON_UNIQUE_ID_COL] != first_leg[s.LEG_NON_UNIQUE_ID_COL]) &
-                        (self.df[s.LEG_NON_UNIQUE_ID_COL] != second_leg[s.LEG_NON_UNIQUE_ID_COL]) &
+                        (self.df[s.LEG_NUMBER_COL] != first_leg[s.LEG_NUMBER_COL]) &
+                        (self.df[s.LEG_NUMBER_COL] != second_leg[s.LEG_NUMBER_COL]) &
                         # Find direct trip in both directions
                         ((self.df[s.ACT_FROM_INTERNAL_COL] == first_leg[s.ACT_FROM_INTERNAL_COL]) &
                          (self.df[s.ACT_TO_INTERNAL_COL] == second_leg[s.ACT_TO_INTERNAL_COL]) |
@@ -997,7 +1051,7 @@ class MiDDataEnhancer(DataFrameProcessor):
 
         for pid, person in persons:
             if len(person) == 1:
-                if person[s.LEG_NON_UNIQUE_ID_COL].isna().all():
+                if person[s.LEG_NUMBER_COL].isna().all():
                     # If the person has no legs, there is no main activity
                     logger.debug(f"Person {pid} has no legs. Skipping...")
                     continue
@@ -1147,15 +1201,11 @@ class MiDDataEnhancer(DataFrameProcessor):
         """
         person_col = s.UNIQUE_P_ID_COL
         act_to_internal_col = s.ACT_TO_INTERNAL_COL
-        leg_non_unique_id_col = s.LEG_NON_UNIQUE_ID_COL
+        leg_non_unique_id_col = s.LEG_NUMBER_COL
         act_dur_seconds_col = s.ACT_DUR_SECONDS_COL
 
         def find_main_activity(person):
             is_main_activity_series = pd.Series(0, index=person.index)  # Initialize all values to 0
-
-            # TODO: REMOVE
-            if person[s.UNIQUE_P_ID_COL].iloc[0] == "69808010_817_69808012":
-                print("HI")
 
             # Filter out home activities (home must not be the main activity)
             group = person[person[act_to_internal_col] != s.ACT_HOME]

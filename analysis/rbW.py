@@ -58,7 +58,7 @@ hhs_with_rbw = population.df[rbw_filter][s.HOUSEHOLD_MID_ID_COL].unique()
 logger.info(f"Number of households with rbW: {len(hhs_with_rbw)}")
 
 filtered_df = population.df[population.df[s.HOUSEHOLD_MID_ID_COL].isin(hhs_with_rbw)]
-filtered_df = filtered_df[[s.HOUSEHOLD_MID_ID_COL, s.PERSON_MID_ID_COL, s.LEG_NON_UNIQUE_ID_COL, s.LEG_IS_RBW_COL,
+filtered_df = filtered_df[[s.HOUSEHOLD_MID_ID_COL, s.PERSON_MID_ID_COL, s.LEG_NUMBER_COL, s.LEG_IS_RBW_COL,
                            s.LEG_START_TIME_COL, s.LEG_END_TIME_COL, s.LEG_DURATION_MINUTES_COL, s.LEG_DISTANCE_KM_COL,
                            s.ACT_MID_COL, s.MODE_MID_COL]]
 # Print the filtered DataFrame

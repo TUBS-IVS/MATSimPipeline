@@ -99,6 +99,7 @@ enhanced_mid:
     mid_trips_folder: "data/mid/trips"
   output:
     enhanced_mid_file: "enhanced_mid.csv"
+  detour_factor: 1.4
 
 location_assignment_prep:
   script: location_assignment_prep\run.py
@@ -114,29 +115,33 @@ location_assignment_prep:
 location_assignment:
   script: location_assignment\run.py
   input:
-    population_csv: "output/20250401_133235/population_with_locations.csv"
-    population_pkl: ""
+    population_csv: "output/20250403_123113/population_with_locations.csv"
+    population_pkl: #"output/20250401_133235/population_with_locations.pkl"
     locations_json: "output/20250401_135025/prepared_dictionary_locations.json"
     locations_pkl: "output/20250401_135025/prepared_dictionary_locations.pkl"
   output:
     population: "population.csv"
   # General settings
   algorithms_to_run:
-    - "load_intermediate"
-    - "CARLA"
+    #- "load_intermediate"
+#    - "CARLA"
+    - "hoerl"
   save_intermediate_results: true
   assert_no_missing_locations: true
   filter_number_of_persons: 1000
   filter_max_distance: 30000
   detour_factor: 1.4
-  skip_loading_full_population: true
+  skip_loading_full_population: false
   write_to_csv: true
   # Algorithm specific settings
   filter:
     filter_by_person: "10474610_12005_10474614"
   CARLA:
-    number_of_branches: 70
-    min_candidates_complex_case: 20
+    number_of_branches: 1
+    number_of_branches_4_legs: 30 # Fewer branches for long trips (currently unused)
+    number_of_branches_5_legs: 20
+    number_of_branches_6_legs: 10
+    min_candidates_complex_case: 10
     candidates_two_leg_case: 30
     max_candidates: null
     anchor_strategy: "lower_middle"
@@ -155,14 +160,18 @@ location_assignment:
 matsim_writer:
   script: matsim_writer\run.py
   input:
-    population_df: "${CURRENT_OUTPUT}/population.csv"
+    population_csv: "${CURRENT_OUTPUT}/population.csv"
+    population_pkl: ""
   output:
     plans: "population.xml"
     households: "households.xml"
     facilities: "facilities.xml"
     vehicles: "vehicles.xml"
-  write_post_processed_population: true
-  write_xmls: true
+  write_facilities: true
+  write_vehicles: true
+  write_households: true
+  write_plans: true
+
 
 # Define the mapping of values from the input data to internal values
 value_maps:

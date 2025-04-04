@@ -43,7 +43,6 @@ class PipelineRunner:
     def run_step(self, step_name):
         """
         Runs a single pipeline step via subprocess.
-        Instead of passing the full Config object, it passes the paths to the updated config file and used config file.
         """
         logging.info(f"Running step: {step_name}...")
 

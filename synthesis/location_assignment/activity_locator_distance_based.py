@@ -100,7 +100,6 @@ class CommuterPlacer:
         # Do more precise check.
 
 
-
 # def reformat_locations(locations_data: Dict[str, Dict[str, Dict[str, Any]]]) -> Dict[str, Dict[str, np.ndarray]]:
 #     """Reformat locations data from a nested dictionary to a dictionary of numpy arrays."""
 #     reformatted_data = {}
@@ -153,7 +152,7 @@ class TargetLocations:
     This class is used to quickly find the nearest activity locations for a given location.
     """
 
-    def __init__(self, locations_json_path: str, locations_pkl_path:str):
+    def __init__(self, locations_json_path: str, locations_pkl_path: str):
         self.data: Dict[str, Dict[str, np.ndarray]] = self.load_locations_dict(locations_json_path, locations_pkl_path)
         self.indices: Dict[str, cKDTree] = {}
 
@@ -1539,11 +1538,127 @@ class CircleIntersection:
 
         return best_id, best_coord, best_potential, best_score
 
+#
+# def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any]]]:
+#     """
+#     USES OLD FORMAT.
+#     Uses the MiD df to populate a nested dictionary with leg information for each person.
+#     :param df: DataFrame containing MiD data (BUT units are always meters, seconds)
+#     :return: Nested dictionary with leg information for each person
+#     Example output:
+#     data = {
+#         '10000290_11563_10000291': [
+#             {
+#                 'unique_leg_id': '10000290_11563_10000291_1.0',
+#                 'to_act_type': 'shopping',
+#                 'distance': 950.0,
+#                 'from_location': array([552452.11071084, 5807493.538159]),
+#                 'to_location': array([], dtype=float64),
+#                 'mode': 'bike',
+#                 'is_main_activity': 1,
+#                 'home_to_main_distance': 120.0
+#             },
+#             {
+#                 'unique_leg_id': '10000290_11563_10000291_2.0',
+#                 'to_act_type': 'home',
+#                 'distance': 1430.0,
+#                 'from_location': array([], dtype=float64),
+#                 'to_location': array([552452.11071084, 5807493.538159]),
+#                 'mode': 'bike',
+#                 'is_main_activity': 0,
+#                 'home_to_main_distance': 120.0
+#             }
+#         ],
+#         '10000370_11564_10000371': [
+#             {
+#                 'unique_leg_id': '10000370_11564_10000371_1.0',
+#                 'to_act_type': 'leisure',
+#                 'distance': 10450.0,
+#                 'from_location': array([554098.49165674, 5802930.10530201]),
+#                 'to_location': array([], dtype=float64),
+#                 'mode': 'car',
+#                 'is_main_activity': 1,
+#                 'home_to_main_distance': 1500.0
+#             },
+#             {
+#                 'unique_leg_id': '10000370_11564_10000371_2.0',
+#                 'to_act_type': 'home',
+#                 'distance': 7600.0,
+#                 'from_location': array([], dtype=float64),
+#                 'to_location': array([], dtype=float64),
+#                 'mode': 'car',
+#                 'is_main_activity': 0,
+#                 'home_to_main_distance': 1500.0
+#             },
+#             {
+#                 'unique_leg_id': '10000370_11564_10000371_3.0',
+#                 'to_act_type': 'shopping',
+#                 'distance': 13300.0,
+#                 'from_location': array([], dtype=float64),
+#                 'to_location': array([], dtype=float64),
+#                 'mode': 'car',
+#                 'is_main_activity': 0,
+#                 'home_to_main_distance': 1500.0
+#             },
+#             {
+#                 'unique_leg_id': '10000370_11564_10000371_4.0',
+#                 'to_act_type': 'home',
+#                 'distance': 13300.0,
+#                 'from_location': array([], dtype=float64),
+#                 'to_location': array([554098.49165674, 5802930.10530201]),
+#                 'mode': 'walk',
+#                 'is_main_activity': 0,
+#                 'is_main_activity': 0,
+#                 'home_to_main_distance': 1500.0
+#             }
+#         ]
+#     }
+#
+#
+#     """
+#
+#     # Extract relevant information into a new DataFrame
+#     legs_info_df = pd.DataFrame({
+#         s.UNIQUE_P_ID_COL: df[s.UNIQUE_P_ID_COL],
+#         'leg_info': list(zip(
+#             df[s.UNIQUE_LEG_ID_COL],
+#             df[s.ACT_TO_INTERNAL_COL],
+#             df[s.LEG_DISTANCE_METERS_COL],
+#             [np.array(loc) if loc is not None else np.array([]) for loc in df['from_location']],
+#             [np.array(loc) if loc is not None else np.array([]) for loc in df['to_location']],
+#             df[s.MODE_INTERNAL_COL],
+#             df[s.IS_MAIN_ACTIVITY_COL],
+#             df[s.HOME_TO_MAIN_METERS_COL]
+#         ))
+#     })
+#
+#     # Transform each tuple into a dictionary
+#     def to_leg_dict(leg_tuple):
+#         return {
+#             s.UNIQUE_LEG_ID_COL: leg_tuple[0],
+#             'to_act_type': leg_tuple[1],
+#             'distance': leg_tuple[2],
+#             'from_location': leg_tuple[3],
+#             'to_location': leg_tuple[4],
+#             'mode': leg_tuple[5],
+#             'is_main_activity': leg_tuple[6],
+#             'home_to_main_distance': leg_tuple[7]
+#         }
+#
+#     legs_info_df['leg_info'] = legs_info_df['leg_info'].map(to_leg_dict)
+#
+#     # Group by unique person identifier and aggregate leg information
+#     grouped = legs_info_df.groupby(s.UNIQUE_P_ID_COL)['leg_info'].apply(list)
+#
+#     # Convert the grouped Series to a dictionary
+#     nested_dict = grouped.to_dict()
+#
+#     return nested_dict
 
 def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any]]]:
     """
+    Build a nested dictionary of leg information, grouped by person, using separate x/y coordinate columns.
     USES OLD FORMAT.
-    Uses the MiD df to populate a nested dictionary with leg information for each person.
     :param df: DataFrame containing MiD data (BUT units are always meters, seconds)
     :return: Nested dictionary with leg information for each person
     Example output:
@@ -1615,25 +1730,27 @@ def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any
         ]
     }
 
-
     """
+    # Combine x/y columns into numpy arrays for each row
+    from_coords = df[[s.FROM_X_COL, s.FROM_Y_COL]].to_numpy(dtype=float)
+    to_coords = df[[s.TO_X_COL, s.TO_Y_COL]].to_numpy(dtype=float)
 
-    # Extract relevant information into a new DataFrame
+    # Extract relevant leg information as tuples
     legs_info_df = pd.DataFrame({
         s.UNIQUE_P_ID_COL: df[s.UNIQUE_P_ID_COL],
         'leg_info': list(zip(
             df[s.UNIQUE_LEG_ID_COL],
             df[s.ACT_TO_INTERNAL_COL],
             df[s.LEG_DISTANCE_METERS_COL],
-            [np.array(loc) if loc is not None else np.array([]) for loc in df['from_location']],
-            [np.array(loc) if loc is not None else np.array([]) for loc in df['to_location']],
+            [np.array(loc) if not np.any(pd.isna(loc)) else np.array([]) for loc in from_coords],
+            [np.array(loc) if not np.any(pd.isna(loc)) else np.array([]) for loc in to_coords],
             df[s.MODE_INTERNAL_COL],
             df[s.IS_MAIN_ACTIVITY_COL],
             df[s.HOME_TO_MAIN_METERS_COL]
         ))
     })
 
-    # Transform each tuple into a dictionary
+    # Turn each tuple into a dictionary
     def to_leg_dict(leg_tuple):
         return {
             s.UNIQUE_LEG_ID_COL: leg_tuple[0],
@@ -1648,10 +1765,8 @@ def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any
 
     legs_info_df['leg_info'] = legs_info_df['leg_info'].map(to_leg_dict)
 
-    # Group by unique person identifier and aggregate leg information
+    # Group by person and return nested dictionary
     grouped = legs_info_df.groupby(s.UNIQUE_P_ID_COL)['leg_info'].apply(list)
-
-    # Convert the grouped Series to a dictionary
     nested_dict = grouped.to_dict()
 
     return nested_dict
@@ -1660,47 +1775,98 @@ def populate_legs_dict_from_df(df: pd.DataFrame) -> Dict[str, List[Dict[str, Any
 def convert_to_segmented_plans(df: pd.DataFrame) -> SegmentedPlans:
     """
     Convert a DataFrame into SegmentedPlans using Leg structure.
-
     :param df: DataFrame containing the trip data.
     :return: SegmentedPlans (frozendict of person_id -> SegmentedPlan).
     """
 
-    def safe_array(loc):
-        """Convert location to np.array, replace None with an empty array."""
-        return np.array(loc) if loc is not None else np.array([])
+    def safe_array(x, y):
+        """Create array from x and y, handling missing values."""
+        if pd.notna(x) and pd.notna(y):
+            return np.array([x, y])
+        return np.array([])
 
     def row_to_leg(leg_tuple) -> Leg:
         return Leg(
             unique_leg_id=leg_tuple[0],
-            from_location=safe_array(leg_tuple[3]),
-            to_location=safe_array(leg_tuple[4]),
+            from_location=safe_array(leg_tuple[3], leg_tuple[4]),
+            to_location=safe_array(leg_tuple[5], leg_tuple[6]),
             distance=float(leg_tuple[2]) if leg_tuple[2] is not None else 0.0,
             to_act_type=leg_tuple[1] if leg_tuple[1] is not None else "unknown",
             to_act_identifier=None
         )
 
-    # Extract legs information into tuples
+    # Build tuples of leg information with X/Y coordinates instead of arrays
     legs_info_df = pd.DataFrame({
         s.UNIQUE_P_ID_COL: df[s.UNIQUE_P_ID_COL],
         'leg_info': list(zip(
             df[s.UNIQUE_LEG_ID_COL],
             df[s.ACT_TO_INTERNAL_COL],
             df[s.LEG_DISTANCE_METERS_COL],
-            [safe_array(loc) for loc in df['from_location']],
-            [safe_array(loc) for loc in df['to_location']],
+            df[s.FROM_X_COL],
+            df[s.FROM_Y_COL],
+            df[s.TO_X_COL],
+            df[s.TO_Y_COL],
         ))
     })
 
-    # Group by unique person identifier and convert to SegmentedPlans
+    # Group by person ID and build SegmentedPlans
     grouped = legs_info_df.groupby(s.UNIQUE_P_ID_COL)['leg_info'].apply(list)
+
     segmented_plans = frozendict({
         person_id: tuple(
-            tuple(row_to_leg(leg_tuple) for leg_tuple in segment)  # Segment as tuple of Legs
+            row_to_leg(leg_tuple) for leg_tuple in segment
         )
         for person_id, segment in grouped.items()
     })
 
     return segmented_plans
+
+
+#
+# def convert_to_segmented_plans(df: pd.DataFrame) -> SegmentedPlans:
+#     """
+#     Convert a DataFrame into SegmentedPlans using Leg structure.
+#
+#     :param df: DataFrame containing the trip data.
+#     :return: SegmentedPlans (frozendict of person_id -> SegmentedPlan).
+#     """
+#
+#     def safe_array(loc):
+#         """Convert location to np.array, replace None with an empty array."""
+#         return np.array(loc) if loc is not None else np.array([])
+#
+#     def row_to_leg(leg_tuple) -> Leg:
+#         return Leg(
+#             unique_leg_id=leg_tuple[0],
+#             from_location=safe_array(leg_tuple[3]),
+#             to_location=safe_array(leg_tuple[4]),
+#             distance=float(leg_tuple[2]) if leg_tuple[2] is not None else 0.0,
+#             to_act_type=leg_tuple[1] if leg_tuple[1] is not None else "unknown",
+#             to_act_identifier=None
+#         )
+#
+#     # Extract legs information into tuples
+#     legs_info_df = pd.DataFrame({
+#         s.UNIQUE_P_ID_COL: df[s.UNIQUE_P_ID_COL],
+#         'leg_info': list(zip(
+#             df[s.UNIQUE_LEG_ID_COL],
+#             df[s.ACT_TO_INTERNAL_COL],
+#             df[s.LEG_DISTANCE_METERS_COL],
+#             [safe_array(loc) for loc in df['from_location']],
+#             [safe_array(loc) for loc in df['to_location']],
+#         ))
+#     })
+#
+#     # Group by unique person identifier and convert to SegmentedPlans
+#     grouped = legs_info_df.groupby(s.UNIQUE_P_ID_COL)['leg_info'].apply(list)
+#     segmented_plans = frozendict({
+#         person_id: tuple(
+#             tuple(row_to_leg(leg_tuple) for leg_tuple in segment)  # Segment as tuple of Legs
+#         )
+#         for person_id, segment in grouped.items()
+#     })
+#
+#     return segmented_plans
 
 
 def convert_to_detailed_segmented_plans(df: pd.DataFrame) -> DetailedSegmentedPlans:
@@ -1759,11 +1925,6 @@ def convert_to_detailed_segmented_plans(df: pd.DataFrame) -> DetailedSegmentedPl
 
 def prepare_population_df_for_location_assignment(df, filter_max_distance=None, number_of_persons=None) -> (
         pd.DataFrame, pd.DataFrame):
-    """Temporarily prepare the MiD DataFrame for the leg dictionary function."""
-
-    # df["from_location"] = None
-    # df["to_location"] = None
-
     # Split persons with no leg ID into a separate DataFrame
     no_leg_df = df[df[s.LEG_ID_COL].isna()].copy()
     df = df.dropna(subset=[s.LEG_ID_COL])
@@ -1772,11 +1933,12 @@ def prepare_population_df_for_location_assignment(df, filter_max_distance=None, 
     df = df[df[s.UNIQUE_P_ID_COL].isin(mobile_persons_with_leg_1)]
 
     if logger.isEnabledFor(logging.INFO): logger.info(f"People with no legs: {no_leg_df.shape[0]}")
+    if logger.isEnabledFor(logging.INFO): logger.info(f"People with legs: {df.shape[0]}")
 
     # Throw out rows with missing values in the distance column
     row_count_before = df.shape[0]
     df = df.dropna(subset=[s.LEG_DISTANCE_METERS_COL])
-    if logger.isEnabledFor(logging.DEBUG): logger.debug(
+    if logger.isEnabledFor(logging.INFO): logger.info(
         f"Dropped {row_count_before - df.shape[0]} rows with missing distance values.")
 
     # Identify and remove records of persons with any trip exceeding the max distance if filter_max_distance is specified
@@ -1784,44 +1946,13 @@ def prepare_population_df_for_location_assignment(df, filter_max_distance=None, 
         person_ids_to_exclude = df[df[s.LEG_DISTANCE_METERS_COL] > filter_max_distance][s.PERSON_MID_ID_COL].unique()
         row_count_before = df.shape[0]
         df = df[~df[s.PERSON_MID_ID_COL].isin(person_ids_to_exclude)]
-        if logger.isEnabledFor(logging.DEBUG): logger.debug(
+        if logger.isEnabledFor(logging.INFO): logger.info(
             f"Dropped {row_count_before - df.shape[0]} rows from persons with trips exceeding the max distance of {filter_max_distance} km.")
-
-    # Ensure these columns are treated as object type to store arrays
-    df["from_location"] = df["from_location"].astype(object)
-    df["to_location"] = df["to_location"].astype(object)
 
     # Limit to the specified number of persons and keep all rows for these persons
     if number_of_persons is not None:
         person_ids = df[s.PERSON_MID_ID_COL].unique()[:number_of_persons]
         df = df[df[s.PERSON_MID_ID_COL].isin(person_ids)]
-
-    # # Add random home locations for each person for testing
-    # def generate_random_location_within_hanover():
-    #     """Generate a random coordinate within Hanover, Germany, in EPSG:25832."""
-    #     xmin, xmax = 546000, 556000
-    #     ymin, ymax = 5800000, 5810000
-    #     x = random.uniform(xmin, xmax)
-    #     y = random.uniform(ymin, ymax)
-    #     return np.array([x, y])
-    #
-    # df[s.HOME_LOC_COL] = None
-    # for person_id, group in df.groupby(s.UNIQUE_P_ID_COL):
-    #     home_location = generate_random_location_within_hanover()
-    #     for i in group.index:
-    #         df.at[i, s.HOME_LOC_COL] = home_location
-    #     df.at[group.index[0], "from_location"] = home_location
-    #     df.at[group.index[-1], "to_location"] = home_location
-    #
-    #     home_rows_to = group[group[s.ACT_TO_INTERNAL_COL] == s.ACT_HOME].index
-    #     if not home_rows_to.empty:
-    #         for idx in home_rows_to:
-    #             df.at[idx, "to_location"] = home_location
-    #
-    #     home_rows_from = group[group[s.ACT_FROM_INTERNAL_COL] == s.ACT_HOME].index
-    #     if not home_rows_from.empty:
-    #         for idx in home_rows_from:
-    #             df.at[idx, "from_location"] = home_location
 
     logger.info("Prepared population dataframe for location assignment.")
     if logger.isEnabledFor(logging.DEBUG): logger.debug(df.head())
@@ -2034,8 +2165,6 @@ def new_segment_plans(plans: SegmentedPlans) -> SegmentedPlans:
 #             if logger.isEnabledFor(logging.DEBUG): logger.debug(candidates)
 
 
-
-
 #
 # def update_dataframe(df: pd.DataFrame, placed_dict: Dict[str, Any]) -> pd.DataFrame:
 #     # Initialize new columns with NaN values
@@ -2062,28 +2191,62 @@ def new_segment_plans(plans: SegmentedPlans) -> SegmentedPlans:
 #     return df
 
 
-def write_hoerl_df_to_big_df(hoerl_df, big_df):  # TODO: write main stuff (somewhere else) to big df
+# def write_hoerl_df_to_big_df(hoerl_df, big_df):  # TODO: write main stuff (somewhere else) to big df
+#     """Unites the Hoerl DataFrame with the big DataFrame."""
+#     hoerl_df = hoerl_df.rename(columns={'person_id': s.PERSON_MID_ID_COL,
+#                                         'location_id': 'location_id_hoerl',
+#                                         'geometry': 'to_location_hoerl'})
+#
+#     # Recreate the unique leg id column
+#     hoerl_df[s.LEG_NUMBER_COL] = hoerl_df['activity_index'] - 1  # Starting index
+#     hoerl_df[s.UNIQUE_LEG_ID_COL] = (hoerl_df[s.PERSON_MID_ID_COL] + "_" + hoerl_df[s.LEG_NUMBER_COL].astype(str) +
+#                                      ".0")  # .0 is added to match the format of the big DataFrame :(
+#
+#     hoerl_df = hoerl_df[[s.UNIQUE_LEG_ID_COL, 'location_id_hoerl', 'to_location_hoerl']]
+#
+#     # Perform the merge with suffixes
+#     merged_df = big_df.merge(hoerl_df, on=s.UNIQUE_LEG_ID_COL, how='left', suffixes=('', '_hoerl'))
+#
+#     # Combine the columns to prioritize non-NaN values from hoerl_df
+#     # merged_df['location_id'] = merged_df['location_id_hoerl'].combine_first(merged_df['location_id'])
+#     merged_df['to_location'] = merged_df['to_location_hoerl'].combine_first(merged_df['to_location'])
+#
+#     # Drop the temporary hoerl columns
+#     merged_df = merged_df.drop(columns=['location_id_hoerl', 'to_location_hoerl'])
+#
+#     return merged_df
+
+def write_hoerl_df_to_big_df(hoerl_df, big_df):
     """Unites the Hoerl DataFrame with the big DataFrame."""
-    hoerl_df = hoerl_df.rename(columns={'person_id': s.PERSON_MID_ID_COL,
-                                        'location_id': 'location_id_hoerl',
-                                        'geometry': 'to_location_hoerl'})
 
-    # Recreate the unique leg id column
-    hoerl_df[s.LEG_NON_UNIQUE_ID_COL] = hoerl_df['activity_index'] - 1  # Starting index
-    hoerl_df[s.UNIQUE_LEG_ID_COL] = (hoerl_df[s.PERSON_MID_ID_COL] + "_" + hoerl_df[s.LEG_NON_UNIQUE_ID_COL].astype(str) +
-                                     ".0")  # .0 is added to match the format of the big DataFrame :(
+    hoerl_df = hoerl_df.rename(columns={
+        'person_id': "person_id_hoerl",
+        'location_id': 'location_id_hoerl',
+        'geometry': 'to_location_hoerl'
+    })
 
-    hoerl_df = hoerl_df[[s.UNIQUE_LEG_ID_COL, 'location_id_hoerl', 'to_location_hoerl']]
+    # Recreate unique_leg_id to match big_df format
+    hoerl_df[s.LEG_NUMBER_COL] = hoerl_df['activity_index'] - 1
+    hoerl_df[s.UNIQUE_LEG_ID_COL] = (
+        hoerl_df["person_id_hoerl"] + "_" + hoerl_df[s.LEG_NUMBER_COL].astype(str) + ".0"
+    )
 
-    # Perform the merge with suffixes
-    merged_df = big_df.merge(hoerl_df, on=s.UNIQUE_LEG_ID_COL, how='left', suffixes=('', '_hoerl'))
+    # Extract x/y coordinates from geometry
+    hoerl_df["coord_x_to_hoerl"] = hoerl_df["to_location_hoerl"].apply(lambda g: g.x if g else None)
+    hoerl_df["coord_y_to_hoerl"] = hoerl_df["to_location_hoerl"].apply(lambda g: g.y if g else None)
 
-    # Combine the columns to prioritize non-NaN values from hoerl_df
-    # merged_df['location_id'] = merged_df['location_id_hoerl'].combine_first(merged_df['location_id'])
-    merged_df['to_location'] = merged_df['to_location_hoerl'].combine_first(merged_df['to_location'])
+    # Select only necessary columns for merging
+    hoerl_df = hoerl_df[[s.UNIQUE_LEG_ID_COL, "coord_x_to_hoerl", "coord_y_to_hoerl"]]
 
-    # Drop the temporary hoerl columns
-    merged_df = merged_df.drop(columns=['location_id_hoerl', 'to_location_hoerl'])
+    # Merge into big_df
+    merged_df = big_df.merge(hoerl_df, on=s.UNIQUE_LEG_ID_COL, how='left')
+
+    # Combine columns (prefer Hoerl values if present)
+    merged_df[s.TO_X_COL] = merged_df["coord_x_to_hoerl"].combine_first(merged_df[s.TO_X_COL])
+    merged_df[s.TO_Y_COL] = merged_df["coord_y_to_hoerl"].combine_first(merged_df[s.TO_Y_COL])
+
+    # Drop intermediate Hoerl columns
+    merged_df = merged_df.drop(columns=["coord_x_to_hoerl", "coord_y_to_hoerl"])
 
     return merged_df
 
@@ -2095,47 +2258,105 @@ def write_placement_results_dict_to_population_df(placement_results_dict, popula
     for person_id, segments in placement_results_dict.items():
         for segment in segments:
             for leg in segment:
-                records.append(leg)
+                if hasattr(leg, '__dict__'):
+                    records.append(vars(leg))
+                else:
+                    records.append(leg)
 
     data_df = pd.DataFrame(records)
 
-    # Check columns
-    mandatory_columns = [s.UNIQUE_LEG_ID_COL, 'from_location', 'to_location']
+    # Split array columns into x/y components
+    if 'from_location' in data_df.columns:
+        data_df[s.FROM_X_COL] = data_df['from_location'].apply(
+            lambda arr: arr[0] if isinstance(arr, (list, np.ndarray)) else np.nan)
+        data_df[s.FROM_Y_COL] = data_df['from_location'].apply(
+            lambda arr: arr[1] if isinstance(arr, (list, np.ndarray)) else np.nan)
+    if 'to_location' in data_df.columns:
+        data_df[s.TO_X_COL] = data_df['to_location'].apply(
+            lambda arr: arr[0] if isinstance(arr, (list, np.ndarray)) else np.nan)
+        data_df[s.TO_Y_COL] = data_df['to_location'].apply(
+            lambda arr: arr[1] if isinstance(arr, (list, np.ndarray)) else np.nan)
+
+    # Define merge columns
+    mandatory_columns = [s.UNIQUE_LEG_ID_COL, s.FROM_X_COL, s.FROM_Y_COL, s.TO_X_COL, s.TO_Y_COL]
     optional_columns = ['to_act_name', 'to_act_potential', 'to_act_identifier']
-
-    for col in mandatory_columns:
-        if col not in data_df.columns:
-            raise ValueError(f"Mandatory column '{col}' is missing in data_df.")
-
     existing_optional_columns = [col for col in optional_columns if col in data_df.columns]
     existing_columns = mandatory_columns + existing_optional_columns
 
-    # Perform the merge with the existing columns
-    merged_df = population_df.merge(data_df[existing_columns], on=s.UNIQUE_LEG_ID_COL, how=merge_how)
+    # Perform merge with custom suffixes
+    merged_df = population_df.merge(
+        data_df[existing_columns],
+        on=s.UNIQUE_LEG_ID_COL,
+        how=merge_how,
+        suffixes=('_orig', '_placement')
+    )
 
-    # Combine columns to prioritize non-NaN values from data_df (_x is the original column, _y is the new one)
-    # From and to location are always expected to be present (even before placement, there will be home locations)
-    merged_df['from_location'] = merged_df['from_location_y'].combine_first(merged_df['from_location_x'])
-    merged_df['to_location'] = merged_df['to_location_y'].combine_first(merged_df['to_location_x'])
-    merged_df = merged_df.drop(columns=['from_location_x', 'from_location_y', 'to_location_x', 'to_location_y'])
+    # Overwrite coordinates with placement values
+    for col in [s.FROM_X_COL, s.FROM_Y_COL, s.TO_X_COL, s.TO_Y_COL]:
+        merged_df[col] = merged_df[f"{col}_placement"].combine_first(merged_df[f"{col}_orig"])
+        merged_df.drop(columns=[f"{col}_orig", f"{col}_placement"], inplace=True)
 
-    try:
-        merged_df['to_act_identifier'] = merged_df['to_act_identifier_y'].combine_first(
-            merged_df['to_act_identifier_x'])
-        merged_df = merged_df.drop(columns=['to_act_identifier_x', 'to_act_identifier_y'])
-    except KeyError:
-        pass
-    try:
-        merged_df['to_act_name'] = merged_df['to_act_name_y'].combine_first(merged_df['to_act_name_x'])
-        merged_df = merged_df.drop(columns=['to_act_name_x', 'to_act_name_y'])
-    except KeyError:
-        pass
-    try:
-        merged_df['to_act_potential'] = merged_df['to_act_potential_y'].combine_first(merged_df['to_act_potential_x'])
-        merged_df = merged_df.drop(columns=['to_act_potential_x', 'to_act_potential_y'])
-    except KeyError:
-        pass
+    # Overwrite optional columns
+    for col in existing_optional_columns:
+        try:
+            merged_df[col] = merged_df[f"{col}_placement"].combine_first(merged_df[f"{col}_orig"])
+            merged_df.drop(columns=[f"{col}_orig", f"{col}_placement"], inplace=True)
+        except KeyError:
+            pass
 
-    # Make sure no merge postfixes are left
-    assert not any([col.endswith('_x') or col.endswith('_y') for col in merged_df.columns]), "Postfixes left."
+    assert not any(col.endswith('_orig') or col.endswith('_placement') for col in merged_df.columns), "Postfixes left."
+
     return merged_df
+
+#
+# def write_placement_results_dict_to_population_df(placement_results_dict, population_df,
+#                                                   merge_how='left') -> pd.DataFrame:
+#     """Writes the placement results from the dictionary to the big DataFrame."""
+#     records = []
+#     for person_id, segments in placement_results_dict.items():
+#         for segment in segments:
+#             for leg in segment:
+#                 records.append(leg)
+#
+#     data_df = pd.DataFrame(records)
+#
+#     # Check columns
+#     mandatory_columns = [s.UNIQUE_LEG_ID_COL, 'from_location', 'to_location']
+#     optional_columns = ['to_act_name', 'to_act_potential', 'to_act_identifier']
+#
+#     for col in mandatory_columns:
+#         if col not in data_df.columns:
+#             raise ValueError(f"Mandatory column '{col}' is missing in data_df.")
+#
+#     existing_optional_columns = [col for col in optional_columns if col in data_df.columns]
+#     existing_columns = mandatory_columns + existing_optional_columns
+#
+#     # Perform the merge with the existing columns
+#     merged_df = population_df.merge(data_df[existing_columns], on=s.UNIQUE_LEG_ID_COL, how=merge_how)
+#
+#     # Combine columns to prioritize non-NaN values from data_df (_x is the original column, _y is the new one)
+#     # From and to location are always expected to be present (even before placement, there will be home locations)
+#     merged_df['from_location'] = merged_df['from_location_y'].combine_first(merged_df['from_location_x'])
+#     merged_df['to_location'] = merged_df['to_location_y'].combine_first(merged_df['to_location_x'])
+#     merged_df = merged_df.drop(columns=['from_location_x', 'from_location_y', 'to_location_x', 'to_location_y'])
+#
+#     try:
+#         merged_df['to_act_identifier'] = merged_df['to_act_identifier_y'].combine_first(
+#             merged_df['to_act_identifier_x'])
+#         merged_df = merged_df.drop(columns=['to_act_identifier_x', 'to_act_identifier_y'])
+#     except KeyError:
+#         pass
+#     try:
+#         merged_df['to_act_name'] = merged_df['to_act_name_y'].combine_first(merged_df['to_act_name_x'])
+#         merged_df = merged_df.drop(columns=['to_act_name_x', 'to_act_name_y'])
+#     except KeyError:
+#         pass
+#     try:
+#         merged_df['to_act_potential'] = merged_df['to_act_potential_y'].combine_first(merged_df['to_act_potential_x'])
+#         merged_df = merged_df.drop(columns=['to_act_potential_x', 'to_act_potential_y'])
+#     except KeyError:
+#         pass
+#
+#     # Make sure no merge postfixes are left
+#     assert not any([col.endswith('_x') or col.endswith('_y') for col in merged_df.columns]), "Postfixes left."
+#     return merged_df

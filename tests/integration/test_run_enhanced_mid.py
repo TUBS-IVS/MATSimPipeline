@@ -92,7 +92,7 @@ def test_enhance_travel_survey(setup_test_environment):
 
     for person_id, group in grouped:
         # Non-mobile person
-        if pd.isna(group.at[group.index[0], s.LEG_NON_UNIQUE_ID_COL]):
+        if pd.isna(group.at[group.index[0], s.LEG_NUMBER_COL]):
             assert len(group) == 1, (
                 f"Person {person_id} has multiple rows but no NON_UNIQUE_LEG_ID values."
             )
@@ -118,12 +118,12 @@ def test_enhance_travel_survey(setup_test_environment):
             )
 
             # Check that NON_UNIQUE_LEG_ID is a float or string with dot (just for better NaN handling)
-            assert group[s.LEG_NON_UNIQUE_ID_COL].apply(is_float_or_nan).all(), (
+            assert group[s.LEG_NUMBER_COL].apply(is_float_or_nan).all(), (
                 f"Person {person_id} has NON_UNIQUE_LEG_ID values that are not whole numbers."
             )
 
             # Check that NON_UNIQUE_LEG_ID matches the last part of unique_leg_id
-            non_unique_leg_ids = group[s.LEG_NON_UNIQUE_ID_COL].values
+            non_unique_leg_ids = group[s.LEG_NUMBER_COL].values
             unique_leg_ids = group['unique_leg_id'].values
             for i, unique_leg_id in enumerate(unique_leg_ids):
                 last_part = unique_leg_id.split('_')[-1]

@@ -56,7 +56,7 @@ class ActivityLocator:
         :return:
         """
         logger.info(f"Locating main activity cells for person {person[s.UNIQUE_P_ID_COL].iloc[0]}...")
-        if person[s.LEG_NON_UNIQUE_ID_COL].iloc[0] != 1:
+        if person[s.LEG_NUMBER_COL].iloc[0] != 1:
             logger.error(f"Person {person[s.UNIQUE_P_ID_COL].iloc[0]} has no leg 1 and thus no start. Locating randomly.")
             person = person.copy()
             person[s.CELL_FROM_COL] = random.choice(self.capa.capa_csv_df['NAME'].unique())

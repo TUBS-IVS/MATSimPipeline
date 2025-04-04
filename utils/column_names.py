@@ -1,7 +1,9 @@
 """
-MiD and custom column names and value maps.
+MiD and custom column names and values
 """
 
+# # --------------------------------------------------------------------------------------------------------------
+# TODO: Remove/move
 # Global Settings
 SAMPLE_SIZE = 0.25
 N_CLOSEST_CELLS = 10
@@ -9,39 +11,46 @@ DEFAULT_SLACK_FACTOR = 1.5
 SIGMOID_BETA = -0.15
 SIGMOID_DELTA_T = 1200
 
-# Input Files
-EXPANDED_HOUSEHOLDS_FILES = [
-    "data/synthetic_households_city.csv",
-    "data/synthetic_households_region.csv"
-]
-ENHANCED_MID_FOLDER = "data/mid/enhanced"
-MID_HH_FOLDER = "data/mid/households"
-MID_PERSONS_FOLDER = "data/mid/persons"
-MID_TRIPS_FOLDER = "data/mid/trips"
-BUILDINGS_IN_LOWEST_GEOGRAPHY_WITH_WEIGHTS_FILE = "data/houses_with_weights.csv"
-CAPA_CELLS_CSV_PATH = "data/region_hanover_potentials.csv"
-CAPA_CELLS_SHP_PATH = "data/shapes/RH_useful__zone.SHP"
-REGION_WITHOUT_CITY_GPKG_FILE = "data/shapes/RegionOhneStadtGitter100m.gpkg"
-SHAPE_BOUNDARY_FILE = "data/shapes/region_hanover.shp"
-SLACK_FACTORS_FILE = "data/Slack_Factors.csv"
+# # Input Files
+# EXPANDED_HOUSEHOLDS_FILES = [
+#     "data/synthetic_households_city.csv",
+#     "data/synthetic_households_region.csv"
+# ]
+# ENHANCED_MID_FOLDER = "data/mid/enhanced"
+# MID_HH_FOLDER = "data/mid/households"
+# MID_PERSONS_FOLDER = "data/mid/persons"
+# MID_TRIPS_FOLDER = "data/mid/trips"
+# BUILDINGS_IN_LOWEST_GEOGRAPHY_WITH_WEIGHTS_FILE = "data/houses_with_weights.csv"
+# CAPA_CELLS_CSV_PATH = "data/region_hanover_potentials.csv"
+# CAPA_CELLS_SHP_PATH = "data/shapes/RH_useful__zone.SHP"
+# REGION_WITHOUT_CITY_GPKG_FILE = "data/shapes/RegionOhneStadtGitter100m.gpkg"
+# SHAPE_BOUNDARY_FILE = "data/shapes/region_hanover.shp"
+# SLACK_FACTORS_FILE = "data/Slack_Factors.csv"
+# 
+# # Output Files
+# POPULATION_ANALYSIS_OUTPUT_FILE = "full_population_frame.csv"
+# MATSIM_PLANS_FILE = "population.xml"
+# STATS_FILE = "stats.txt"
+# ENHANCED_MID_FILE = "enhanced_mid.csv"
 
-# Output Files
-POPULATION_ANALYSIS_OUTPUT_FILE = "full_population_frame.csv"
-MATSIM_PLANS_FILE = "population.xml"
-STATS_FILE = "stats.txt"
-ENHANCED_MID_FILE = "enhanced_mid.csv"
+# Geography
+GEOGRAPHY_COLUMNS = ["WELT", "STAAT", "STADTTLNR", "BAUBLOCKNR"]
+LOWEST_LEVEL_GEOGRAPHY = "BAUBLOCKNR"
+
+# --------------------------------------------------------------------------------------------------------------
 
 # ID Columns
 HOUSEHOLD_MID_ID_COL = "H_ID"
 HOUSEHOLD_POPSIM_ID_COL = "household_id"
 PERSON_MID_ID_COL = "HP_ID"
-LEG_NON_UNIQUE_ID_COL = "W_ID"
-LEG_ID_COL = "HPW_ID"
+LEG_NUMBER_COL = "W_ID" # MiD ID, 1,2,3... for each leg
+LEG_ID_COL = "HPW_ID" # MiD Person ID and leg number concatenated
 TT_MATRIX_CELL_ID_COL = "cell_id"
 
-# Geography
-GEOGRAPHY_COLUMNS = ["WELT", "STAAT", "STADTTLNR", "BAUBLOCKNR"]
-LOWEST_LEVEL_GEOGRAPHY = "BAUBLOCKNR"
+# Unique ids added after population expansion
+UNIQUE_LEG_ID_COL = "unique_leg_id"
+UNIQUE_HH_ID_COL = "unique_household_id"
+UNIQUE_P_ID_COL = "unique_person_id"
 
 # Household Columns
 H_CAR_IN_HH_COL = "auto"
@@ -60,7 +69,7 @@ LEG_MAIN_MODE_COL = "hvm_imp"
 LEG_START_TIME_COL = "W_SZ"
 LEG_END_TIME_COL = "W_AZ"
 LEG_DURATION_MINUTES_COL = "wegmin_imp1"
-LEG_DURATION_SECONDS_COL = "leg_duration_seconds" # TODO: Check if this is valid
+LEG_DURATION_SECONDS_COL = "leg_duration_seconds"
 LEG_DISTANCE_KM_COL = "wegkm_imp"
 LEG_DISTANCE_METERS_COL = "leg_distance_meters"
 FIRST_LEG_STARTS_AT_HOME_COL = "W_SO1"
@@ -78,11 +87,6 @@ IS_IMPUTED_TIME_COL = "imputed_time"
 IS_IMPUTED_LEG_COL = "imputed_leg"
 LIST_OF_CARS_COL = "car_list"
 
-# Processing Columns
-UNIQUE_LEG_ID_COL = "unique_leg_id"
-UNIQUE_HH_ID_COL = "unique_household_id"
-UNIQUE_P_ID_COL = "unique_person_id"
-
 FACILITY_ID_COL = "facility_id"
 FACILITY_CENTROID_COL = "facility_centroid"
 FACILITY_X_COL = "facility_x"
@@ -94,7 +98,6 @@ FACILITY_POTENTIAL_COL = "facility_potential"
 IS_MAIN_ACTIVITY_COL = "is_main_activity"
 MIRRORS_MAIN_ACTIVITY_COL = "mirrors_main_activity"
 
-# TODO: Check if this is valid
 CONNECTED_LEGS_COL = "connected_legs"
 TO_ACTIVITY_WITH_CONNECTED_COL = "to_activity_with_connected"
 IS_PROTAGONIST_COL = "is_protagonist"
@@ -104,14 +107,20 @@ P_HAS_CONNECTIONS_COL = "p_has_connections"
 NUM_CONNECTED_LEGS_COL = "num_connected_legs"
 CELL_FROM_COL = "cell_from"
 CELL_TO_COL = "cell_to"
-COORD_FROM_COL = "coord_from"
-COORD_TO_COL = "coord_to"
+#COORD_FROM_COL = "from_location"
+COORD_TO_COL = "to_location"
+FROM_X_COL = "from_x"
+FROM_Y_COL = "from_y"
+TO_X_COL = "to_x"
+TO_Y_COL = "to_y"
 HOME_CELL_COL = "home_cell"
 HOME_LOC_COL = "home_location"
+HOME_X_COL = "home_x"
+HOME_Y_COL = "home_y"
 MAIN_MODE_TO_MAIN_ACT_TIMEBASED_COL = "main_mode_to_main_act_timebased"
 MAIN_MODE_TO_MAIN_ACT_DISTBASED_COL = "main_mode_to_main_act_distbased"
 
-# Value Maps
+# Values
 MODE_CAR = "car"
 MODE_PT = "pt"
 MODE_RIDE = "ride"

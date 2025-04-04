@@ -73,7 +73,7 @@ class Helpers:
 
         # Create unique leg ids
         legs_file[s.LEG_ID_COL] = legs_file[s.PERSON_MID_ID_COL].astype(str) + "_" + legs_file[
-            s.LEG_NON_UNIQUE_ID_COL].astype(
+            s.LEG_NUMBER_COL].astype(
             str)
         self.logger.info(f"Created unique leg ids.")
         return legs_file
@@ -81,6 +81,7 @@ class Helpers:
     def convert_to_point(self, point_input, target='Point'):
         """
         Forces all weird location representations to either Point or array.
+        Works well, but no longer needed due to representation of coords in two colums (x and y).
         :param point_input: String input of the format 'x,y' or '[x,y]', a list [x, y], or a Shapely Point
         :param target: Desired output format, either 'Point' or 'array'
         :return: Shapely Point or numpy array
@@ -470,49 +471,77 @@ class Helpers:
         except ValueError:
             return s
 
-    def add_from_coord(self, df):
+    # def add_from_coord(self, df):
+    #     """
+    #     Add a 'from_activity' column to the DataFrame, which is the to_activity of the previous leg.
+    #     For the first leg of each person, set 'from_activity' based on 'starts_at_home' (-> home or unspecified).
+    #     :return:
+    #     """
+    #     self.logger.info("Adding/updating from_coord column...")
+    #     # Sort the DataFrame by person ID and leg number (the df should usually already be sorted this way)
+    #     df.sort_values(by=[s.UNIQUE_P_ID_COL, s.LEG_NUMBER_COL], inplace=True)
+    #
+    #     # Shift the 'to_activity' down to create 'from_activity' for each group
+    #     df[s.COORD_FROM_COL] = df.groupby(s.PERSON_MID_ID_COL)[s.COORD_TO_COL].shift(1)
+    #
+    #     # For the first leg of each person, set 'from_coord' to home coord
+    #     df.loc[(df[s.LEG_NUMBER_COL] == 1), s.COORD_FROM_COL] = df.loc[
+    #         (df[s.LEG_NUMBER_COL] == 1), 'home_loc']
+    #
+    #     self.logger.info("Done.")
+    #     return df
+    # 
+    # def add_from_location(self, df, col_to, col_from, backup_existing_from_col=False):
+    #     """
+    #     Add a 'from_activity' column to the DataFrame, which is the to_activity of the previous leg.
+    #     For the first leg of each person, set 'from_activity' based on 'starts_at_home' (-> home or unspecified).
+    #     :return:
+    #     """
+    #     self.logger.info("Adding/updating from_coord column...")
+    # 
+    #     if backup_existing_from_col and col_from in df.columns:
+    #         col_from_old = col_from + "_old"
+    #         df[col_from_old] = df[col_from]
+    # 
+    #     # Sort the DataFrame by person ID and leg number (the df should usually already be sorted this way)
+    #     df.sort_values(by=[s.UNIQUE_P_ID_COL, s.LEG_NUMBER_COL], inplace=True)
+    # 
+    #     # Shift the 'to_activity' down to create 'from_activity' for each group
+    #     df[col_from] = df.groupby(s.PERSON_MID_ID_COL)[col_to].shift(1)
+    # 
+    #     # For the first leg of each person, set 'from_coord' to home coord
+    #     df.loc[(df[s.LEG_NUMBER_COL] == 1), col_from] = df.loc[
+    #         (df[s.LEG_NUMBER_COL] == 1), s.HOME_LOC_COL]
+    # 
+    #     self.logger.info("Done.")
+    #     return df
+
+    def add_from_location(self, df, backup_existing_from_col=False):
         """
-        Add a 'from_activity' column to the DataFrame, which is the to_activity of the previous leg.
-        For the first leg of each person, set 'from_activity' based on 'starts_at_home' (-> home or unspecified).
-        :return:
+        Adds or updates the 'from_x' and 'from_y' columns by shifting the 'to_x' and 'to_y' of the previous leg.
+        For the first leg of each person, sets 'from_x/y' to the person's home_x/y coordinates.
         """
-        self.logger.info("Adding/updating from_coord column...")
+        self.logger.info("Adding/updating from_x and from_y...")
+
+        if backup_existing_from_col:
+            if s.FROM_X_COL in df.columns:
+                df[s.FROM_X_COL + '_old'] = df[s.FROM_X_COL]
+            if s.FROM_Y_COL in df.columns:
+                df[s.FROM_Y_COL + '_old'] = df[s.FROM_Y_COL]
+
         # Sort the DataFrame by person ID and leg number (the df should usually already be sorted this way)
-        df.sort_values(by=[s.UNIQUE_P_ID_COL, s.LEG_NON_UNIQUE_ID_COL], inplace=True)
+        df.sort_values(by=[s.UNIQUE_P_ID_COL, s.LEG_NUMBER_COL], inplace=True)
 
-        # Shift the 'to_activity' down to create 'from_activity' for each group
-        df[s.COORD_FROM_COL] = df.groupby(s.PERSON_MID_ID_COL)[s.COORD_TO_COL].shift(1)
+        # Shift the to-coords down to create the from coords for each group
+        #TODO: Why PERSON_MID_ID_COL?? Seems wrong?
+        df[s.FROM_X_COL] = df.groupby(s.PERSON_MID_ID_COL)[s.TO_X_COL].shift(1)
+        df[s.FROM_Y_COL] = df.groupby(s.PERSON_MID_ID_COL)[s.TO_Y_COL].shift(1)
 
-        # For the first leg of each person, set 'from_coord' to home coord
-        df.loc[(df[s.LEG_NON_UNIQUE_ID_COL] == 1), s.COORD_FROM_COL] = df.loc[
-            (df[s.LEG_NON_UNIQUE_ID_COL] == 1), 'home_loc']
+        first_leg_mask = df[s.LEG_NUMBER_COL] == 1
+        df.loc[first_leg_mask, s.FROM_X_COL] = df.loc[first_leg_mask, s.HOME_X_COL]
+        df.loc[first_leg_mask, s.FROM_Y_COL] = df.loc[first_leg_mask, s.HOME_Y_COL]
 
-        self.logger.info("Done.")
-        return df
-
-    def add_from_location(self, df, col_to, col_from, backup_existing_from_col=False):
-        """
-        Add a 'from_activity' column to the DataFrame, which is the to_activity of the previous leg.
-        For the first leg of each person, set 'from_activity' based on 'starts_at_home' (-> home or unspecified).
-        :return:
-        """
-        self.logger.info("Adding/updating from_coord column...")
-
-        if backup_existing_from_col and col_from in df.columns:
-            col_from_old = col_from + "_old"
-            df[col_from_old] = df[col_from]
-
-        # Sort the DataFrame by person ID and leg number (the df should usually already be sorted this way)
-        df.sort_values(by=[s.UNIQUE_P_ID_COL, s.LEG_NON_UNIQUE_ID_COL], inplace=True)
-
-        # Shift the 'to_activity' down to create 'from_activity' for each group
-        df[col_from] = df.groupby(s.PERSON_MID_ID_COL)[col_to].shift(1)
-
-        # For the first leg of each person, set 'from_coord' to home coord
-        df.loc[(df[s.LEG_NON_UNIQUE_ID_COL] == 1), col_from] = df.loc[
-            (df[s.LEG_NON_UNIQUE_ID_COL] == 1), s.HOME_LOC_COL]
-
-        self.logger.info("Done.")
+        self.logger.info("Done updating from_x/from_y.")
         return df
 
     def add_from_cell(self, df):
@@ -523,13 +552,13 @@ class Helpers:
         """
         self.logger.info("Adding/updating from_coord column...")
         # Sort the DataFrame by person ID and leg number (the df should usually already be sorted this way)
-        df.sort_values(by=[s.UNIQUE_P_ID_COL, s.LEG_NON_UNIQUE_ID_COL], inplace=True)
+        df.sort_values(by=[s.UNIQUE_P_ID_COL, s.LEG_NUMBER_COL], inplace=True)
 
         df[s.CELL_FROM_COL] = df.groupby(s.PERSON_MID_ID_COL)[s.CELL_TO_COL].shift(1)
 
         # For the first leg of each person, set 'from_cell' to home cell
-        df.loc[(df[s.LEG_NON_UNIQUE_ID_COL] == 1), s.CELL_FROM_COL] = df.loc[
-            (df[s.LEG_NON_UNIQUE_ID_COL] == 1), s.HOME_CELL_COL]
+        df.loc[(df[s.LEG_NUMBER_COL] == 1), s.CELL_FROM_COL] = df.loc[
+            (df[s.LEG_NUMBER_COL] == 1), s.HOME_CELL_COL]
 
         self.logger.info("Done.")
         return df
@@ -544,13 +573,13 @@ class Helpers:
         person = person.copy()
         self.logger.debug("Adding/updating from_coord column for single person...")
         # Sort the DataFrame by person ID and leg number (the df should usually already be sorted this way)
-        person.sort_values(by=[s.LEG_NON_UNIQUE_ID_COL], inplace=True, ignore_index=True)
+        person.sort_values(by=[s.LEG_NUMBER_COL], inplace=True, ignore_index=True)
 
         person[s.CELL_FROM_COL] = person[s.CELL_TO_COL].shift(1)
 
         # For the first leg of the person, set 'from_cell' to home cell
-        person.loc[(person[s.LEG_NON_UNIQUE_ID_COL] == 1), s.CELL_FROM_COL] = person.loc[
-            (person[s.LEG_NON_UNIQUE_ID_COL] == 1), s.HOME_CELL_COL]
+        person.loc[(person[s.LEG_NUMBER_COL] == 1), s.CELL_FROM_COL] = person.loc[
+            (person[s.LEG_NUMBER_COL] == 1), s.HOME_CELL_COL]
 
         return person
 
@@ -695,10 +724,10 @@ class Helpers:
         col_name = s.UNIQUE_LEG_ID_COL
         self.logger.info(f"Generating unique leg IDs...")
         if col_name not in df.columns:
-            df[col_name] = df[s.UNIQUE_P_ID_COL] + "_" + df[s.LEG_NON_UNIQUE_ID_COL].astype(str)
+            df[col_name] = df[s.UNIQUE_P_ID_COL] + "_" + df[s.LEG_NUMBER_COL].astype(str)
             self.logger.info(f"Created new column {col_name}.")
         else:
-            df[col_name] = df[s.UNIQUE_P_ID_COL] + "_" + df[s.LEG_NON_UNIQUE_ID_COL].astype(str)
+            df[col_name] = df[s.UNIQUE_P_ID_COL] + "_" + df[s.LEG_NUMBER_COL].astype(str)
             self.logger.info(f"Overwrote existing column {col_name}.")
         return df
 

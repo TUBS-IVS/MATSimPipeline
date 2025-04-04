@@ -19,7 +19,7 @@ def enhance_travel_survey(config: Config):
         - The ids of households, persons and trips must be unique within the population sample (e.g. MiD)
         (MiD: H_ID, HP_ID, and a previously added HPW_ID for legs)
     """
-
+    # TODO: Unique ids for legs, hh and persons should be added LATER and consistently in the syn pop step.
     # Create unique leg ids in the leg input file if necessary
     # df = h.read_csv(h.get_files(s.MiD_TRIPS_FOLDER))
     # df = h.create_leg_ids(df)
@@ -78,12 +78,13 @@ def enhance_travel_survey(config: Config):
 
     # Add/edit trip-specific rule-based attributes
     # logger.info(f"Population df after applying L row rules: \n{population.df.head()}")
-    population.df[s.LEG_NON_UNIQUE_ID_COL] = pd.to_numeric(population.df[s.LEG_NON_UNIQUE_ID_COL], errors='coerce')
+    population.df[s.LEG_NUMBER_COL] = pd.to_numeric(population.df[s.LEG_NUMBER_COL], errors='coerce')
     population.df = h.generate_unique_leg_id(population.df)
 
     population.add_from_activity()
     # population.filter_home_to_home_legs()  Home-to-home should be dealt with in placement itself. Also, removing it
     # here may cause issues because it may remove the first leg.
+    # population.expand_home_to_home_legs() TODO: We may do this instead. After that, we must update number of legs, leg numbers and leg IDs.
     population.update_number_of_legs()
 
     population.convert_minutes_to_seconds(s.LEG_DURATION_MINUTES_COL, s.LEG_DURATION_SECONDS_COL)

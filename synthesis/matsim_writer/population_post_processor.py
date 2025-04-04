@@ -6,10 +6,12 @@ Post-processor is part of writing because 1) there is not much to do 2) it is ve
 from datetime import timedelta
 import utils.column_names as s
 from utils.data_frame_processor import DataFrameProcessor
+import pandas as pd
+import numpy as np
 
 class PopulationPostProcessor(DataFrameProcessor):
-    def __init__(self, stats_tracker):
-        super().__init__(stats_tracker)
+    def __init__(self, stats_tracker, logger):
+        super().__init__(stats_tracker=stats_tracker, logger=logger)
 
     def change_last_leg_activity_to_home(self) -> None:
         """

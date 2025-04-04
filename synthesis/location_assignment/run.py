@@ -23,6 +23,7 @@ def run_location_assignment():
 
     locations_json_path = os.path.join(project_root, config.get("location_assignment.input.locations_json"))
     locations_pkl_path = os.path.join(project_root, config.get("location_assignment.input.locations_pkl"))
+
     algorithms_to_run = config.get("location_assignment.algorithms_to_run")
 
     save_intermediate_results = config.get("location_assignment.save_intermediate_results")
@@ -45,7 +46,12 @@ def run_location_assignment():
 
     if not skip_loading_full_population:
         # Load the population dataframe
-        population_df = pd.read_csv(config.get("location_assignment.population_csv"))
+        try:
+            logger.info("Loading population dataframe from pickle...")
+            population_df = pd.read_pickle(os.path.join(project_root, config.get("location_assignment.input.population_pkl")))
+        except (FileNotFoundError, TypeError):
+            logger.info("Pickle not found, loading population dataframe from CSV...")
+            population_df = pd.read_csv(os.path.join(project_root, config.get("location_assignment.input.population_csv")))
 
         # Prepare the population dataframe, split off non-mobile persons
         mobile_population_df, non_mobile_population_df = (al.prepare_population_df_for_location_assignment
@@ -90,17 +96,18 @@ def run_location_assignment():
         else:
             raise ValueError("Invalid algorithm.")
 
-        # Make sure algorithm results are in the correct format
-        mobile_population_df['to_location'] = mobile_population_df['to_location'].apply(
-            lambda x: h.convert_to_point(x, target='array'))
-        mobile_population_df['from_location'] = mobile_population_df['from_location'].apply(
-            lambda x: h.convert_to_point(x, target='array'))
-        if save_intermediate_results:
-            mobile_population_df.to_csv(os.path.join(output_folder, f"mobile_population_{algorithm}.csv"),
-                                        index=False)
+        # # Make sure algorithm results are in the correct format
+        # mobile_population_df['to_location'] = mobile_population_df['to_location'].apply(
+        #     lambda x: h.convert_to_point(x, target='array'))
+        # mobile_population_df['from_location'] = mobile_population_df['from_location'].apply(
+        #     lambda x: h.convert_to_point(x, target='array'))
+        # if save_intermediate_results:
+        #     mobile_population_df.to_csv(os.path.join(output_folder, f"mobile_population_{algorithm}.csv"),
+        #                                 index=False)
 
     if assert_no_missing_locations:
-        assert mobile_population_df['to_location'].notna().all(), "Some persons have no location assigned."
+        assert mobile_population_df[s.TO_X_COL].notna().all(), "Some persons have no location assigned."
+        assert mobile_population_df[s.TO_Y_COL].notna().all(), "Some persons have no location assigned."
 
     # Recombine the population dataframes
     result_df = pd.concat([mobile_population_df, non_mobile_population_df], ignore_index=True)
@@ -162,12 +169,12 @@ def run_hoerl(population_df, target_locations, config):
     algo_time = time.time() - time_start
     logger.info(f"Hoerl done in {algo_time} seconds.")
     stats_tracker.log("runtimes.hoerl_time", algo_time)
-    population_df['to_location'] = population_df['to_location'].apply(
-        lambda x: h.convert_to_point(x, target='array'))  # Needed currently so [] becomes None
-    population_df['from_location'] = population_df['from_location'].apply(
-        lambda x: h.convert_to_point(x, target='array'))  # Needed currently so [] becomes None
+    # population_df['to_location'] = population_df['to_location'].apply(
+    #     lambda x: h.convert_to_point(x, target='array'))  # Needed currently so [] becomes None
+    # population_df['from_location'] = population_df['from_location'].apply(
+    #     lambda x: h.convert_to_point(x, target='array'))  # Needed currently so [] becomes None
     population_df = al.write_hoerl_df_to_big_df(df_location, population_df)
-    population_df = h.add_from_location(population_df, 'to_location', 'from_location')
+    population_df = h.add_from_location(population_df)
     return population_df
 
 
@@ -194,7 +201,7 @@ def run_simple_lelke(population_df, target_locations):
     lelke_algorithm = al.SimpleLelkeAlgorithm(target_locations, segmented_dict)
     result_dict = lelke_algorithm.run()
     population_df = al.write_placement_results_dict_to_population_df(result_dict, population_df)
-    return h.add_from_location(population_df, 'to_location', 'from_location')
+    return h.add_from_location(population_df)
 
 
 def run_simple_main(population_df, target_locations, config):
@@ -229,13 +236,13 @@ def run_carla(population_df, target_locations, config):
     segmented_dict = al.new_segment_plans(legs_dict)
     logger.info("Dict segmented.")
     time_start = time.time()
-    advance_petre_algorithm = al.CARLA(target_locations, segmented_dict, config)
-    result_dict = advance_petre_algorithm.run()
+    CARLA_algo = al.CARLA(target_locations, segmented_dict, config)
+    result_dict = CARLA_algo.run()
     algo_time = time.time() - time_start
     logger.info(f"CARLA done in {algo_time} seconds.")
     stats_tracker.log("runtimes.carla_time", algo_time)
     population_df = al.write_placement_results_dict_to_population_df(result_dict, population_df)
-    return h.add_from_location(population_df, 'to_location', 'from_location')
+    return h.add_from_location(population_df)
 
 
 if __name__ == "__main__":

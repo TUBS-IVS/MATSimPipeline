@@ -30,14 +30,6 @@ from frozendict import frozendict
 logger = logging.getLogger(__name__)
 
 
-class GermanPopulationDensity:
-    pass
-
-
-class GermanTrainStations:
-    pass
-
-
 # either near Bahnhof (pt) or according to landuse (car)
 class CommuterPlacer:
     """
@@ -53,6 +45,7 @@ class CommuterPlacer:
     Possibilities:
     - Search for commuters more carefully using boundary intersection test
     - Apply commuters internally (within region)
+
     """
 
     # Values are 1.: in meters, 2.: guessed
@@ -99,35 +92,6 @@ class CommuterPlacer:
         # Remove the rest
         # Do more precise check.
 
-
-# def reformat_locations(locations_data: Dict[str, Dict[str, Dict[str, Any]]]) -> Dict[str, Dict[str, np.ndarray]]:
-#     """Reformat locations data from a nested dictionary to a dictionary of numpy arrays."""
-#     reformatted_data = {}
-#
-#     for type, locations in locations_data.items():
-#         identifiers = []
-#         names = []
-#         coordinates = []
-#         potentials = []
-#
-#         for location_id, location_details in locations.items():
-#             identifiers.append(location_id)
-#             names.append(location_details['name'])
-#             coordinates.append(location_details['coordinates'])
-#             try:
-#                 potentials.append(location_details['potential'])
-#             except KeyError:
-#                 logger.warning("Using old capacity name instead of potential name")
-#                 potentials.append(location_details['capacity'])  # Old name
-#
-#         reformatted_data[type] = {
-#             'identifiers': np.array(identifiers, dtype=object),
-#             'names': np.array(names, dtype=str),
-#             'coordinates': np.array(coordinates, dtype=float),
-#             'potentials': np.array(potentials, dtype=float)
-#         }
-#
-#     return reformatted_data
 
 
 class Potentials:

@@ -17,6 +17,29 @@ from utils.logger import setup_logging
 import logging
 from utils import column_names as s
 
+def cut_out_shape(gdf: gpd.GeoDataFrame, shape_path, common_crs) -> gpd.GeoDataFrame:
+    """
+    Cuts out the area defined by the shape from the GeoDataFrame.
+    Returns a new GeoDataFrame containing only the features within the shape.
+    """
+    logger.info(f"Cutting out shape from {shape_path}")
+    # Ensure common CRS
+    if gdf.crs != common_crs:
+        logger.info(f"Converting GeoDataFrame CRS from {gdf.crs} to {common_crs}")
+        gdf = gdf.to_crs(common_crs)
+
+    shape = gpd.read_file(shape_path)
+    if shape.empty:
+        raise ValueError(f"Shape file {shape_path} is empty.")
+    if shape.crs is None:
+        logger.warning(f"Could not find a CRS for shape file {shape_path}.")
+        logger.warning(f"Assigning CRS {common_crs} to shape.")
+        shape = shape.set_crs(common_crs)
+
+    # Perform spatial intersection
+    cut_out_gdf = gpd.overlay(gdf, shape, how='intersection')
+
+    return cut_out_gdf
 
 def reformat_locations_from_df(df: pd.DataFrame) -> dict:
     """
@@ -101,8 +124,14 @@ def run_prepare_location_assignment():
         logger.info(f"No CRS detected. Assuming {common_crs}")
         gdf.set_crs(common_crs, inplace=True)
     elif gdf.crs != common_crs:
+        logger.info(f"Converting GeoDataFrame CRS from {gdf.crs} to {common_crs}")
         gdf = gdf.to_crs(common_crs)
 
+    if config.get("location_assignment_prep.cut_out_shape"):
+        shape_path = os.path.join(project_root, config.get("location_assignment_prep.input.cut_out_shape_path"))
+        if not os.path.exists(shape_path):
+            raise FileNotFoundError(f"Shape file {shape_path} does not exist.")
+        gdf = cut_out_shape(gdf, shape_path, common_crs)
     reformatted = reformat_locations_from_df(gdf)
 
     if config.get("location_assignment_prep.save_pkl"):

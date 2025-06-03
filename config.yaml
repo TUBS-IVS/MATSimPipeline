@@ -106,50 +106,54 @@ location_assignment_prep:
   input:
       locations_gpkg: "locations.gpkg"
       locations_pkl: "output/20250401_104704/locations.pkl"
+      cut_out_shape_path: "data/shapes/region_hanover.shp"
   output:
       location_pkl: "prepared_dictionary_locations.pkl"
       location_json: "prepared_dictionary_locations.json"
+  cut_out_shape: true # Cut out the locations that are not in the given region
   save_json: false # May take ages
   save_pkl: true
 
 location_assignment:
   script: location_assignment\run.py
   input:
-    population_csv: "output/20250403_123113/population_with_locations.csv"
+    population_csv: "data/intermediates/mobile_population_remove_unfeasible_reformatted.csv"
     population_pkl: #"output/20250401_133235/population_with_locations.pkl"
-    locations_json: "output/20250401_135025/prepared_dictionary_locations.json"
-    locations_pkl: "output/20250401_135025/prepared_dictionary_locations.pkl"
+    locations_json: ""# "output/20250401_135025/prepared_dictionary_locations.json"
+    locations_pkl: "data/locations_data_reformatted.pkl"
   output:
     population: "population.csv"
   # General settings
   algorithms_to_run:
+    - "filter"
     #- "load_intermediate"
-#    - "CARLA"
-    - "hoerl"
+    - "CARLA"
+#    - "hoerl"
   save_intermediate_results: true
   assert_no_missing_locations: true
-  filter_number_of_persons: 1000
+  filter_number_of_persons:  # None (empty) means no filtering, otherwise filter to this number of persons
   filter_max_distance: 30000
   detour_factor: 1.4
   skip_loading_full_population: false
   write_to_csv: true
   # Algorithm specific settings
   filter:
-    filter_by_person: "10474610_12005_10474614"
+    filter_by_person: "10004170_11567_10004171"
   CARLA:
     number_of_branches: 1
     number_of_branches_4_legs: 30 # Fewer branches for long trips (currently unused)
     number_of_branches_5_legs: 20
     number_of_branches_6_legs: 10
     min_candidates_complex_case: 10
-    candidates_two_leg_case: 30
+    candidates_two_leg_case: 20 # 30 better
     max_candidates: null
     anchor_strategy: "lower_middle"
-    selection_strategy_complex_case: "top_n_spatial_downsample"
+    selection_strategy_complex_case: "mixed"#"top_n_spatial_downsample" better
     selection_strategy_two_leg_case: "top_n"
     max_radius_reduction_factor: null
     max_iterations_complex_case: 15
     only_return_valid_persons: false
+    visualize: true
   simple_main:
     skip_already_located: true
   open_ended:

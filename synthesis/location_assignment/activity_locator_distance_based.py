@@ -7,10 +7,11 @@ import random
 import time
 import json
 
-from build.lib.ivs_helpers import stats_tracker
 from tqdm import tqdm
 from collections import defaultdict
 from typing import List, Dict, Any, Tuple, Literal
+
+from utils.stats_tracker import StatsTracker
 from utils.types import Segment, SegmentedPlan, SegmentedPlans, DetailedSegment, DetailedSegmentedPlan, \
     DetailedSegmentedPlans, Leg, DetailedLeg
 
@@ -116,7 +117,8 @@ class TargetLocations:
     This class is used to quickly find the nearest activity locations for a given location.
     """
 
-    def __init__(self, locations_json_path: str, locations_pkl_path: str):
+    def __init__(self, locations_json_path: str, locations_pkl_path: str, stats_tracker: StatsTracker):
+        self.stats_tracker = stats_tracker
         self.data: Dict[str, Dict[str, np.ndarray]] = self.load_locations_dict(locations_json_path, locations_pkl_path)
         self.indices: Dict[str, cKDTree] = {}
 
@@ -283,7 +285,7 @@ class TargetLocations:
                     )
                 if len(candidates[0]) >= min_candidates:
                     if logger.isEnabledFor(logging.DEBUG): logger.debug(f"Found {len(candidates[0])} candidates.")
-                    stats_tracker.log(f"Find_ring_candidates: Iterations for {act_type}", i)
+                    self.stats_tracker.log(f"Find_ring_candidates: Iterations for {act_type}", i)
                     return candidates
             radius1, radius2 = h.spread_distances(radius1, radius2, iteration=i, first_step=20)
             i += 1
@@ -366,7 +368,7 @@ class TargetLocations:
             if candidates is not None and len(candidates[0]) >= min_candidates:
                 if logger.isEnabledFor(logging.DEBUG): logger.debug(
                     f"Found {len(candidates[0])} candidates after {i} iterations.")
-                stats_tracker.log(f"Find_ring_candidates: Iterations for {act_type}", i)
+                self.stats_tracker.log(f"Find_ring_candidates: Iterations for {act_type}", i)
                 return candidates, i
             radius1a, radius1b = h.spread_distances(radius1a, radius1b, iteration=i, first_step=50)
             radius2a, radius2b = h.spread_distances(radius2a, radius2b, iteration=i, first_step=50)
@@ -381,10 +383,11 @@ class CARLA:
     """
     """
 
-    def __init__(self, target_locations: TargetLocations, segmented_plans: SegmentedPlans, config):
+    def __init__(self, target_locations: TargetLocations, segmented_plans: SegmentedPlans, config, visualizer = None):
         self.target_locations = target_locations
         self.segmented_plans = segmented_plans
         self.c_i = CircleIntersection(target_locations)
+        self.visualizer = visualizer
 
         self.number_of_branches = config.get("location_assignment.CARLA.number_of_branches")
         self.min_candidates_complex_case = config.get("location_assignment.CARLA.min_candidates_complex_case")
@@ -397,12 +400,22 @@ class CARLA:
         self.max_iterations_complex_case = config.get("location_assignment.CARLA.max_iterations_complex_case")
         self.only_return_valid_persons = config.get("location_assignment.CARLA.only_return_valid_persons")
 
+
     def run(self):
+        if self.visualizer:
+            assert len(self.segmented_plans) == 1, "Visualizer can only handle one person-tour at a time."
+            person_id, segments = next(iter(self.segmented_plans.items()))
+            first_leg = segments[0][0]
+            home_location = first_leg.from_location
+            root_node = self.visualizer.add_node(None, f"Home for {person_id}", location=home_location)
+        else:
+            root_node = None
+
         placed_dict = {}
         for person_id, segments in tqdm(self.segmented_plans.items(), desc="Processing persons"):
             placed_dict[person_id] = []
             for segment in segments:
-                placed_segment, _ = self.solve_segment(segment)
+                placed_segment, _ = self.solve_segment(segment, root_node)
                 if placed_segment is not None:
                     placed_dict[person_id].append(placed_segment)
                 elif not self.only_return_valid_persons:
@@ -422,8 +435,13 @@ class CARLA:
         else:
             raise ValueError("Invalid anchor strategy.")
 
-    def solve_segment(self, segment: Segment) -> Tuple[Segment, float]:
+    def solve_segment(self, segment: Segment, parent_node=None) -> Tuple[Segment, float]:
         """Recursively solve a segment for multiple candidates."""
+        # if self.visualizer:
+        #     current_node = self.visualizer.add_node(parent_node, f"Segment with {len(segment)} legs")
+        # else:
+        #     current_node = None
+
         if len(segment) == 0:
             raise ValueError("No legs in segment.")
         elif len(segment) == 1:  # Base case for single leg
@@ -443,6 +461,9 @@ class CARLA:
                 raise RuntimeError("Reached impossible state.")
             updated_leg1 = segment[0]._replace(to_location=best_loc[1], to_act_identifier=best_loc[0])
             updated_leg2 = segment[1]._replace(from_location=best_loc[1])
+            if self.visualizer:
+                label = f"2-leg node: {best_loc[0]}, score: {best_loc[3]:.2f}"
+                self.visualizer.add_node(parent_node, label, location=best_loc[1], metadata={"score": best_loc[3]})
             return (updated_leg1, updated_leg2), best_loc[3]  # act_score
 
         # Recursive case
@@ -508,6 +529,12 @@ class CARLA:
             new_coord = selected_candidates[1][i]
             new_id = selected_candidates[0][i]
 
+            if self.visualizer:
+                candidate_label = f"Candidate {new_id}: Score {selected_scores[i]:.2f}"
+                child_node = self.visualizer.add_node(parent_node, candidate_label, location=new_coord, metadata={"score": selected_scores[i]})
+            else:
+                child_node = None
+
             # Create updated legs (safe copies, not modifying originals)
             updated_leg1 = segment[anchor_idx]._replace(to_location=new_coord, to_act_identifier=new_id)
             updated_leg2 = segment[anchor_idx + 1]._replace(from_location=new_coord)
@@ -517,8 +544,8 @@ class CARLA:
             subsegment2 = (updated_leg2, *segment[anchor_idx + 2:])
 
             # Recursively solve each subsegment
-            located_seg1, score1 = self.solve_segment(subsegment1)
-            located_seg2, score2 = self.solve_segment(subsegment2)
+            located_seg1, score1 = self.solve_segment(subsegment1, child_node)
+            located_seg2, score2 = self.solve_segment(subsegment2, child_node)
 
             if located_seg1 is None or located_seg2 is None:
                 if self.only_return_valid_persons:
@@ -1032,18 +1059,6 @@ class MatrixMainLocationAlgorithm:
         raise NotImplementedError
 
 
-# def sigmoid(x):
-#     """
-#     Sigmoid function for likelihood calculation.
-#
-#     :param x: The input value (e.g. distance from desired point) - can be a number, list, or numpy array.
-#     :return: Sigmoid function value.
-#     """
-#     x = np.array(x)  # Ensure x is a numpy array
-#     z = -self.sigmoid_beta * (x - self.sigmoid_delta_t)
-#     # Use np.clip to limit the values in z to avoid overflow
-#     z = np.clip(z, -500, 500)
-#     return 1 / (1 + np.exp(z))
 
 class EvaluationFunction:
 
@@ -1108,7 +1123,7 @@ class EvaluationFunction:
             top_portion: float = 0.5,
             coords: np.ndarray = None,
             num_cells_x: int = 20,
-            num_cells_y: int = 20
+            num_cells_y: int = 20,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Select the indices of candidates based on their normalized scores using Monte Carlo sampling,
@@ -1127,20 +1142,20 @@ class EvaluationFunction:
         """
         assert len(scores) > 0, "The scores array cannot be empty."
         if num_candidates >= len(scores):
-            stats_tracker.increment("Select_candidates_indices: All candidates selected")
+            #stats_tracker.increment("Select_candidates_indices: All candidates selected")
             return np.arange(len(scores)), scores
 
         if strategy == 'monte_carlo':
-            stats_tracker.increment("Scoring runs (Monte Carlo)")
+            #stats_tracker.increment("Scoring runs (Monte Carlo)")
             normalized_scores = scores / np.sum(scores, dtype=np.float64)
             chosen_indices = np.random.choice(len(scores), num_candidates, p=normalized_scores, replace=False)
 
         elif strategy == 'top_n':
-            stats_tracker.increment("Scoring runs (Top N)")
+            #stats_tracker.increment("Scoring runs (Top N)")
             chosen_indices = np.argsort(scores)[-num_candidates:][::-1]  # Top scores in descending order
 
         elif strategy == 'mixed':
-            stats_tracker.increment("Scoring runs (Mixed)")
+            #stats_tracker.increment("Scoring runs (Mixed)")
             num_top = int(np.ceil(num_candidates * top_portion))
             num_monte_carlo = num_candidates - num_top
 
@@ -1158,14 +1173,14 @@ class EvaluationFunction:
 
         elif strategy == 'spatial_downsample':
             assert coords is not None, "Coordinates (coords) are required for spatial_downsample strategy."
-            stats_tracker.increment("Scoring runs (Spatial Downsample)")
+            #stats_tracker.increment("Scoring runs (Spatial Downsample)")
             chosen_indices = cls.even_spatial_downsample(
                 coords, num_cells_x=num_cells_x, num_cells_y=num_cells_y
             )[:num_candidates]
 
         elif strategy == 'top_n_spatial_downsample':
             assert coords is not None, "Coordinates (coords) are required for top_n_spatial_downsample strategy."
-            stats_tracker.increment("Scoring runs (Top N Spatial Downsample)")
+            #stats_tracker.increment("Scoring runs (Top N Spatial Downsample)")
 
             # Sort scores in descending order
             sorted_indices = np.argsort(scores)[::-1]

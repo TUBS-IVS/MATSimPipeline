@@ -1,11 +1,16 @@
 import sys
 import logging
 import time
-
+import cProfile
+import io
+import pstats
+import networkx as nx
+import matplotlib.pyplot as plt
+import uuid
 from utils.config import Config
 from utils.logger import setup_logging
 from utils.stats_tracker import StatsTracker
-
+import folium
 import pandas as pd
 import os
 
@@ -21,7 +26,7 @@ from synthesis.location_assignment import hoerl
 
 def run_location_assignment():
 
-    locations_json_path = os.path.join(project_root, config.get("location_assignment.input.locations_json"))
+    locations_json_path = os.path.join(project_root, config.get("location_assignment.input.locations_json", ""))
     locations_pkl_path = os.path.join(project_root, config.get("location_assignment.input.locations_pkl"))
 
     algorithms_to_run = config.get("location_assignment.algorithms_to_run")
@@ -42,7 +47,7 @@ def run_location_assignment():
         raise ValueError(f"Invalid algorithm. Valid algorithms are: {valid_algorithms}")
 
     # Build the common KDTree for the locations
-    target_locations = al.TargetLocations(locations_json_path, locations_pkl_path)
+    target_locations = al.TargetLocations(locations_json_path, locations_pkl_path, stats_tracker)
 
     if not skip_loading_full_population:
         # Load the population dataframe
@@ -235,14 +240,174 @@ def run_carla(population_df, target_locations, config):
     logger.info("Dict populated.")
     segmented_dict = al.new_segment_plans(legs_dict)
     logger.info("Dict segmented.")
+    visualizer = CarlaVisualizer() if config.get("location_assignment.CARLA.visualize") else None
     time_start = time.time()
-    CARLA_algo = al.CARLA(target_locations, segmented_dict, config)
+    CARLA_algo = al.CARLA(target_locations, segmented_dict, config, visualizer)
     result_dict = CARLA_algo.run()
     algo_time = time.time() - time_start
     logger.info(f"CARLA done in {algo_time} seconds.")
+    if visualizer:
+        visualizer.visualize()
+        visualizer.visualize_levels()
     stats_tracker.log("runtimes.carla_time", algo_time)
     population_df = al.write_placement_results_dict_to_population_df(result_dict, population_df)
     return h.add_from_location(population_df)
+
+
+import folium
+from pyproj import Transformer
+import matplotlib.colors as mcolors
+import uuid
+
+class CarlaVisualizer:
+    def __init__(self):
+        self.tree = nx.DiGraph()
+        self.locations = {}  # node_id -> {coords, metadata, label, level}
+        self.transformer = Transformer.from_crs(25832, 4326, always_xy=True)
+
+    def add_node(self, parent_id, label, location=None, metadata=None):
+        node_id = str(uuid.uuid4())
+        self.tree.add_node(node_id, label=label)
+        # Determine level
+        if parent_id:
+            self.tree.add_edge(parent_id, node_id)
+            parent_level = self.locations[parent_id]["level"] if parent_id in self.locations else 0
+            level = parent_level + 1
+        else:
+            level = 0
+        # Always store node metadata, even if coords is None
+        self.locations[node_id] = {
+            "coords": location,
+            "metadata": metadata or {},
+            "label": label,
+            "level": level
+        }
+        return node_id
+
+    def visualize(self):
+        if not self.locations:
+            print("No locations to visualize.")
+            return
+
+        # Find first node with valid coordinates
+        root_node = next((info for info in self.locations.values() if info["coords"] is not None), None)
+        if not root_node:
+            print("No valid coordinates found for visualization.")
+            return
+
+        lon, lat = self.transformer.transform(root_node["coords"][0], root_node["coords"][1])
+        m = folium.Map(location=[lat, lon], zoom_start=13)
+
+        # Set up colormap
+        levels = [info["level"] for info in self.locations.values()]
+        max_level = max(levels) if levels else 1
+        from matplotlib import cm
+        cmap = cm.get_cmap('viridis', max_level + 1)
+        norm = mcolors.Normalize(vmin=0, vmax=max_level)
+
+        # Add nodes (skip ones without coords)
+        for node_id, info in self.locations.items():
+            if info["coords"] is None:
+                continue
+            easting, northing = info["coords"]
+            lon, lat = self.transformer.transform(easting, northing)
+            color = mcolors.to_hex(cmap(norm(info["level"])))
+            popup = (f"{info['label']}<br>"
+                     f"Metadata: {info['metadata']}<br>"
+                     f"Level: {info['level']}")
+            folium.CircleMarker([lat, lon], radius=5, color=color, fill=True, popup=popup).add_to(m)
+
+        # Add edges between parent and child nodes
+        for parent_id, child_id in self.tree.edges():
+            parent_info = self.locations.get(parent_id)
+            child_info = self.locations.get(child_id)
+            if parent_info and child_info:
+                if parent_info["coords"] is None or child_info["coords"] is None:
+                    continue
+                e1, n1 = parent_info["coords"]
+                e2, n2 = child_info["coords"]
+                lon1, lat1 = self.transformer.transform(e1, n1)
+                lon2, lat2 = self.transformer.transform(e2, n2)
+                folium.PolyLine([(lat1, lon1), (lat2, lon2)], color='gray', weight=1).add_to(m)
+
+        m.save("carla_branching_map.html")
+        print("Map saved as carla_branching_map.html")
+
+    def visualize_levels(self):
+        if not self.locations:
+            print("No locations to visualize.")
+            return
+
+        # Find root location for centering
+        root_node = next((info for info in self.locations.values() if info["coords"] is not None), None)
+        if not root_node:
+            print("No valid coordinates found for visualization.")
+            return
+
+        lon, lat = self.transformer.transform(root_node["coords"][0], root_node["coords"][1])
+
+        # Determine max level
+        levels = [info["level"] for info in self.locations.values() if info["coords"] is not None]
+        max_level = max(levels)
+
+        from matplotlib import cm
+        cmap = cm.get_cmap('viridis', max_level + 1)
+        norm = mcolors.Normalize(vmin=0, vmax=max_level)
+
+        # Group nodes by level
+        level_groups = {lvl: [] for lvl in range(max_level + 1)}
+        for node_id, info in self.locations.items():
+            if info["coords"] is not None:
+                level_groups[info["level"]].append((node_id, info))
+
+        # Step 1: Individual level maps
+        for lvl in range(max_level + 1):
+            m = folium.Map(location=[lat, lon], zoom_start=13)
+            for node_id, info in level_groups[lvl]:
+                easting, northing = info["coords"]
+                lon_, lat_ = self.transformer.transform(easting, northing)
+                color = mcolors.to_hex(cmap(norm(info["level"])))
+                popup = f"{info['label']}<br>Metadata: {info['metadata']}<br>Level: {info['level']}"
+                folium.CircleMarker([lat_, lon_], radius=5, color=color, fill=True, popup=popup).add_to(m)
+
+            for parent_id, child_id in self.tree.edges():
+                p_info = self.locations.get(parent_id)
+                c_info = self.locations.get(child_id)
+                if p_info and c_info and p_info["coords"] is not None and c_info["coords"] is not None:
+                    if p_info["level"] == lvl or c_info["level"] == lvl:
+                        e1, n1 = p_info["coords"]
+                        e2, n2 = c_info["coords"]
+                        lon1, lat1 = self.transformer.transform(e1, n1)
+                        lon2, lat2 = self.transformer.transform(e2, n2)
+                        folium.PolyLine([(lat1, lon1), (lat2, lon2)], color='gray', weight=1).add_to(m)
+
+            m.save(f"carla_map_level_{lvl}.html")
+            print(f"Map for level {lvl} saved as carla_map_level_{lvl}.html")
+
+        # Step 2: Cumulative level maps
+        for lvl in range(max_level + 1):
+            m = folium.Map(location=[lat, lon], zoom_start=13)
+            for l in range(lvl + 1):
+                for node_id, info in level_groups[l]:
+                    easting, northing = info["coords"]
+                    lon_, lat_ = self.transformer.transform(easting, northing)
+                    color = mcolors.to_hex(cmap(norm(info["level"])))
+                    popup = f"{info['label']}<br>Metadata: {info['metadata']}<br>Level: {info['level']}"
+                    folium.CircleMarker([lat_, lon_], radius=5, color=color, fill=True, popup=popup).add_to(m)
+
+            for parent_id, child_id in self.tree.edges():
+                p_info = self.locations.get(parent_id)
+                c_info = self.locations.get(child_id)
+                if p_info and c_info and p_info["coords"] is not None and c_info["coords"] is not None:
+                    if p_info["level"] <= lvl and c_info["level"] <= lvl:
+                        e1, n1 = p_info["coords"]
+                        e2, n2 = c_info["coords"]
+                        lon1, lat1 = self.transformer.transform(e1, n1)
+                        lon2, lat2 = self.transformer.transform(e2, n2)
+                        folium.PolyLine([(lat1, lon1), (lat2, lon2)], color='gray', weight=1).add_to(m)
+
+            m.save(f"carla_map_levels_0_to_{lvl}.html")
+            print(f"Cumulative map for levels 0 to {lvl} saved as carla_map_levels_0_to_{lvl}.html")
 
 
 if __name__ == "__main__":
@@ -268,11 +433,33 @@ if __name__ == "__main__":
 
     h = Helpers(project_root, output_folder, config, stats_tracker, logger)
 
+    profile_enabled = config.get("settings.profiling.enabled", default=False)
+    save_txt = config.get("settings.profiling.save_txt", default=True)
+    save_raw = config.get("settings.profiling.save_raw", default=False)
+    profiler = None
+    if profile_enabled:
+        logger.info("Profiling enabled — running with cProfile.")
+        profiler = cProfile.Profile()
+        profiler.enable()
     logger.info(f"Starting step {step_name}")
     time_start = time.time()
     run_location_assignment()
     time_end = time.time()
     time_step = time_end - time_start
+    if profile_enabled and profiler:
+        profiler.disable()
+        if save_txt:
+            stats_path = os.path.join(output_folder, "profile_stats.txt")
+            s = io.StringIO()
+            ps = pstats.Stats(profiler, stream=s).sort_stats(pstats.SortKey.CUMULATIVE)
+            ps.print_stats()
+            with open(stats_path, "w") as f:
+                f.write(s.getvalue())
+            logging.info(f"Profiling summary saved to {stats_path}")
+        if save_raw:
+            raw_path = os.path.join(output_folder, "profile_stats.prof")
+            profiler.dump_stats(raw_path)
+            logging.info(f"Raw profiler data saved to {raw_path}")
     stats_tracker.log("runtimes.location_assignment_time", time_step)
     stats_tracker.write_stats()
     config.write_used_config()

@@ -140,15 +140,15 @@ location_assignment:
   filter:
     filter_by_person: "10004170_11567_10004171"
   CARLA:
-    number_of_branches: 1
+    number_of_branches: 10
     number_of_branches_4_legs: 30 # Fewer branches for long trips (currently unused)
     number_of_branches_5_legs: 20
     number_of_branches_6_legs: 10
     min_candidates_complex_case: 10
-    candidates_two_leg_case: 20 # 30 better
+    candidates_two_leg_case: 30 # 30 better, 20 in paper
     max_candidates: null
     anchor_strategy: "lower_middle"
-    selection_strategy_complex_case: "mixed"#"top_n_spatial_downsample" better
+    selection_strategy_complex_case: "top_n_spatial_downsample"#"mixed"#
     selection_strategy_two_leg_case: "top_n"
     max_radius_reduction_factor: null
     max_iterations_complex_case: 15

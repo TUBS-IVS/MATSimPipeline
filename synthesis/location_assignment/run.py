@@ -324,11 +324,13 @@ class CarlaVisualizer:
             if parent_info and child_info:
                 if parent_info["coords"] is None or child_info["coords"] is None:
                     continue
+                if parent_info["level"] == 0:
+                    continue  # Skip edge from root
                 e1, n1 = parent_info["coords"]
                 e2, n2 = child_info["coords"]
                 lon1, lat1 = self.transformer.transform(e1, n1)
                 lon2, lat2 = self.transformer.transform(e2, n2)
-                folium.PolyLine([(lat1, lon1), (lat2, lon2)], color='gray', weight=1).add_to(m)
+                folium.PolyLine([(lat1, lon1), (lat2, lon2)], color='black', weight=3).add_to(m)
 
         m.save("carla_branching_map.html")
         print("Map saved as carla_branching_map.html")
@@ -344,7 +346,7 @@ class CarlaVisualizer:
             print("No valid coordinates found for visualization.")
             return
 
-        lon, lat = self.transformer.transform(root_node["coords"][0], root_node["coords"][1])
+        lon, lat = self.transformer.transform(root_node["coords"][0], root_node["coords"][1] - 1000) # centre more south
 
         # Determine max level
         levels = [info["level"] for info in self.locations.values() if info["coords"] is not None]
@@ -387,25 +389,36 @@ class CarlaVisualizer:
         # Step 2: Cumulative level maps
         for lvl in range(max_level + 1):
             m = folium.Map(location=[lat, lon], zoom_start=13)
+
+
+            for parent_id, child_id in self.tree.edges():
+                p_info = self.locations.get(parent_id)
+                c_info = self.locations.get(child_id)
+                if p_info and c_info and p_info["coords"] is not None and c_info["coords"] is not None:
+                    if p_info["level"] == 0:
+                        continue  # Skip edge from root
+                    if p_info["level"] <= lvl and c_info["level"] <= lvl:
+                        e1, n1 = p_info["coords"]
+                        e2, n2 = c_info["coords"]
+                        lon1, lat1 = self.transformer.transform(e1, n1)
+                        lon2, lat2 = self.transformer.transform(e2, n2)
+                        folium.PolyLine([(lat1, lon1), (lat2, lon2)], color='black', weight=2).add_to(m)
             for l in range(lvl + 1):
                 for node_id, info in level_groups[l]:
                     easting, northing = info["coords"]
                     lon_, lat_ = self.transformer.transform(easting, northing)
                     color = mcolors.to_hex(cmap(norm(info["level"])))
                     popup = f"{info['label']}<br>Metadata: {info['metadata']}<br>Level: {info['level']}"
-                    folium.CircleMarker([lat_, lon_], radius=5, color=color, fill=True, popup=popup).add_to(m)
-
-            for parent_id, child_id in self.tree.edges():
-                p_info = self.locations.get(parent_id)
-                c_info = self.locations.get(child_id)
-                if p_info and c_info and p_info["coords"] is not None and c_info["coords"] is not None:
-                    if p_info["level"] <= lvl and c_info["level"] <= lvl:
-                        e1, n1 = p_info["coords"]
-                        e2, n2 = c_info["coords"]
-                        lon1, lat1 = self.transformer.transform(e1, n1)
-                        lon2, lat2 = self.transformer.transform(e2, n2)
-                        folium.PolyLine([(lat1, lon1), (lat2, lon2)], color='gray', weight=1).add_to(m)
-
+                    folium.CircleMarker(
+                        [lat_, lon_],
+                        radius=8,  # larger marker
+                        color='black',  # border color
+                        fill=True,
+                        fill_color=color,  # internal color from colormap
+                        fill_opacity=1.0,  # fully opaque
+                        weight=1,  # border thickness
+                        popup=popup
+                    ).add_to(m)
             m.save(f"carla_map_levels_0_to_{lvl}.html")
             print(f"Cumulative map for levels 0 to {lvl} saved as carla_map_levels_0_to_{lvl}.html")
 

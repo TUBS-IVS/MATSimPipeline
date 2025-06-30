@@ -437,17 +437,13 @@ class CARLA:
 
     def solve_segment(self, segment: Segment, parent_node=None) -> Tuple[Segment, float]:
         """Recursively solve a segment for multiple candidates."""
-        # if self.visualizer:
-        #     current_node = self.visualizer.add_node(parent_node, f"Segment with {len(segment)} legs")
-        # else:
-        #     current_node = None
 
         if len(segment) == 0:
             raise ValueError("No legs in segment.")
         elif len(segment) == 1:  # Base case for single leg
             assert segment[0].from_location.size > 0 and segment[0].to_location.size > 0, \
                 "Start and end locations must be known."
-            return segment, 0
+            return segment, 0 # Score was calculated one lvl higher for single-leg segment
         elif len(segment) == 2:  # Base case for two legs
             best_loc = self.c_i.get_best_circle_intersection_location(
                 segment[0].from_location, segment[1].to_location, segment[0].to_act_type,
@@ -497,7 +493,7 @@ class CARLA:
         # Evaluate candidates
         if iterations > 0:  # We need to find distance deviations of each candidate to score them
             candidate_deviations = np.zeros(len(candidate_ids))
-            # We only count deviations of lowest-level legs to avoid double counting
+            # We only count deviations of lowest-level legs to avoid double counting (!!)
             if len(distances_start_to_act) == 1:
                 candidate_deviations += h.get_abs_distance_deviations(candidate_coords, location1,
                                                                       distances_start_to_act)

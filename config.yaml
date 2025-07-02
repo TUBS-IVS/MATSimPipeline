@@ -117,7 +117,7 @@ location_assignment_prep:
 location_assignment:
   script: location_assignment\run.py
   input:
-    population_csv: "data/intermediates/mobile_population_remove_unfeasible_reformatted.csv"
+    population_csv: "data/intermediates/mobile_population_remove_unfeasible_reformatteds.csv"
     population_pkl: #"output/20250401_133235/population_with_locations.pkl"
     locations_json: ""# "output/20250401_135025/prepared_dictionary_locations.json"
     locations_pkl: "data/locations_data_reformatted.pkl"
